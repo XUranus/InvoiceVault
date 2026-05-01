@@ -10,7 +10,7 @@ M0 脚手架已建立：
 - SQLite 使用内置迁移，当前迁移版本为 `1`。
 - 前端通过 Tauri command `app_health` 读取基础设施状态。
 - 后端支持 PDF/PNG/JPG/JPEG 路径导入，导入时会计算 SHA256/MD5、按 `raw/YYYY/MM/文件名` 存储原始 PDF/图片，并记录导入任务。
-- 前端导入队列已接入 `import_files` 和 `list_import_jobs`，当前先使用路径输入，后续补文件选择器和拖拽。
+- 前端导入队列已接入 `import_files` 和 `list_import_jobs`，支持原生文件选择器和路径输入，后续补拖拽。
 
 ## 常用命令
 

@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import "./styles.css";
 
 type AppHealth = {
@@ -69,6 +70,41 @@ function App() {
     }
   };
 
+  const handlePickFiles = async () => {
+    setError(null);
+    const selected = await open({
+      multiple: true,
+      directory: false,
+      filters: [
+        {
+          name: "发票文件",
+          extensions: ["pdf", "png", "jpg", "jpeg"],
+        },
+      ],
+    });
+
+    if (!selected) {
+      return;
+    }
+
+    const paths = Array.isArray(selected) ? selected : [selected];
+    if (paths.length === 0) {
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const imported = await invoke<ImportJob[]>("import_files", {
+        request: { paths },
+      });
+      setJobs((current) => [...imported, ...current]);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   return (
     <main className="app-shell">
       <section className="topbar">
@@ -91,9 +127,14 @@ function App() {
               placeholder="每行一个 PDF/PNG/JPG/JPEG 文件路径"
               rows={5}
             />
-            <button type="button" onClick={handleImport} disabled={isImporting}>
-              {isImporting ? "导入中" : "导入文件"}
-            </button>
+            <div className="import-actions">
+              <button type="button" onClick={handlePickFiles} disabled={isImporting}>
+                选择文件
+              </button>
+              <button type="button" onClick={handleImport} disabled={isImporting}>
+                {isImporting ? "导入中" : "导入路径"}
+              </button>
+            </div>
           </div>
           <div className="job-list">
             {jobs.length === 0 ? (

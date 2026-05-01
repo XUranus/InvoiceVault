@@ -104,6 +104,11 @@ h2 {
   line-height: 1.45;
 }
 
+.import-actions {
+  display: grid;
+  gap: 10px;
+}
+
 .import-form button {
   border: 0;
   border-radius: 8px;
