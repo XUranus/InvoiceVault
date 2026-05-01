@@ -2,20 +2,25 @@
 
 ## 当前状态
 
-M0 脚手架已建立：
+M3 已完成，P0 闭环达成：
 
-- 前端使用 Vite + React + TypeScript。
-- 桌面端使用 Tauri 2 + Rust。
+- 前端使用 Vite + React + TypeScript，侧边栏导航多页面布局。
+- 桌面端使用 Tauri 2 + Rust，9 个后端模块。
 - 后端启动时创建应用数据目录、RAW 目录、缩略图目录和 SQLite 数据库。
-- SQLite 使用内置迁移，当前迁移版本为 `2`。
+- SQLite 使用内置迁移，当前迁移版本为 `3`。
 - 前端通过 Tauri command `app_health` 读取基础设施状态。
 - 后端支持 PDF/PNG/JPG/JPEG 路径导入，导入时会计算 SHA256/MD5、按 `raw/YYYY/MM/文件名` 保留原始格式归档 PDF/图片，并记录导入任务。
-- 前端导入队列已接入 `import_files` 和 `list_import_jobs`，支持原生文件选择器、拖拽和路径输入。
-- 前端支持 OpenAI-compatible LLM Provider 连接测试；API Key 只在本次界面输入中使用，不写入仓库。
+- 前端导入页面支持原生文件选择器、拖拽和路径输入，展示导入历史和任务详情。
+- 前端支持 OpenAI-compatible LLM Provider 连接测试；API Key 只在当前会话中使用，不写入仓库。
 - 后端已建立发票识别结果 JSON 校验与结构化入库基础，支持把校验后的识别结果写入 `invoices`、`invoice_items` 和 `extraction_runs`。
 - 前端导入队列已支持对图片 RAW 文件触发多模态识别，并展示已入库发票摘要。
-- PDF RAW 文件识别会通过本机 `pdftoppm` 渲染为 JPEG 页面缓存，再逐页调用多模态识别；Windows 打包时仍需处理 Poppler 分发或替代渲染库。
+- PDF RAW 文件识别会通过本机 `pdftoppm` 渲染为 JPEG 页面缓存，再逐页调用多模态识别。
 - 图片和 PDF 页面在发送给 LLM 前会通过本机 `magick` 生成标准化 JPEG，同时生成预览缩略图；RAW 原文件不被修改。
+- 发票库页面支持分页、关键词搜索、日期/金额/状态筛选、多字段排序。
+- 发票详情页展示完整字段、明细行、缩略图预览，支持字段编辑和明细行 CRUD。
+- 字段级重复检测自动运行：发票代码+号码完全匹配（95分）、多字段相似度打分。
+- 重复候选管理支持确认和忽略操作。
+- CSV 和 Excel 导出（通过 `rust_xlsxwriter` + `csv` crate）。
 
 ## 常用命令
 

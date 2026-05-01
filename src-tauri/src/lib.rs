@@ -1,5 +1,7 @@
 mod app_core;
+mod dedupe;
 mod document;
+mod exporter;
 mod extractor;
 mod importer;
 mod llm;
@@ -7,7 +9,13 @@ mod raw_store;
 mod storage;
 
 use app_core::{AppHealth, AppState};
-use extractor::{InvoiceSummary, SaveInvoiceExtractionRequest};
+use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
+use exporter::{ExportInvoicesRequest, ExportResult};
+use extractor::{
+    InvoiceDetail, InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult,
+    InvoiceSummary, SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest,
+    UpdateInvoiceRequest, UpdateInvoiceResult,
+};
 use importer::{ImportJobSummary, ImportRequest};
 use llm::{
     recognize_invoice_image, test_llm_connection as run_llm_connection_test,
@@ -49,6 +57,76 @@ fn save_invoice_extraction(
 #[tauri::command]
 fn list_invoices(state: State<'_, AppState>) -> Result<Vec<InvoiceSummary>, String> {
     state.list_invoices().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn search_invoices(
+    state: State<'_, AppState>,
+    params: InvoiceSearchParams,
+) -> Result<InvoiceSearchResult, String> {
+    state
+        .search_invoices(params)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn get_invoice_detail(
+    state: State<'_, AppState>,
+    invoice_id: i64,
+) -> Result<InvoiceDetail, String> {
+    state
+        .get_invoice_detail(invoice_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn update_invoice(
+    state: State<'_, AppState>,
+    request: UpdateInvoiceRequest,
+) -> Result<UpdateInvoiceResult, String> {
+    state
+        .update_invoice(request)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn update_invoice_items(
+    state: State<'_, AppState>,
+    request: UpdateInvoiceItemsRequest,
+) -> Result<Vec<InvoiceItemRow>, String> {
+    state
+        .update_invoice_items(request)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn check_invoice_duplicates(
+    state: State<'_, AppState>,
+    invoice_id: i64,
+) -> Result<DedupeCheckResult, String> {
+    state
+        .check_invoice_duplicates(invoice_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn resolve_duplicate(
+    state: State<'_, AppState>,
+    request: ResolveDuplicateRequest,
+) -> Result<(), String> {
+    state
+        .resolve_duplicate(request)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn export_invoices(
+    state: State<'_, AppState>,
+    request: ExportInvoicesRequest,
+) -> Result<ExportResult, String> {
+    state
+        .export_invoices(request)
+        .map_err(|err| err.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,6 +270,13 @@ pub fn run() {
             list_import_jobs,
             save_invoice_extraction,
             list_invoices,
+            search_invoices,
+            get_invoice_detail,
+            update_invoice,
+            update_invoice_items,
+            check_invoice_duplicates,
+            resolve_duplicate,
+            export_invoices,
             recognize_raw_file,
             test_llm_connection
         ])

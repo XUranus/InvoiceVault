@@ -9,14 +9,22 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::{
+    dedupe::{
+        check_invoice_duplicates as run_dedupe_check, resolve_duplicate as run_dedupe_resolve,
+        DedupeCheckResult, DedupeError, ResolveDuplicateRequest,
+    },
     document::{
         prepare_image_for_recognition, render_pdf_pages, DocumentError, PreparedImage,
         RenderedPdfPage,
     },
     extractor::{
-        list_invoices, save_invoice_extraction, ExtractorError, InvoiceSummary,
-        SaveInvoiceExtractionRequest,
+        get_invoice_detail, list_invoices, save_invoice_extraction, search_invoices,
+        update_invoice, update_invoice_items, ExtractorError, InvoiceDetail,
+        InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult, InvoiceSummary,
+        SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
+        UpdateInvoiceResult,
     },
+    exporter::{export_invoices, ExportError, ExportInvoicesRequest, ExportResult},
     importer::{import_files, list_import_jobs, ImportError, ImportJobSummary},
     storage::{run_migrations, StorageError},
 };
@@ -33,6 +41,10 @@ pub enum AppError {
     Import(#[from] ImportError),
     #[error("extractor error: {0}")]
     Extractor(#[from] ExtractorError),
+    #[error("dedupe error: {0}")]
+    Dedupe(#[from] DedupeError),
+    #[error("export error: {0}")]
+    Export(#[from] ExportError),
     #[error("document error: {0}")]
     Document(#[from] DocumentError),
 }
@@ -111,12 +123,71 @@ impl AppState {
         request: SaveInvoiceExtractionRequest,
     ) -> Result<InvoiceSummary, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
-        Ok(save_invoice_extraction(&mut db, request)?)
+        let invoice = save_invoice_extraction(&mut db, request)?;
+        // Trigger dedupe check (best-effort, don't fail on error)
+        let _ = run_dedupe_check(&db, invoice.id);
+        Ok(invoice)
     }
 
     pub fn list_invoices(&self) -> Result<Vec<InvoiceSummary>, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(list_invoices(&db)?)
+    }
+
+    pub fn search_invoices(
+        &self,
+        params: InvoiceSearchParams,
+    ) -> Result<InvoiceSearchResult, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(search_invoices(&db, params)?)
+    }
+
+    pub fn get_invoice_detail(&self, invoice_id: i64) -> Result<InvoiceDetail, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(get_invoice_detail(&db, &self.paths.thumbnails_dir, invoice_id)?)
+    }
+
+    pub fn update_invoice(
+        &self,
+        request: UpdateInvoiceRequest,
+    ) -> Result<UpdateInvoiceResult, AppError> {
+        let mut db = self.db.lock().expect("database mutex poisoned");
+        let result = update_invoice(&mut db, request)?;
+        // Trigger dedupe check (best-effort)
+        let _ = run_dedupe_check(&db, result.invoice.id);
+        Ok(result)
+    }
+
+    pub fn update_invoice_items(
+        &self,
+        request: UpdateInvoiceItemsRequest,
+    ) -> Result<Vec<InvoiceItemRow>, AppError> {
+        let mut db = self.db.lock().expect("database mutex poisoned");
+        Ok(update_invoice_items(&mut db, request)?)
+    }
+
+    pub fn check_invoice_duplicates(
+        &self,
+        invoice_id: i64,
+    ) -> Result<DedupeCheckResult, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(run_dedupe_check(&db, invoice_id)?)
+    }
+
+    pub fn resolve_duplicate(
+        &self,
+        request: ResolveDuplicateRequest,
+    ) -> Result<(), AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(run_dedupe_resolve(&db, request)?)
+    }
+
+    pub fn export_invoices(
+        &self,
+        request: ExportInvoicesRequest,
+    ) -> Result<ExportResult, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(export_invoices(&db, request)?)
     }
 
     pub fn raw_file_for_recognition(

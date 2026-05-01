@@ -34,6 +34,649 @@ pub struct InvoiceSummary {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct InvoiceSearchParams {
+    pub query: Option<String>,
+    pub invoice_type: Option<String>,
+    pub seller_name: Option<String>,
+    pub buyer_name: Option<String>,
+    pub invoice_number: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub amount_min: Option<String>,
+    pub amount_max: Option<String>,
+    pub category: Option<String>,
+    pub status: Option<String>,
+    pub duplicate_status: Option<String>,
+    pub sort_by: Option<String>,
+    pub sort_order: Option<String>,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InvoiceSearchResult {
+    pub invoices: Vec<InvoiceSummary>,
+    pub total_count: i64,
+    pub page: i64,
+    pub page_size: i64,
+    pub total_pages: i64,
+}
+
+pub fn search_invoices(
+    conn: &Connection,
+    params: InvoiceSearchParams,
+) -> Result<InvoiceSearchResult, ExtractorError> {
+    let page = params.page.unwrap_or(1).max(1);
+    let page_size = params.page_size.unwrap_or(50).min(500).max(1);
+    let offset = (page - 1) * page_size;
+
+    let (where_clause, mut bind_values) = build_search_where(&params);
+    let sort_clause = build_sort_clause(params.sort_by.as_deref(), params.sort_order.as_deref());
+
+    let total_count: i64 = {
+        let count_sql = format!("SELECT COUNT(*) FROM invoices WHERE 1=1 {where_clause}");
+        let mut stmt = conn.prepare(&count_sql)?;
+        let refs: Vec<&dyn rusqlite::types::ToSql> =
+            bind_values.iter().map(|v| v.as_ref()).collect();
+        stmt.query_row(refs.as_slice(), |row| row.get(0))?
+    };
+
+    let query_sql = format!(
+        "SELECT
+            id, raw_file_id, invoice_type, invoice_code, invoice_number,
+            issue_date, seller_name, buyer_name, currency, total_amount,
+            category, source_page_range, confidence, status, duplicate_status,
+            created_at, updated_at
+        FROM invoices
+        WHERE 1=1 {where_clause}
+        {sort_clause}
+        LIMIT ?{} OFFSET ?{}",
+        bind_values.len() + 1,
+        bind_values.len() + 2,
+    );
+
+    bind_values.push(Box::new(page_size));
+    bind_values.push(Box::new(offset));
+
+    let mut stmt = conn.prepare(&query_sql)?;
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        bind_values.iter().map(|v| v.as_ref()).collect();
+
+    let invoices = stmt
+        .query_map(param_refs.as_slice(), row_to_invoice_summary)?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let total_pages = ((total_count as f64) / (page_size as f64)).ceil() as i64;
+
+    Ok(InvoiceSearchResult {
+        invoices,
+        total_count,
+        page,
+        page_size,
+        total_pages: total_pages.max(1),
+    })
+}
+
+fn build_search_where(
+    params: &InvoiceSearchParams,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let mut clauses = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ref query) = params.query {
+        let q = format!("%{query}%");
+        let n = values.len() + 1;
+        clauses.push(format!(
+            "(seller_name LIKE ?{n} OR buyer_name LIKE ?{n} OR invoice_number LIKE ?{n} OR invoice_code LIKE ?{n})"
+        ));
+        for _ in 0..4 {
+            values.push(Box::new(q.clone()));
+        }
+    }
+
+    if let Some(ref t) = params.invoice_type {
+        clauses.push(format!("invoice_type = ?{}", values.len() + 1));
+        values.push(Box::new(t.clone()));
+    }
+
+    if let Some(ref s) = params.seller_name {
+        clauses.push(format!("seller_name LIKE ?{}", values.len() + 1));
+        values.push(Box::new(format!("%{s}%")));
+    }
+
+    if let Some(ref b) = params.buyer_name {
+        clauses.push(format!("buyer_name LIKE ?{}", values.len() + 1));
+        values.push(Box::new(format!("%{b}%")));
+    }
+
+    if let Some(ref n) = params.invoice_number {
+        clauses.push(format!("invoice_number LIKE ?{}", values.len() + 1));
+        values.push(Box::new(format!("%{n}%")));
+    }
+
+    if let Some(ref d) = params.date_from {
+        clauses.push(format!("issue_date >= ?{}", values.len() + 1));
+        values.push(Box::new(d.clone()));
+    }
+
+    if let Some(ref d) = params.date_to {
+        clauses.push(format!("issue_date <= ?{}", values.len() + 1));
+        values.push(Box::new(d.clone()));
+    }
+
+    if let Some(ref a) = params.amount_min {
+        clauses.push(format!(
+            "CAST(total_amount AS REAL) >= CAST(?{} AS REAL)",
+            values.len() + 1
+        ));
+        values.push(Box::new(a.clone()));
+    }
+
+    if let Some(ref a) = params.amount_max {
+        clauses.push(format!(
+            "CAST(total_amount AS REAL) <= CAST(?{} AS REAL)",
+            values.len() + 1
+        ));
+        values.push(Box::new(a.clone()));
+    }
+
+    if let Some(ref c) = params.category {
+        clauses.push(format!("category LIKE ?{}", values.len() + 1));
+        values.push(Box::new(format!("%{c}%")));
+    }
+
+    if let Some(ref s) = params.status {
+        clauses.push(format!("status = ?{}", values.len() + 1));
+        values.push(Box::new(s.clone()));
+    }
+
+    if let Some(ref d) = params.duplicate_status {
+        clauses.push(format!("duplicate_status = ?{}", values.len() + 1));
+        values.push(Box::new(d.clone()));
+    }
+
+    let where_clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", clauses.join(" AND "))
+    };
+
+    (where_clause, values)
+}
+
+fn build_sort_clause(sort_by: Option<&str>, sort_order: Option<&str>) -> String {
+    let valid_columns: &[&str] = &[
+        "issue_date",
+        "total_amount",
+        "seller_name",
+        "confidence",
+        "created_at",
+    ];
+
+    let column = sort_by
+        .filter(|s| valid_columns.contains(s))
+        .unwrap_or("id");
+
+    let direction = match sort_order {
+        Some("asc") => "ASC",
+        Some("desc") => "DESC",
+        _ => "DESC",
+    };
+
+    format!("ORDER BY {column} {direction}")
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InvoiceDetail {
+    pub id: i64,
+    pub raw_file_id: i64,
+    pub invoice_type: Option<String>,
+    pub invoice_code: Option<String>,
+    pub invoice_number: Option<String>,
+    pub issue_date: Option<String>,
+    pub seller_name: Option<String>,
+    pub seller_tax_id: Option<String>,
+    pub buyer_name: Option<String>,
+    pub buyer_tax_id: Option<String>,
+    pub currency: String,
+    pub amount_without_tax: Option<String>,
+    pub tax_amount: Option<String>,
+    pub total_amount: Option<String>,
+    pub category: Option<String>,
+    pub remarks: Option<String>,
+    pub source_page_range: Option<String>,
+    pub confidence: Option<f64>,
+    pub status: String,
+    pub duplicate_status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub items: Vec<InvoiceItemRow>,
+    pub raw_file_name: Option<String>,
+    pub raw_file_mime: Option<String>,
+    pub thumbnail_path: Option<String>,
+    pub extraction_model: Option<String>,
+    pub extraction_provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InvoiceItemRow {
+    pub id: i64,
+    pub name: String,
+    pub specification: Option<String>,
+    pub unit: Option<String>,
+    pub quantity: Option<String>,
+    pub unit_price: Option<String>,
+    pub amount: Option<String>,
+    pub tax_rate: Option<String>,
+    pub tax_amount: Option<String>,
+}
+
+pub fn get_invoice_detail(
+    conn: &Connection,
+    thumbnails_dir: &std::path::Path,
+    invoice_id: i64,
+) -> Result<InvoiceDetail, ExtractorError> {
+    let invoice = conn.query_row(
+        "SELECT
+            id, raw_file_id, invoice_type, invoice_code, invoice_number,
+            issue_date, seller_name, seller_tax_id, buyer_name, buyer_tax_id,
+            currency, amount_without_tax, tax_amount, total_amount,
+            category, remarks, source_page_range, confidence, status,
+            duplicate_status, created_at, updated_at
+        FROM invoices WHERE id = ?1",
+        [invoice_id],
+        |row| {
+            Ok(InvoiceDetail {
+                id: row.get(0)?,
+                raw_file_id: row.get(1)?,
+                invoice_type: row.get(2)?,
+                invoice_code: row.get(3)?,
+                invoice_number: row.get(4)?,
+                issue_date: row.get(5)?,
+                seller_name: row.get(6)?,
+                seller_tax_id: row.get(7)?,
+                buyer_name: row.get(8)?,
+                buyer_tax_id: row.get(9)?,
+                currency: row.get::<_, Option<String>>(10)?.unwrap_or_else(|| "CNY".into()),
+                amount_without_tax: row.get(11)?,
+                tax_amount: row.get(12)?,
+                total_amount: row.get(13)?,
+                category: row.get(14)?,
+                remarks: row.get(15)?,
+                source_page_range: row.get(16)?,
+                confidence: row.get(17)?,
+                status: row.get::<_, Option<String>>(18)?.unwrap_or_else(|| "pending_confirmation".into()),
+                duplicate_status: row.get::<_, Option<String>>(19)?.unwrap_or_else(|| "unknown".into()),
+                created_at: row.get(20)?,
+                updated_at: row.get(21)?,
+                items: Vec::new(),
+                raw_file_name: None,
+                raw_file_mime: None,
+                thumbnail_path: None,
+                extraction_model: None,
+                extraction_provider: None,
+            })
+        },
+    )?;
+
+    // Load items
+    let mut stmt = conn.prepare(
+        "SELECT id, name, specification, unit, quantity, unit_price, amount, tax_rate, tax_amount
+        FROM invoice_items WHERE invoice_id = ?1 ORDER BY id",
+    )?;
+    let items = stmt
+        .query_map([invoice_id], |row| {
+            Ok(InvoiceItemRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                specification: row.get(2)?,
+                unit: row.get(3)?,
+                quantity: row.get(4)?,
+                unit_price: row.get(5)?,
+                amount: row.get(6)?,
+                tax_rate: row.get(7)?,
+                tax_amount: row.get(8)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Load raw_file info and thumbnail path
+    let (raw_name, raw_mime, source_page_range): (Option<String>, Option<String>, Option<String>) =
+        conn.query_row(
+            "SELECT rf.original_name, rf.mime_type, inv.source_page_range
+            FROM invoices inv JOIN raw_files rf ON rf.id = inv.raw_file_id
+            WHERE inv.id = ?1",
+            [invoice_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+
+    let thumbnail_path = source_page_range.as_ref().and_then(|page_range| {
+        let page = page_range
+            .split('-')
+            .next()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(1);
+        let label = format!("page-{page}");
+        let path = thumbnails_dir.join("previews").join(invoice.raw_file_id.to_string()).join(format!("{label}.jpg"));
+        if path.exists() {
+            Some(path.to_string_lossy().into_owned())
+        } else {
+            let fallback = thumbnails_dir.join("previews").join(invoice.raw_file_id.to_string()).join("image.jpg");
+            if fallback.exists() {
+                Some(fallback.to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        }
+    });
+
+    // Load extraction info
+    let (model, provider): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT model, provider_name FROM extraction_runs WHERE invoice_id = ?1 ORDER BY id DESC LIMIT 1",
+            [invoice_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?
+        .unwrap_or((None, None));
+
+    Ok(InvoiceDetail {
+        items,
+        raw_file_name: raw_name,
+        raw_file_mime: raw_mime,
+        thumbnail_path,
+        extraction_model: model,
+        extraction_provider: provider,
+        ..invoice
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateInvoiceRequest {
+    pub id: i64,
+    pub invoice_type: Option<Option<String>>,
+    pub invoice_code: Option<Option<String>>,
+    pub invoice_number: Option<Option<String>>,
+    pub issue_date: Option<Option<String>>,
+    pub seller_name: Option<Option<String>>,
+    pub seller_tax_id: Option<Option<String>>,
+    pub buyer_name: Option<Option<String>>,
+    pub buyer_tax_id: Option<Option<String>>,
+    pub currency: Option<Option<String>>,
+    pub amount_without_tax: Option<Option<String>>,
+    pub tax_amount: Option<Option<String>>,
+    pub total_amount: Option<Option<String>>,
+    pub category: Option<Option<String>>,
+    pub remarks: Option<Option<String>>,
+    pub confidence: Option<Option<f64>>,
+    pub status: Option<Option<String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateInvoiceResult {
+    pub invoice: InvoiceSummary,
+    pub errors: Vec<FieldError>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FieldError {
+    pub field: String,
+    pub message: String,
+}
+
+pub fn update_invoice(
+    conn: &mut Connection,
+    request: UpdateInvoiceRequest,
+) -> Result<UpdateInvoiceResult, ExtractorError> {
+    let errors = validate_invoice_fields(
+        &request.issue_date,
+        &request.status,
+        request.confidence,
+    );
+
+    let tx = conn.transaction()?;
+
+    let mut set_clauses = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    macro_rules! add_field {
+        ($field:ident, $val:expr) => {
+            if let Some(v) = $val {
+                set_clauses.push(format!("{} = ?{}", stringify!($field), values.len() + 1));
+                values.push(Box::new(v));
+            }
+        };
+    }
+
+    add_field!(invoice_type, request.invoice_type);
+    add_field!(invoice_code, request.invoice_code);
+    add_field!(invoice_number, request.invoice_number);
+    add_field!(issue_date, request.issue_date);
+    add_field!(seller_name, request.seller_name);
+    add_field!(seller_tax_id, request.seller_tax_id);
+    add_field!(buyer_name, request.buyer_name);
+    add_field!(buyer_tax_id, request.buyer_tax_id);
+    add_field!(currency, request.currency);
+    add_field!(amount_without_tax, request.amount_without_tax);
+    add_field!(tax_amount, request.tax_amount);
+    add_field!(total_amount, request.total_amount);
+    add_field!(category, request.category);
+    add_field!(remarks, request.remarks);
+    add_field!(confidence, request.confidence);
+    add_field!(status, request.status);
+
+    if set_clauses.is_empty() {
+        drop(tx);
+        return Ok(UpdateInvoiceResult {
+            invoice: load_invoice_summary(conn, request.id)?,
+            errors,
+        });
+    }
+
+    set_clauses.push("updated_at = CURRENT_TIMESTAMP".to_owned());
+    let sql = format!(
+        "UPDATE invoices SET {} WHERE id = ?{}",
+        set_clauses.join(", "),
+        values.len() + 1
+    );
+    values.push(Box::new(request.id));
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    tx.execute(&sql, param_refs.as_slice())?;
+    tx.commit()?;
+
+    let invoice = load_invoice_summary(conn, request.id)?;
+    Ok(UpdateInvoiceResult { invoice, errors })
+}
+
+fn validate_invoice_fields(
+    issue_date: &Option<Option<String>>,
+    status: &Option<Option<String>>,
+    confidence: Option<Option<f64>>,
+) -> Vec<FieldError> {
+    let mut errors = Vec::new();
+
+    if let Some(Some(ref date)) = issue_date {
+        if !date.is_empty() && NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err() {
+            errors.push(FieldError {
+                field: "issue_date".into(),
+                message: "日期格式必须为 YYYY-MM-DD".into(),
+            });
+        }
+    }
+
+    if let Some(Some(ref s)) = status {
+        let valid = ["pending_confirmation", "recognized", "reviewed", "flagged"];
+        if !s.is_empty() && !valid.contains(&s.as_str()) {
+            errors.push(FieldError {
+                field: "status".into(),
+                message: format!("状态值无效，允许的值: {valid:?}"),
+            });
+        }
+    }
+
+    if let Some(Some(c)) = confidence {
+        if !(0.0..=1.0).contains(&c) {
+            errors.push(FieldError {
+                field: "confidence".into(),
+                message: "置信度必须在 0 到 1 之间".into(),
+            });
+        }
+    }
+
+    errors
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateInvoiceItemsRequest {
+    pub invoice_id: i64,
+    pub items: Vec<InvoiceItemChange>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action")]
+pub enum InvoiceItemChange {
+    #[serde(rename = "add")]
+    Add {
+        name: String,
+        specification: Option<String>,
+        unit: Option<String>,
+        quantity: Option<String>,
+        unit_price: Option<String>,
+        amount: Option<String>,
+        tax_rate: Option<String>,
+        tax_amount: Option<String>,
+    },
+    #[serde(rename = "update")]
+    Update {
+        id: i64,
+        name: Option<String>,
+        specification: Option<String>,
+        unit: Option<String>,
+        quantity: Option<String>,
+        unit_price: Option<String>,
+        amount: Option<String>,
+        tax_rate: Option<String>,
+        tax_amount: Option<String>,
+    },
+    #[serde(rename = "delete")]
+    Delete { id: i64 },
+}
+
+pub fn update_invoice_items(
+    conn: &mut Connection,
+    request: UpdateInvoiceItemsRequest,
+) -> Result<Vec<InvoiceItemRow>, ExtractorError> {
+    let tx = conn.transaction()?;
+
+    for change in &request.items {
+        match change {
+            InvoiceItemChange::Add {
+                name,
+                specification,
+                unit,
+                quantity,
+                unit_price,
+                amount,
+                tax_rate,
+                tax_amount,
+            } => {
+                tx.execute(
+                    "INSERT INTO invoice_items (invoice_id, name, specification, unit, quantity, unit_price, amount, tax_rate, tax_amount)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        request.invoice_id,
+                        name,
+                        specification,
+                        unit,
+                        quantity,
+                        unit_price,
+                        amount,
+                        tax_rate,
+                        tax_amount,
+                    ],
+                )?;
+            }
+            InvoiceItemChange::Update {
+                id,
+                name,
+                specification,
+                unit,
+                quantity,
+                unit_price,
+                amount,
+                tax_rate,
+                tax_amount,
+            } => {
+                let mut set = Vec::new();
+                let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+                let mut add = |col: &str, val: &Option<String>| {
+                    if val.is_some() {
+                        set.push(format!("{col} = ?{}", vals.len() + 1));
+                        vals.push(Box::new(val.clone()));
+                    }
+                };
+
+                add("name", name);
+                add("specification", specification);
+                add("unit", unit);
+                add("quantity", quantity);
+                add("unit_price", unit_price);
+                add("amount", amount);
+                add("tax_rate", tax_rate);
+                add("tax_amount", tax_amount);
+
+                if !set.is_empty() {
+                    let sql = format!(
+                        "UPDATE invoice_items SET {} WHERE id = ?{} AND invoice_id = ?{}",
+                        set.join(", "),
+                        vals.len() + 1,
+                        vals.len() + 2,
+                    );
+                    vals.push(Box::new(*id));
+                    vals.push(Box::new(request.invoice_id));
+                    let refs: Vec<&dyn rusqlite::types::ToSql> =
+                        vals.iter().map(|v| v.as_ref()).collect();
+                    tx.execute(&sql, refs.as_slice())?;
+                }
+            }
+            InvoiceItemChange::Delete { id } => {
+                tx.execute(
+                    "DELETE FROM invoice_items WHERE id = ?1 AND invoice_id = ?2",
+                    params![id, request.invoice_id],
+                )?;
+            }
+        }
+    }
+
+    tx.commit()?;
+
+    // Return updated items list
+    let mut stmt = conn.prepare(
+        "SELECT id, name, specification, unit, quantity, unit_price, amount, tax_rate, tax_amount
+        FROM invoice_items WHERE invoice_id = ?1 ORDER BY id",
+    )?;
+    let items = stmt
+        .query_map([request.invoice_id], |row| {
+            Ok(InvoiceItemRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                specification: row.get(2)?,
+                unit: row.get(3)?,
+                quantity: row.get(4)?,
+                unit_price: row.get(5)?,
+                amount: row.get(6)?,
+                tax_rate: row.get(7)?,
+                tax_amount: row.get(8)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(items)
+}
+
+#[derive(Debug, Deserialize)]
 struct InvoiceExtraction {
     is_invoice: bool,
     #[serde(default)]
