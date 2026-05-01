@@ -90,4 +90,3 @@ CREATE TABLE IF NOT EXISTS extraction_runs (
     FOREIGN KEY (raw_file_id) REFERENCES raw_files(id),
     FOREIGN KEY (invoice_id) REFERENCES invoices(id)
 );
-

@@ -142,6 +142,7 @@ h2 {
 }
 
 .job-main strong,
+.job-main small,
 .job-main span,
 .job-main em {
   display: block;
@@ -155,6 +156,12 @@ h2 {
 
 .job-main span {
   color: #627282;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.job-main small {
+  color: #2f6f73;
   font-size: 12px;
   margin-top: 4px;
 }

@@ -14,6 +14,7 @@ type ImportJob = {
   raw_file_id: number | null;
   source_path: string;
   original_name: string | null;
+  current_name: string | null;
   status: string;
   sha256: string | null;
   storage_path: string | null;
@@ -102,6 +103,7 @@ function App() {
                 <article className="job-row" key={job.id}>
                   <div className="job-main">
                     <strong>{job.original_name ?? job.source_path}</strong>
+                    {job.current_name ? <small>存储为 {job.current_name}</small> : null}
                     <span>{job.source_path}</span>
                     {job.error_message ? <em>{job.error_message}</em> : null}
                   </div>

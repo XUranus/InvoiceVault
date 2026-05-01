@@ -1,6 +1,12 @@
 use rusqlite::Connection;
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../../migrations/0001_initial.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../../migrations/0001_initial.sql")),
+    (
+        2,
+        include_str!("../../migrations/0002_raw_current_name.sql"),
+    ),
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
@@ -56,6 +62,6 @@ mod tests {
             )
             .expect("read migration version");
 
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 }

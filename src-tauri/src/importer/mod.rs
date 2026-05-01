@@ -6,7 +6,7 @@ use std::{
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::raw_store::{ingest_file, RawFileInput, RawStoreError};
+use crate::raw_store::{inspect_file, store_original_file, RawFileInput, RawStoreError};
 
 #[derive(Debug, Deserialize)]
 pub struct ImportRequest {
@@ -19,6 +19,7 @@ pub struct ImportJobSummary {
     pub raw_file_id: Option<i64>,
     pub source_path: String,
     pub original_name: Option<String>,
+    pub current_name: Option<String>,
     pub status: String,
     pub sha256: Option<String>,
     pub storage_path: Option<String>,
@@ -35,6 +36,8 @@ pub enum ImportError {
     RawStore(#[from] RawStoreError),
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
+    #[error("stored raw file metadata is incomplete")]
+    MissingStoredMetadata,
 }
 
 pub fn import_files(
@@ -60,6 +63,7 @@ pub fn list_import_jobs(conn: &Connection) -> Result<Vec<ImportJobSummary>, Impo
             ij.raw_file_id,
             ij.source_path,
             rf.original_name,
+            rf.current_name,
             ij.status,
             rf.sha256,
             rf.storage_path,
@@ -86,12 +90,24 @@ fn import_one(
 ) -> Result<ImportJobSummary, ImportError> {
     let source_path_text = source_path.to_string_lossy().into_owned();
 
-    match ingest_file(raw_dir, &source_path) {
+    match inspect_file(&source_path) {
         Ok(raw_file) => {
+            if let Some(raw_file_id) = find_raw_file_by_hash(conn, &raw_file.sha256)? {
+                let job_id = insert_import_job(
+                    conn,
+                    Some(raw_file_id),
+                    &source_path_text,
+                    "duplicate",
+                    None,
+                )?;
+                return load_import_job(conn, job_id);
+            }
+
+            let stored_raw_file = store_original_file(raw_dir, raw_file)?;
             let tx = conn.transaction()?;
-            let (raw_file_id, status) = upsert_raw_file(&tx, &raw_file)?;
+            let raw_file_id = insert_raw_file(&tx, &stored_raw_file)?;
             let job_id =
-                insert_import_job(&tx, Some(raw_file_id), &source_path_text, status, None)?;
+                insert_import_job(&tx, Some(raw_file_id), &source_path_text, "completed", None)?;
             tx.commit()?;
             load_import_job(conn, job_id)
         }
@@ -105,44 +121,49 @@ fn import_one(
     }
 }
 
-fn upsert_raw_file(
-    conn: &Connection,
-    raw_file: &RawFileInput,
-) -> Result<(i64, &'static str), ImportError> {
-    let existing_id = conn
+fn find_raw_file_by_hash(conn: &Connection, sha256: &str) -> Result<Option<i64>, ImportError> {
+    Ok(conn
         .query_row(
             "SELECT id FROM raw_files WHERE sha256 = ?1",
-            [&raw_file.sha256],
+            [sha256],
             |row| row.get::<_, i64>(0),
         )
-        .optional()?;
+        .optional()?)
+}
 
-    if let Some(id) = existing_id {
-        return Ok((id, "duplicate"));
-    }
-
+fn insert_raw_file(conn: &Connection, raw_file: &RawFileInput) -> Result<i64, ImportError> {
+    let current_name = raw_file
+        .current_name
+        .as_deref()
+        .ok_or(ImportError::MissingStoredMetadata)?;
+    let storage_path = raw_file
+        .storage_path
+        .as_ref()
+        .ok_or(ImportError::MissingStoredMetadata)?;
     conn.execute(
         "INSERT INTO raw_files (
             sha256,
             md5,
             original_name,
+            current_name,
             extension,
             mime_type,
             byte_size,
             storage_path
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             raw_file.sha256,
             raw_file.md5,
             raw_file.original_name,
+            current_name,
             raw_file.extension,
             raw_file.mime_type,
             raw_file.byte_size as i64,
-            raw_file.storage_path.to_string_lossy().as_ref()
+            storage_path.to_string_lossy().as_ref()
         ],
     )?;
 
-    Ok((conn.last_insert_rowid(), "completed"))
+    Ok(conn.last_insert_rowid())
 }
 
 fn insert_import_job(
@@ -175,6 +196,7 @@ fn load_import_job(conn: &Connection, job_id: i64) -> Result<ImportJobSummary, I
             ij.raw_file_id,
             ij.source_path,
             rf.original_name,
+            rf.current_name,
             ij.status,
             rf.sha256,
             rf.storage_path,
@@ -196,12 +218,13 @@ fn row_to_import_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportJobSumma
         raw_file_id: row.get(1)?,
         source_path: row.get(2)?,
         original_name: row.get(3)?,
-        status: row.get(4)?,
-        sha256: row.get(5)?,
-        storage_path: row.get(6)?,
-        error_message: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        current_name: row.get(4)?,
+        status: row.get(5)?,
+        sha256: row.get(6)?,
+        storage_path: row.get(7)?,
+        error_message: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
 }
 
@@ -243,6 +266,8 @@ mod tests {
         assert_eq!(first[0].status, "completed");
         assert_eq!(second[0].status, "duplicate");
         assert_eq!(first[0].raw_file_id, second[0].raw_file_id);
+        assert_eq!(first[0].original_name.as_deref(), Some("receipt.jpg"));
+        assert_eq!(first[0].current_name.as_deref(), Some("receipt.jpg"));
     }
 
     #[test]
