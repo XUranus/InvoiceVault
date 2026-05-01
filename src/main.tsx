@@ -9,15 +9,64 @@ type AppHealth = {
   migration_version: number;
 };
 
+type ImportJob = {
+  id: number;
+  raw_file_id: number | null;
+  source_path: string;
+  original_name: string | null;
+  status: string;
+  sha256: string | null;
+  storage_path: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 function App() {
   const [health, setHealth] = React.useState<AppHealth | null>(null);
+  const [jobs, setJobs] = React.useState<ImportJob[]>([]);
+  const [pathsText, setPathsText] = React.useState("");
+  const [isImporting, setIsImporting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const refreshJobs = React.useCallback(() => {
+    invoke<ImportJob[]>("list_import_jobs")
+      .then(setJobs)
+      .catch((err) => setError(String(err)));
+  }, []);
 
   React.useEffect(() => {
     invoke<AppHealth>("app_health")
       .then(setHealth)
       .catch((err) => setError(String(err)));
-  }, []);
+    refreshJobs();
+  }, [refreshJobs]);
+
+  const handleImport = async () => {
+    const paths = pathsText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (paths.length === 0) {
+      setError("请输入至少一个文件路径。");
+      return;
+    }
+
+    setIsImporting(true);
+    setError(null);
+    try {
+      const imported = await invoke<ImportJob[]>("import_files", {
+        request: { paths },
+      });
+      setJobs((current) => [...imported, ...current]);
+      setPathsText("");
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   return (
     <main className="app-shell">
@@ -34,7 +83,35 @@ function App() {
       <section className="workspace">
         <div className="panel">
           <h2>导入队列</h2>
-          <p className="muted">下一步将接入 RAW 内容寻址存储、文件校验和导入任务状态机。</p>
+          <div className="import-form">
+            <textarea
+              value={pathsText}
+              onChange={(event) => setPathsText(event.target.value)}
+              placeholder="每行一个 PDF/PNG/JPG/JPEG 文件路径"
+              rows={5}
+            />
+            <button type="button" onClick={handleImport} disabled={isImporting}>
+              {isImporting ? "导入中" : "导入文件"}
+            </button>
+          </div>
+          <div className="job-list">
+            {jobs.length === 0 ? (
+              <p className="muted">暂无导入任务。</p>
+            ) : (
+              jobs.map((job) => (
+                <article className="job-row" key={job.id}>
+                  <div className="job-main">
+                    <strong>{job.original_name ?? job.source_path}</strong>
+                    <span>{job.source_path}</span>
+                    {job.error_message ? <em>{job.error_message}</em> : null}
+                  </div>
+                  <span className={`job-status job-status-${job.status}`}>
+                    {statusLabel(job.status)}
+                  </span>
+                </article>
+              ))
+            )}
+          </div>
         </div>
         <div className="panel">
           <h2>系统状态</h2>
@@ -58,9 +135,18 @@ function App() {
   );
 }
 
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    completed: "已完成",
+    duplicate: "重复",
+    failed: "失败",
+  };
+
+  return labels[status] ?? status;
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
 );
-

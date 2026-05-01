@@ -84,6 +84,110 @@ h2 {
   min-height: 180px;
 }
 
+.import-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  margin-top: 14px;
+  align-items: end;
+}
+
+.import-form textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 118px;
+  border: 1px solid #c8d3dc;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #1f2933;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.import-form button {
+  border: 0;
+  border-radius: 8px;
+  background: #2f6f73;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  min-height: 42px;
+  padding: 0 16px;
+  cursor: pointer;
+}
+
+.import-form button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.job-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.job-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e1e7ec;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.job-main {
+  min-width: 0;
+}
+
+.job-main strong,
+.job-main span,
+.job-main em {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.job-main strong {
+  font-size: 14px;
+}
+
+.job-main span {
+  color: #627282;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.job-main em {
+  color: #9c2d2d;
+  font-size: 12px;
+  font-style: normal;
+  margin-top: 4px;
+}
+
+.job-status {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.job-status-completed {
+  background: #e4f4e9;
+  color: #1d6b3a;
+}
+
+.job-status-duplicate {
+  background: #fff2cf;
+  color: #805b00;
+}
+
+.job-status-failed {
+  background: #f9e6e6;
+  color: #9c2d2d;
+}
+
 .health-grid {
   display: grid;
   grid-template-columns: 90px minmax(0, 1fr);
@@ -126,5 +230,9 @@ h2 {
   .panel + .panel {
     margin-top: 14px;
   }
-}
 
+  .import-form,
+  .job-row {
+    grid-template-columns: 1fr;
+  }
+}

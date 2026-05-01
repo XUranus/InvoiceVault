@@ -8,7 +8,10 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use crate::storage::{run_migrations, StorageError};
+use crate::{
+    importer::{import_files, list_import_jobs, ImportError, ImportJobSummary},
+    storage::{run_migrations, StorageError},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -18,6 +21,8 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("storage error: {0}")]
     Storage(#[from] StorageError),
+    #[error("import error: {0}")]
+    Import(#[from] ImportError),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -69,6 +74,16 @@ impl AppState {
             database_path: display_path(&self.paths.database_path),
             migration_version,
         })
+    }
+
+    pub fn import_files(&self, paths: Vec<String>) -> Result<Vec<ImportJobSummary>, AppError> {
+        let mut db = self.db.lock().expect("database mutex poisoned");
+        Ok(import_files(&mut db, &self.paths.raw_dir, paths)?)
+    }
+
+    pub fn list_import_jobs(&self) -> Result<Vec<ImportJobSummary>, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(list_import_jobs(&db)?)
     }
 }
 
