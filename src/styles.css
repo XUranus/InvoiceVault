@@ -84,6 +84,36 @@ h2 {
   min-height: 180px;
 }
 
+.import-panel {
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.import-panel-dragging {
+  border-color: #2f6f73;
+  box-shadow: 0 0 0 3px #cfe8dc;
+}
+
+.drop-target {
+  display: grid;
+  place-items: center;
+  min-height: 86px;
+  margin-top: 14px;
+  border: 1px dashed #9fb0bd;
+  border-radius: 8px;
+  color: #415363;
+  background: #f7fafc;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.import-panel-dragging .drop-target {
+  border-color: #2f6f73;
+  color: #1d6b3a;
+  background: #e4f4e9;
+}
+
 .import-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

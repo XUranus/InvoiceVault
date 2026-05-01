@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./styles.css";
 
@@ -29,6 +30,7 @@ function App() {
   const [jobs, setJobs] = React.useState<ImportJob[]>([]);
   const [pathsText, setPathsText] = React.useState("");
   const [isImporting, setIsImporting] = React.useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const refreshJobs = React.useCallback(() => {
@@ -44,6 +46,51 @@ function App() {
     refreshJobs();
   }, [refreshJobs]);
 
+  const importPaths = React.useCallback(async (paths: string[]) => {
+    setIsImporting(true);
+    setError(null);
+    try {
+      const imported = await invoke<ImportJob[]>("import_files", {
+        request: { paths },
+      });
+      setJobs((current) => [...imported, ...current]);
+      return imported;
+    } catch (err) {
+      setError(String(err));
+      return [];
+    } finally {
+      setIsImporting(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          setIsDraggingFiles(true);
+          return;
+        }
+
+        if (event.payload.type === "leave") {
+          setIsDraggingFiles(false);
+          return;
+        }
+
+        setIsDraggingFiles(false);
+        void importPaths(event.payload.paths);
+      })
+      .then((handler) => {
+        unlisten = handler;
+      })
+      .catch((err) => setError(String(err)));
+
+    return () => {
+      unlisten?.();
+    };
+  }, [importPaths]);
+
   const handleImport = async () => {
     const paths = pathsText
       .split("\n")
@@ -55,18 +102,9 @@ function App() {
       return;
     }
 
-    setIsImporting(true);
-    setError(null);
-    try {
-      const imported = await invoke<ImportJob[]>("import_files", {
-        request: { paths },
-      });
-      setJobs((current) => [...imported, ...current]);
+    const imported = await importPaths(paths);
+    if (imported.length > 0) {
       setPathsText("");
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setIsImporting(false);
     }
   };
 
@@ -92,17 +130,7 @@ function App() {
       return;
     }
 
-    setIsImporting(true);
-    try {
-      const imported = await invoke<ImportJob[]>("import_files", {
-        request: { paths },
-      });
-      setJobs((current) => [...imported, ...current]);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setIsImporting(false);
-    }
+    await importPaths(paths);
   };
 
   return (
@@ -118,8 +146,11 @@ function App() {
       </section>
 
       <section className="workspace">
-        <div className="panel">
+        <div className={`panel import-panel ${isDraggingFiles ? "import-panel-dragging" : ""}`}>
           <h2>导入队列</h2>
+          <div className="drop-target">
+            {isDraggingFiles ? "松开鼠标导入文件" : "拖入 PDF/PNG/JPG/JPEG 文件"}
+          </div>
           <div className="import-form">
             <textarea
               value={pathsText}
