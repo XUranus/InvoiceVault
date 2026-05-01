@@ -23,6 +23,7 @@ pub struct ImportJobSummary {
     pub status: String,
     pub sha256: Option<String>,
     pub storage_path: Option<String>,
+    pub mime_type: Option<String>,
     pub error_message: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -67,6 +68,7 @@ pub fn list_import_jobs(conn: &Connection) -> Result<Vec<ImportJobSummary>, Impo
             ij.status,
             rf.sha256,
             rf.storage_path,
+            rf.mime_type,
             ij.error_message,
             ij.created_at,
             ij.updated_at
@@ -200,6 +202,7 @@ fn load_import_job(conn: &Connection, job_id: i64) -> Result<ImportJobSummary, I
             ij.status,
             rf.sha256,
             rf.storage_path,
+            rf.mime_type,
             ij.error_message,
             ij.created_at,
             ij.updated_at
@@ -222,9 +225,10 @@ fn row_to_import_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportJobSumma
         status: row.get(5)?,
         sha256: row.get(6)?,
         storage_path: row.get(7)?,
-        error_message: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        mime_type: row.get(8)?,
+        error_message: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
 

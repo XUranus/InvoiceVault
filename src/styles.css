@@ -172,6 +172,12 @@ h2 {
   padding: 12px;
 }
 
+.job-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
 .job-main {
   min-width: 0;
 }
@@ -228,6 +234,24 @@ h2 {
 .job-status-failed {
   background: #f9e6e6;
   color: #9c2d2d;
+}
+
+.small-button {
+  border: 1px solid #b8c6d1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #263846;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.small-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .health-grid {
@@ -313,6 +337,40 @@ h2 {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.invoice-list {
+  display: grid;
+  gap: 10px;
+}
+
+.invoice-row {
+  border: 1px solid #e1e7ec;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.invoice-row strong,
+.invoice-row span,
+.invoice-row small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.invoice-row strong {
+  font-size: 14px;
+}
+
+.invoice-row span {
+  color: #415363;
+  font-size: 13px;
+}
+
+.invoice-row small {
+  color: #627282;
+  font-size: 12px;
 }
 
 @media (max-width: 780px) {

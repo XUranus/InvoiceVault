@@ -20,6 +20,7 @@ type ImportJob = {
   status: string;
   sha256: string | null;
   storage_path: string | null;
+  mime_type: string | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
@@ -31,9 +32,39 @@ type LlmConnectionTestResult = {
   response_preview: string;
 };
 
+type Invoice = {
+  id: number;
+  raw_file_id: number;
+  invoice_type: string | null;
+  invoice_code: string | null;
+  invoice_number: string | null;
+  issue_date: string | null;
+  seller_name: string | null;
+  buyer_name: string | null;
+  currency: string;
+  total_amount: string | null;
+  category: string | null;
+  source_page_range: string | null;
+  confidence: number | null;
+  status: string;
+  duplicate_status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type RecognizeRawFileResult = {
+  invoices: Invoice[];
+  model: string;
+  duration_ms: number;
+  response_preview: string;
+  page_count: number;
+  thumbnail_paths: string[];
+};
+
 function App() {
   const [health, setHealth] = React.useState<AppHealth | null>(null);
   const [jobs, setJobs] = React.useState<ImportJob[]>([]);
+  const [invoices, setInvoices] = React.useState<Invoice[]>([]);
   const [pathsText, setPathsText] = React.useState("");
   const [llmBaseUrl, setLlmBaseUrl] = React.useState(
     "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -43,6 +74,7 @@ function App() {
   const [llmTestResult, setLlmTestResult] = React.useState<LlmConnectionTestResult | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
   const [isTestingLlm, setIsTestingLlm] = React.useState(false);
+  const [recognizingJobId, setRecognizingJobId] = React.useState<number | null>(null);
   const [isDraggingFiles, setIsDraggingFiles] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -52,12 +84,19 @@ function App() {
       .catch((err) => setError(String(err)));
   }, []);
 
+  const refreshInvoices = React.useCallback(() => {
+    invoke<Invoice[]>("list_invoices")
+      .then(setInvoices)
+      .catch((err) => setError(String(err)));
+  }, []);
+
   React.useEffect(() => {
     invoke<AppHealth>("app_health")
       .then(setHealth)
       .catch((err) => setError(String(err)));
     refreshJobs();
-  }, [refreshJobs]);
+    refreshInvoices();
+  }, [refreshJobs, refreshInvoices]);
 
   const importPaths = React.useCallback(async (paths: string[]) => {
     setIsImporting(true);
@@ -167,6 +206,38 @@ function App() {
     }
   };
 
+  const handleRecognizeRawFile = async (job: ImportJob) => {
+    if (!job.raw_file_id) {
+      setError("该导入任务没有可识别的 RAW 文件。");
+      return;
+    }
+    if (!llmApiKey.trim()) {
+      setError("请先填写 LLM API Key。");
+      return;
+    }
+
+    setRecognizingJobId(job.id);
+    setError(null);
+    try {
+      const result = await invoke<RecognizeRawFileResult>("recognize_raw_file", {
+        request: {
+          raw_file_id: job.raw_file_id,
+          config: {
+            base_url: llmBaseUrl,
+            api_key: llmApiKey,
+            model: llmModel,
+            timeout_seconds: 90,
+          },
+        },
+      });
+      setInvoices((current) => [...result.invoices, ...current]);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setRecognizingJobId(null);
+    }
+  };
+
   return (
     <main className="app-shell">
       <section className="topbar">
@@ -213,9 +284,21 @@ function App() {
                     <span>{job.source_path}</span>
                     {job.error_message ? <em>{job.error_message}</em> : null}
                   </div>
-                  <span className={`job-status job-status-${job.status}`}>
-                    {statusLabel(job.status)}
-                  </span>
+                  <div className="job-actions">
+                    <span className={`job-status job-status-${job.status}`}>
+                      {statusLabel(job.status)}
+                    </span>
+                    {canRecognizeJob(job) ? (
+                      <button
+                        className="small-button"
+                        type="button"
+                        onClick={() => void handleRecognizeRawFile(job)}
+                        disabled={recognizingJobId !== null}
+                      >
+                        {recognizingJobId === job.id ? "识别中" : "识别"}
+                      </button>
+                    ) : null}
+                  </div>
                 </article>
               ))
             )}
@@ -278,6 +361,28 @@ function App() {
               </dl>
             ) : null}
           </div>
+          <div className="settings-block">
+            <h2>已入库发票</h2>
+            {invoices.length === 0 ? (
+              <p className="muted">暂无结构化发票。</p>
+            ) : (
+              <div className="invoice-list">
+                {invoices.map((invoice) => (
+                  <article className="invoice-row" key={invoice.id}>
+                    <strong>{invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}</strong>
+                    <span>
+                      {invoice.issue_date ?? "日期未识别"} · {invoice.total_amount ?? "金额未识别"}{" "}
+                      {invoice.currency}
+                    </span>
+                    <small>
+                      {invoice.invoice_number ? `号码 ${invoice.invoice_number}` : "发票号码待确认"}
+                      {invoice.source_page_range ? ` · 第 ${invoice.source_page_range} 页` : ""}
+                    </small>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </section>
     </main>
@@ -289,9 +394,20 @@ function statusLabel(status: string) {
     completed: "已完成",
     duplicate: "重复",
     failed: "失败",
+    recognized: "已识别",
   };
 
   return labels[status] ?? status;
+}
+
+function canRecognizeJob(job: ImportJob) {
+  return (
+    job.raw_file_id !== null &&
+    job.status === "completed" &&
+    (job.mime_type === "image/png" ||
+      job.mime_type === "image/jpeg" ||
+      job.mime_type === "application/pdf")
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
