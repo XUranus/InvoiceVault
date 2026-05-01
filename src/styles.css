@@ -254,6 +254,67 @@ h2 {
   color: #9c2d2d;
 }
 
+.settings-block {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #e1e7ec;
+}
+
+.settings-block label {
+  display: grid;
+  gap: 6px;
+  color: #627282;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-block input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #c8d3dc;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #1f2933;
+  font: inherit;
+  font-weight: 400;
+}
+
+.settings-block button {
+  border: 0;
+  border-radius: 8px;
+  background: #2f6f73;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.settings-block button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.llm-result {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.llm-result dt {
+  color: #627282;
+}
+
+.llm-result dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 780px) {
   .app-shell {
     padding: 16px;

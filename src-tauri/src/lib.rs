@@ -1,10 +1,14 @@
 mod app_core;
 mod importer;
+mod llm;
 mod raw_store;
 mod storage;
 
 use app_core::{AppHealth, AppState};
 use importer::{ImportJobSummary, ImportRequest};
+use llm::{
+    test_llm_connection as run_llm_connection_test, LlmConnectionTestResult, LlmProviderConfig,
+};
 use tauri::{Manager, State};
 
 #[tauri::command]
@@ -27,6 +31,13 @@ fn list_import_jobs(state: State<'_, AppState>) -> Result<Vec<ImportJobSummary>,
     state.list_import_jobs().map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+async fn test_llm_connection(config: LlmProviderConfig) -> Result<LlmConnectionTestResult, String> {
+    run_llm_connection_test(config)
+        .await
+        .map_err(|err| err.to_string())
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -45,7 +56,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_health,
             import_files,
-            list_import_jobs
+            list_import_jobs,
+            test_llm_connection
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");

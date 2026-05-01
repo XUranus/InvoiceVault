@@ -25,11 +25,24 @@ type ImportJob = {
   updated_at: string;
 };
 
+type LlmConnectionTestResult = {
+  model: string;
+  duration_ms: number;
+  response_preview: string;
+};
+
 function App() {
   const [health, setHealth] = React.useState<AppHealth | null>(null);
   const [jobs, setJobs] = React.useState<ImportJob[]>([]);
   const [pathsText, setPathsText] = React.useState("");
+  const [llmBaseUrl, setLlmBaseUrl] = React.useState(
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  );
+  const [llmModel, setLlmModel] = React.useState("qwen3.6-plus");
+  const [llmApiKey, setLlmApiKey] = React.useState("");
+  const [llmTestResult, setLlmTestResult] = React.useState<LlmConnectionTestResult | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
+  const [isTestingLlm, setIsTestingLlm] = React.useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -133,6 +146,27 @@ function App() {
     await importPaths(paths);
   };
 
+  const handleTestLlm = async () => {
+    setIsTestingLlm(true);
+    setLlmTestResult(null);
+    setError(null);
+    try {
+      const result = await invoke<LlmConnectionTestResult>("test_llm_connection", {
+        config: {
+          base_url: llmBaseUrl,
+          api_key: llmApiKey,
+          model: llmModel,
+          timeout_seconds: 30,
+        },
+      });
+      setLlmTestResult(result);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIsTestingLlm(false);
+    }
+  };
+
   return (
     <main className="app-shell">
       <section className="topbar">
@@ -203,6 +237,47 @@ function App() {
           ) : (
             <p className="muted">正在读取 Tauri 后端状态。</p>
           )}
+          <div className="settings-block">
+            <h2>LLM Provider</h2>
+            <label>
+              Base URL
+              <input
+                value={llmBaseUrl}
+                onChange={(event) => setLlmBaseUrl(event.target.value)}
+                spellCheck={false}
+              />
+            </label>
+            <label>
+              Model
+              <input
+                value={llmModel}
+                onChange={(event) => setLlmModel(event.target.value)}
+                spellCheck={false}
+              />
+            </label>
+            <label>
+              API Key
+              <input
+                value={llmApiKey}
+                onChange={(event) => setLlmApiKey(event.target.value)}
+                type="password"
+                spellCheck={false}
+              />
+            </label>
+            <button type="button" onClick={handleTestLlm} disabled={isTestingLlm}>
+              {isTestingLlm ? "测试中" : "测试连接"}
+            </button>
+            {llmTestResult ? (
+              <dl className="llm-result">
+                <dt>模型</dt>
+                <dd>{llmTestResult.model}</dd>
+                <dt>耗时</dt>
+                <dd>{llmTestResult.duration_ms} ms</dd>
+                <dt>响应</dt>
+                <dd>{llmTestResult.response_preview}</dd>
+              </dl>
+            ) : null}
+          </div>
         </div>
       </section>
     </main>

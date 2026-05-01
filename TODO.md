@@ -17,8 +17,8 @@
 - [x] 实现文件 MD5/SHA256 去重。
 - [ ] 实现 PDF 按页处理。
 - [ ] 实现图片标准化和缩略图。
-- [ ] 实现 OpenAI-compatible LLM 配置。
-- [ ] 实现 LLM 连接测试。
+- [x] 实现 OpenAI-compatible LLM 配置。
+- [x] 实现 LLM 连接测试。
 - [ ] 实现发票识别 prompt 和 JSON schema 校验。
 - [ ] 实现发票结构化入库。
 - [ ] 实现发票列表、筛选和分页。

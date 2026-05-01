@@ -11,6 +11,7 @@ M0 脚手架已建立：
 - 前端通过 Tauri command `app_health` 读取基础设施状态。
 - 后端支持 PDF/PNG/JPG/JPEG 路径导入，导入时会计算 SHA256/MD5、按 `raw/YYYY/MM/文件名` 存储原始 PDF/图片，并记录导入任务。
 - 前端导入队列已接入 `import_files` 和 `list_import_jobs`，支持原生文件选择器、拖拽和路径输入。
+- 前端支持 OpenAI-compatible LLM Provider 连接测试；API Key 只在本次界面输入中使用，不写入仓库。
 
 ## 常用命令
 
@@ -21,6 +22,14 @@ cd src-tauri && cargo fmt --check
 cd src-tauri && cargo test
 cd src-tauri && cargo check
 npm run tauri build -- --no-bundle
+```
+
+LLM 真实连接测试默认被忽略，需要本机临时环境变量：
+
+```bash
+cd src-tauri
+RECEIPTIER_LLM_BASE_URL=... RECEIPTIER_LLM_MODEL=... RECEIPTIER_LLM_API_KEY=... \
+  cargo test live_llm_connection_from_env -- --ignored
 ```
 
 开发运行：

@@ -97,6 +97,8 @@ Receiptier/
 
 目标：将导入文件转换为可识别页面，并通过 LLM 生成结构化发票。
 
+状态：进行中。已接入 OpenAI-compatible Chat Completions 连接测试和前端 Provider 配置表单；单张发票识别、JSON schema 校验和结构化入库仍待完成。
+
 任务：
 
 - 实现 PDF 按页渲染或页面图像提取。
