@@ -11,6 +11,7 @@ import { SettingsPage } from "./components/SettingsPage";
 import { AgentPage } from "./components/AgentPage";
 import { EventsPage } from "./components/EventsPage";
 import { NotificationsPage } from "./components/NotificationsPage";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 type Page = "dashboard" | "import" | "invoices" | "agent" | "events" | "notifications" | "settings";
 
@@ -130,6 +131,7 @@ export default function App() {
       />
 
       <main className="app-main">
+        <ErrorBoundary onError={setError}>
         {page === "dashboard" ? (
           <DashboardPage
             error={error}
@@ -179,6 +181,7 @@ export default function App() {
             onToggleTheme={toggleTheme}
           />
         )}
+        </ErrorBoundary>
       </main>
     </div>
   );
