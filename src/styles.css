@@ -806,6 +806,96 @@ body {
   flex-shrink: 0;
 }
 
+.invoice-card-check {
+  display: flex;
+  align-items: center;
+  padding: 0 8px 0 0;
+  cursor: pointer;
+}
+
+.invoice-card-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.invoice-card-selected {
+  border-color: var(--color-primary);
+  background: var(--color-bg);
+}
+
+.select-all-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.select-all-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+/* ---- Batch Action Bar ---- */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.batch-bar-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.batch-bar select {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  min-height: 34px;
+}
+
+.batch-bar .btn-danger {
+  border: 1px solid var(--color-alert-error-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--color-alert-error-bg);
+  color: var(--color-alert-error);
+  cursor: pointer;
+}
+
+.batch-bar .btn-danger:hover {
+  background: var(--color-alert-error);
+  color: #fff;
+}
+
+.batch-bar .btn-danger:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 /* ---- List Controls ---- */
 .list-controls {
   display: flex;

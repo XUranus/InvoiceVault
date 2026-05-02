@@ -1,6 +1,12 @@
 import React from "react";
 import type { Invoice, InvoiceSearchParams, SimilarResult } from "../types";
-import { searchInvoices, getInvoiceDetail, searchInvoicesSemantic } from "../api";
+import {
+  searchInvoices,
+  getInvoiceDetail,
+  searchInvoicesSemantic,
+  batchUpdateInvoices,
+  batchDeleteInvoices,
+} from "../api";
 import { InvoiceListControls } from "./InvoiceListControls";
 import { ExportButton } from "./ExportButton";
 import { InvoiceDetail } from "./InvoiceDetail";
@@ -10,6 +16,28 @@ type Props = {
   onInvoicesChanged: () => void;
   onError: (error: string) => void;
 };
+
+const BATCH_STATUS_OPTIONS = [
+  { value: "", label: "不修改状态" },
+  { value: "pending_confirmation", label: "待确认" },
+  { value: "recognized", label: "已识别" },
+  { value: "reviewed", label: "已复核" },
+  { value: "flagged", label: "已标记" },
+];
+
+const BATCH_CATEGORY_OPTIONS = [
+  { value: "", label: "不修改类别" },
+  { value: "办公用品", label: "办公用品" },
+  { value: "差旅费", label: "差旅费" },
+  { value: "餐饮", label: "餐饮" },
+  { value: "交通", label: "交通" },
+  { value: "通讯", label: "通讯" },
+  { value: "房租", label: "房租" },
+  { value: "水电", label: "水电" },
+  { value: "物流", label: "物流" },
+  { value: "广告", label: "广告" },
+  { value: "其他", label: "其他" },
+];
 
 export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
   const [view, setView] = React.useState<"list" | "detail">("list");
@@ -33,6 +61,14 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
   const [semanticInvoices, setSemanticInvoices] = React.useState<Invoice[] | null>(null);
   const [semanticLoading, setSemanticLoading] = React.useState(false);
   const [searchMode, setSearchMode] = React.useState<"keyword" | "semantic">("keyword");
+
+  // Batch selection state
+  const [selected, setSelected] = React.useState<Set<number>>(new Set());
+  const [batchStatus, setBatchStatus] = React.useState("");
+  const [batchCategory, setBatchCategory] = React.useState("");
+  const [batchApplying, setBatchApplying] = React.useState(false);
+  const [deleteConfirm, setDeleteConfirm] = React.useState(false);
+  const [batchDeleting, setBatchDeleting] = React.useState(false);
 
   const doSearch = React.useCallback(
     async (p: InvoiceSearchParams) => {
@@ -63,7 +99,6 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
     try {
       const results = await searchInvoicesSemantic(semanticQuery.trim(), 20);
       setSemanticResults(results);
-      // Load full invoice data for each result
       const invoiceData: Invoice[] = [];
       for (const r of results) {
         try {
@@ -105,6 +140,67 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
   const totalCount = searchResult?.total_count ?? invoices.length;
   const currentPage = searchResult?.page ?? 1;
   const totalPages = searchResult?.total_pages ?? 1;
+
+  // Clear selection when invoices change
+  React.useEffect(() => {
+    setSelected(new Set());
+  }, [displayInvoices]);
+
+  const toggleSelect = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selected.size === displayInvoices.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(displayInvoices.map((inv) => inv.id)));
+    }
+  };
+
+  const handleBatchApply = async () => {
+    if (!batchStatus && !batchCategory) return;
+    setBatchApplying(true);
+    try {
+      await batchUpdateInvoices({
+        ids: Array.from(selected),
+        status: batchStatus || null,
+        category: batchCategory || null,
+      });
+      setSelected(new Set());
+      setBatchStatus("");
+      setBatchCategory("");
+      doSearch(params);
+      onInvoicesChanged();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setBatchApplying(false);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    setBatchDeleting(true);
+    try {
+      await batchDeleteInvoices(Array.from(selected));
+      setSelected(new Set());
+      setDeleteConfirm(false);
+      doSearch(params);
+      onInvoicesChanged();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
 
   const handleSelectInvoice = (id: number) => {
     setSelectedId(id);
@@ -150,9 +246,81 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
         <h2 className="page-title">发票库</h2>
         <div className="page-header-actions">
           <span className="count-badge">{totalCount} 张</span>
-          <ExportButton onError={onError} onRefresh={onInvoicesChanged} />
+          <ExportButton
+            onError={onError}
+            onRefresh={onInvoicesChanged}
+            invoiceIds={selected.size > 0 ? Array.from(selected) : undefined}
+          />
         </div>
       </div>
+
+      {/* Batch action bar */}
+      {selected.size > 0 && (
+        <div className="batch-bar">
+          <span className="batch-bar-count">已选 {selected.size} 张</span>
+          <select
+            value={batchStatus}
+            onChange={(e) => setBatchStatus(e.target.value)}
+          >
+            {BATCH_STATUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={batchCategory}
+            onChange={(e) => setBatchCategory(e.target.value)}
+          >
+            {BATCH_CATEGORY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn-primary"
+            onClick={handleBatchApply}
+            disabled={batchApplying || (!batchStatus && !batchCategory)}
+          >
+            {batchApplying ? "应用中..." : "批量应用"}
+          </button>
+          {deleteConfirm ? (
+            <>
+              <button
+                className="btn-danger"
+                onClick={handleBatchDelete}
+                disabled={batchDeleting}
+              >
+                {batchDeleting ? "删除中..." : "确认删除"}
+              </button>
+              <button
+                className="btn-small"
+                onClick={() => setDeleteConfirm(false)}
+                disabled={batchDeleting}
+              >
+                取消
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn-danger"
+              onClick={() => setDeleteConfirm(true)}
+            >
+              批量删除
+            </button>
+          )}
+          <button
+            className="btn-small"
+            onClick={() => {
+              setSelected(new Set());
+              setDeleteConfirm(false);
+            }}
+          >
+            取消选择
+          </button>
+        </div>
+      )}
 
       {/* Search mode tabs */}
       <div className="search-mode-tabs">
@@ -198,6 +366,18 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
         />
       )}
 
+      {/* Select all */}
+      {displayInvoices.length > 0 && (
+        <label className="select-all-row">
+          <input
+            type="checkbox"
+            checked={selected.size === displayInvoices.length && displayInvoices.length > 0}
+            onChange={toggleSelectAll}
+          />
+          <span>全选</span>
+        </label>
+      )}
+
       {searchMode === "semantic" && semanticResults !== null && semanticInvoices !== null ? (
         semanticInvoices.length === 0 ? (
           <p className="muted" style={{ marginTop: 16 }}>未找到语义相似结果。</p>
@@ -205,11 +385,20 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
           <div className="invoice-cards" style={{ marginTop: 16 }}>
             {semanticInvoices.map((invoice, i) => (
               <article
-                className="invoice-card"
+                className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""}`}
                 key={invoice.id}
-                onClick={() => handleSelectInvoice(invoice.id)}
               >
-                <div className="invoice-card-body">
+                <label className="invoice-card-check" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(invoice.id)}
+                    onChange={() => toggleSelect(invoice.id)}
+                  />
+                </label>
+                <div
+                  className="invoice-card-body"
+                  onClick={() => handleSelectInvoice(invoice.id)}
+                >
                   <div className="invoice-card-main">
                     <strong>
                       {invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}
@@ -251,11 +440,20 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
         <div className="invoice-cards">
           {displayInvoices.map((invoice) => (
             <article
-              className="invoice-card"
+              className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""}`}
               key={invoice.id}
-              onClick={() => handleSelectInvoice(invoice.id)}
             >
-              <div className="invoice-card-body">
+              <label className="invoice-card-check" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(invoice.id)}
+                  onChange={() => toggleSelect(invoice.id)}
+                />
+              </label>
+              <div
+                className="invoice-card-body"
+                onClick={() => handleSelectInvoice(invoice.id)}
+              >
                 <div className="invoice-card-main">
                   <strong>
                     {invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}

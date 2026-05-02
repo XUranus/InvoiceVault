@@ -22,9 +22,9 @@ use event::{EventListResult, NotificationRow};
 use exporter::{ExportInvoicesRequest, ExportResult};
 use llm::LlmProviderConfig;
 use extractor::{
-    DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult,
-    InvoiceSummary, SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
-    UpdateInvoiceResult,
+    BatchUpdateRequest, DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
+    InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest,
+    UpdateInvoiceRequest, UpdateInvoiceResult,
 };
 use importer::{ImportJobListResult, ImportJobSummary, ImportRequest};
 use llm::{
@@ -115,6 +115,26 @@ fn update_invoice_items(
 ) -> Result<Vec<InvoiceItemRow>, String> {
     state
         .update_invoice_items(request)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn batch_update_invoices(
+    state: State<'_, AppState>,
+    request: extractor::BatchUpdateRequest,
+) -> Result<Vec<InvoiceSummary>, String> {
+    state
+        .batch_update_invoices(request)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn batch_delete_invoices(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<usize, String> {
+    state
+        .batch_delete_invoices(ids)
         .map_err(|err| err.to_string())
 }
 
@@ -565,6 +585,8 @@ pub fn run() {
             get_invoice_detail,
             update_invoice,
             update_invoice_items,
+            batch_update_invoices,
+            batch_delete_invoices,
             check_invoice_duplicates,
             resolve_duplicate,
             export_invoices,

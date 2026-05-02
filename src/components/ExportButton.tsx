@@ -6,9 +6,10 @@ import type { ExportResult } from "../types";
 type Props = {
   onError: (error: string) => void;
   onRefresh: () => void;
+  invoiceIds?: number[];
 };
 
-export function ExportButton({ onError }: Props) {
+export function ExportButton({ onError, invoiceIds }: Props) {
   const [exporting, setExporting] = React.useState(false);
   const [lastResult, setLastResult] = React.useState<ExportResult | null>(null);
 
@@ -34,6 +35,7 @@ export function ExportButton({ onError }: Props) {
       const result = await exportInvoices({
         format,
         output_path: filePath,
+        invoice_ids: invoiceIds,
       });
       setLastResult(result);
     } catch (err) {

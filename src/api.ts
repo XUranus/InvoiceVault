@@ -70,6 +70,18 @@ export async function updateInvoiceItems(
   return invoke<InvoiceItemRow[]>("update_invoice_items", { request });
 }
 
+export async function batchUpdateInvoices(request: {
+  ids: number[];
+  status?: string | null;
+  category?: string | null;
+}): Promise<Invoice[]> {
+  return invoke<Invoice[]>("batch_update_invoices", { request });
+}
+
+export async function batchDeleteInvoices(ids: number[]): Promise<number> {
+  return invoke<number>("batch_delete_invoices", { ids });
+}
+
 export async function testLlmConnection(config: {
   base_url: string;
   api_key: string;

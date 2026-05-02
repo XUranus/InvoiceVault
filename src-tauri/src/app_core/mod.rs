@@ -30,9 +30,10 @@ use crate::{
     exporter::{export_invoices, ExportError, ExportInvoicesRequest, ExportResult},
     extractor::invoice_to_embedding_text,
     extractor::{
-        get_dashboard_stats, get_invoice_detail, list_invoices, save_invoice_extraction,
-        search_invoices, update_invoice, update_invoice_items, DashboardStats, ExtractorError,
-        InvoiceDetail, InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult, InvoiceSummary,
+        batch_delete_invoices, batch_update_invoices, get_dashboard_stats, get_invoice_detail,
+        list_invoices, save_invoice_extraction, search_invoices, update_invoice,
+        update_invoice_items, BatchUpdateRequest, DashboardStats, ExtractorError, InvoiceDetail,
+        InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult, InvoiceSummary,
         SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
         UpdateInvoiceResult,
     },
@@ -306,6 +307,19 @@ impl AppState {
     ) -> Result<Vec<InvoiceItemRow>, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         Ok(update_invoice_items(&mut db, request)?)
+    }
+
+    pub fn batch_update_invoices(
+        &self,
+        request: BatchUpdateRequest,
+    ) -> Result<Vec<InvoiceSummary>, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(batch_update_invoices(&db, &request)?)
+    }
+
+    pub fn batch_delete_invoices(&self, ids: Vec<i64>) -> Result<usize, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(batch_delete_invoices(&db, &ids)?)
     }
 
     pub fn check_invoice_duplicates(&self, invoice_id: i64) -> Result<DedupeCheckResult, AppError> {

@@ -1349,6 +1349,89 @@ pub fn invoice_to_embedding_text(invoice: &InvoiceDetail) -> String {
     }
 }
 
+// ---- Batch operations ----
+
+#[derive(Debug, Deserialize)]
+pub struct BatchUpdateRequest {
+    pub ids: Vec<i64>,
+    pub status: Option<String>,
+    pub category: Option<String>,
+}
+
+pub fn batch_update_invoices(
+    conn: &Connection,
+    request: &BatchUpdateRequest,
+) -> Result<Vec<InvoiceSummary>, ExtractorError> {
+    if request.ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let ids_str = request
+        .ids
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    if let Some(ref status) = request.status {
+        conn.execute(
+            &format!("UPDATE invoices SET status = ?1 WHERE id IN ({})", ids_str),
+            [status],
+        )?;
+    }
+    if let Some(ref category) = request.category {
+        conn.execute(
+            &format!(
+                "UPDATE invoices SET category = ?1 WHERE id IN ({})",
+                ids_str
+            ),
+            [category],
+        )?;
+    }
+
+    let mut stmt = conn.prepare(&format!(
+        "SELECT
+            id, raw_file_id,
+            invoice_type, invoice_code, invoice_number, issue_date,
+            seller_name, buyer_name, currency, total_amount, category,
+            source_page_range, confidence, status, duplicate_status,
+            created_at, updated_at
+        FROM invoices WHERE id IN ({}) ORDER BY id",
+        ids_str
+    ))?;
+    let rows = stmt
+        .query_map([], |row| row_to_invoice_summary(row))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn batch_delete_invoices(
+    conn: &Connection,
+    ids: &[i64],
+) -> Result<usize, ExtractorError> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let ids_str = ids
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let count = conn.execute(
+        &format!("DELETE FROM invoices WHERE id IN ({})", ids_str),
+        [],
+    )?;
+    // Also clean up dedupe entries
+    conn.execute(
+        &format!(
+            "DELETE FROM dedupe_candidates WHERE invoice_id_1 IN ({0}) OR invoice_id_2 IN ({0})",
+            ids_str
+        ),
+        [],
+    )?;
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
