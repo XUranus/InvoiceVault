@@ -2,7 +2,7 @@ import React from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import type { Invoice, WatcherImportEvent } from "./types";
-import { getAppHealth, searchInvoices, importFiles } from "./api";
+import { getAppHealth, searchInvoices, importFiles, getLlmConfig } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { DashboardPage } from "./components/DashboardPage";
 import { ImportPage } from "./components/ImportPage";
@@ -65,6 +65,16 @@ export default function App() {
       .then(setHealth)
       .catch((err) => setError(String(err)));
     refreshInvoices();
+    // Restore saved LLM config
+    getLlmConfig()
+      .then((cfg) => {
+        if (cfg) {
+          setLlmBaseUrl(cfg.base_url);
+          setLlmModel(cfg.model);
+          setLlmApiKey(cfg.api_key);
+        }
+      })
+      .catch(() => {});
   }, [refreshInvoices]);
 
   // Global drag-drop handler — navigate to import page on drop

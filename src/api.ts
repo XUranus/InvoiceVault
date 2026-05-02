@@ -278,3 +278,14 @@ export async function setLlmConfig(config: {
 }): Promise<void> {
   return invoke<void>("set_llm_config", { config });
 }
+
+export type LlmConfigResponse = {
+  base_url: string;
+  api_key: string;
+  model: string;
+  timeout_seconds?: number;
+} | null;
+
+export async function getLlmConfig(): Promise<LlmConfigResponse> {
+  return invoke<LlmConfigResponse>("get_llm_config");
+}

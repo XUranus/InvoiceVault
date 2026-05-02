@@ -528,6 +528,13 @@ fn set_llm_config(
     state.set_llm_config(config).map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn get_llm_config(
+    state: State<'_, AppState>,
+) -> Result<Option<LlmProviderConfig>, String> {
+    Ok(state.get_llm_config())
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -617,7 +624,8 @@ pub fn run() {
             mark_notification_read,
             mark_all_notifications_read,
             dismiss_notification,
-            set_llm_config
+            set_llm_config,
+            get_llm_config
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");

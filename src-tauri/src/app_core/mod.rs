@@ -118,8 +118,22 @@ impl AppState {
         run_migrations(&mut db)?;
         let db = Arc::new(Mutex::new(db));
 
-        let llm_config: Arc<Mutex<Option<LlmProviderConfig>>> =
-            Arc::new(Mutex::new(None));
+        let chroma_config = ChromaConfig::default();
+
+        // Load persisted configs
+        let embedding_config = Self::load_config_raw::<EmbeddingConfig>(
+            &app_data_dir,
+            "embedding_config.json",
+        )
+        .unwrap_or_default();
+
+        let llm_config: Arc<Mutex<Option<LlmProviderConfig>>> = {
+            let saved = Self::load_config_raw::<LlmProviderConfig>(
+                &app_data_dir,
+                "llm_config.json",
+            );
+            Arc::new(Mutex::new(saved))
+        };
 
         let watcher_manager = WatcherManager::new(
             Arc::clone(&db),
@@ -128,9 +142,6 @@ impl AppState {
             Arc::clone(&llm_config),
             app.clone(),
         )?;
-
-        let chroma_config = ChromaConfig::default();
-        let embedding_config = EmbeddingConfig::default();
 
         Ok(Self {
             paths,
@@ -400,7 +411,12 @@ impl AppState {
 
     pub fn set_embedding_config(&self, config: EmbeddingConfig) -> Result<(), AppError> {
         let mut cfg = self.embedding_config.lock().expect("lock");
-        *cfg = config;
+        *cfg = config.clone();
+        // Persist to file
+        let path = self.paths.app_data_dir.join("embedding_config.json");
+        if let Ok(json) = serde_json::to_string_pretty(&config) {
+            let _ = std::fs::write(&path, json);
+        }
         let db = self.db.lock().expect("db lock");
         let _ = event::create_event(
             &db,
@@ -421,12 +437,26 @@ impl AppState {
 
     pub fn set_llm_config(&self, config: LlmProviderConfig) -> Result<(), AppError> {
         let mut cfg = self.llm_config.lock().expect("lock");
-        *cfg = Some(config);
+        *cfg = Some(config.clone());
+        // Persist to file
+        let path = self.paths.app_data_dir.join("llm_config.json");
+        if let Ok(json) = serde_json::to_string_pretty(&config) {
+            let _ = std::fs::write(&path, json);
+        }
         Ok(())
     }
 
     pub fn get_llm_config(&self) -> Option<LlmProviderConfig> {
         self.llm_config.lock().expect("lock").clone()
+    }
+
+    fn load_config_raw<T: serde::de::DeserializeOwned>(
+        app_data_dir: &Path,
+        filename: &str,
+    ) -> Option<T> {
+        let path = app_data_dir.join(filename);
+        let json = std::fs::read_to_string(&path).ok()?;
+        serde_json::from_str(&json).ok()
     }
 
     pub fn test_chroma_connection(&self) -> Result<bool, AppError> {
