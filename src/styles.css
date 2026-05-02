@@ -875,25 +875,8 @@ body {
 }
 
 .batch-bar .btn-danger {
-  border: 1px solid var(--color-alert-error-border);
-  border-radius: var(--radius-sm);
   padding: 6px 14px;
-  font: inherit;
   font-size: 13px;
-  font-weight: 600;
-  background: var(--color-alert-error-bg);
-  color: var(--color-alert-error);
-  cursor: pointer;
-}
-
-.batch-bar .btn-danger:hover {
-  background: var(--color-alert-error);
-  color: #fff;
-}
-
-.batch-bar .btn-danger:disabled {
-  opacity: 0.5;
-  cursor: wait;
 }
 
 /* ---- List Controls ---- */
@@ -1542,8 +1525,26 @@ body {
 }
 
 .btn-danger {
-  color: var(--color-error);
-  border-color: var(--color-error);
+  border: 1px solid var(--color-alert-error-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-alert-error-bg);
+  color: var(--color-alert-error);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.btn-danger:hover {
+  background: var(--color-alert-error);
+  color: #ffffff;
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .watch-dir-list {
