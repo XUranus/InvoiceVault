@@ -13,6 +13,7 @@ import {
   setEmbeddingConfig,
   getEmbeddingConfig,
   testEmbeddingConnection,
+  setLlmConfig,
 } from "../api";
 import { WatchDirManager } from "./WatchDirManager";
 
@@ -70,6 +71,18 @@ export function SettingsPage({
       .then((cfg) => setEmbConfig({ ...cfg, enabled: cfg.enabled !== false }))
       .catch(() => {});
   }, []);
+
+  // Auto-save LLM config on change
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setLlmConfig({
+        base_url: llmBaseUrl,
+        api_key: llmApiKey,
+        model: llmModel,
+      }).catch(() => {});
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [llmBaseUrl, llmModel, llmApiKey]);
 
   // Auto-save chroma config on change
   React.useEffect(() => {

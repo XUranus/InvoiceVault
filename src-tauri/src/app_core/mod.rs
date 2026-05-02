@@ -37,6 +37,7 @@ use crate::{
         UpdateInvoiceResult,
     },
     importer::{import_files, list_import_jobs, ImportError, ImportJobListResult, ImportJobSummary},
+    llm::LlmProviderConfig,
     storage::{run_migrations, StorageError},
     watcher::{
         AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus, WatcherError, WatcherManager,
@@ -102,6 +103,7 @@ pub struct AppState {
     watcher_manager: WatcherManager,
     chroma_config: Mutex<ChromaConfig>,
     embedding_config: Mutex<EmbeddingConfig>,
+    llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
 }
 
 impl AppState {
@@ -115,8 +117,16 @@ impl AppState {
         run_migrations(&mut db)?;
         let db = Arc::new(Mutex::new(db));
 
-        let watcher_manager =
-            WatcherManager::new(Arc::clone(&db), paths.raw_dir.clone(), app.clone())?;
+        let llm_config: Arc<Mutex<Option<LlmProviderConfig>>> =
+            Arc::new(Mutex::new(None));
+
+        let watcher_manager = WatcherManager::new(
+            Arc::clone(&db),
+            paths.raw_dir.clone(),
+            paths.thumbnails_dir.clone(),
+            Arc::clone(&llm_config),
+            app.clone(),
+        )?;
 
         let chroma_config = ChromaConfig::default();
         let embedding_config = EmbeddingConfig::default();
@@ -127,6 +137,7 @@ impl AppState {
             watcher_manager,
             chroma_config: Mutex::new(chroma_config),
             embedding_config: Mutex::new(embedding_config),
+            llm_config,
         })
     }
 
@@ -384,6 +395,16 @@ impl AppState {
 
     pub fn get_embedding_config(&self) -> EmbeddingConfig {
         self.embedding_config.lock().expect("lock").clone()
+    }
+
+    pub fn set_llm_config(&self, config: LlmProviderConfig) -> Result<(), AppError> {
+        let mut cfg = self.llm_config.lock().expect("lock");
+        *cfg = Some(config);
+        Ok(())
+    }
+
+    pub fn get_llm_config(&self) -> Option<LlmProviderConfig> {
+        self.llm_config.lock().expect("lock").clone()
     }
 
     pub fn test_chroma_connection(&self) -> Result<bool, AppError> {

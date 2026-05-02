@@ -20,6 +20,7 @@ use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
 use embedding::{EmbeddingConfig, EmbeddingTestResult};
 use event::{EventListResult, NotificationRow};
 use exporter::{ExportInvoicesRequest, ExportResult};
+use llm::LlmProviderConfig;
 use extractor::{
     DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult,
     InvoiceSummary, SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
@@ -28,7 +29,7 @@ use extractor::{
 use importer::{ImportJobListResult, ImportJobSummary, ImportRequest};
 use llm::{
     recognize_invoice_image, test_llm_connection as run_llm_connection_test,
-    LlmConnectionTestResult, LlmProviderConfig,
+    LlmConnectionTestResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -487,6 +488,14 @@ fn dismiss_notification(state: State<'_, AppState>, id: i64) -> Result<(), Strin
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn set_llm_config(
+    state: State<'_, AppState>,
+    config: LlmProviderConfig,
+) -> Result<(), String> {
+    state.set_llm_config(config).map_err(|err| err.to_string())
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -573,7 +582,8 @@ pub fn run() {
             get_unread_notification_count,
             mark_notification_read,
             mark_all_notifications_read,
-            dismiss_notification
+            dismiss_notification,
+            set_llm_config
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");

@@ -14,7 +14,11 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::{
+    document::render_pdf_pages,
+    event,
+    extractor::{save_invoice_extraction, SaveInvoiceExtractionRequest},
     importer::{import_files, ImportJobSummary},
+    llm::{recognize_invoice_image, LlmProviderConfig},
     storage::StorageError,
 };
 
@@ -87,6 +91,8 @@ struct WatchHandle {
 pub struct WatcherManager {
     db: Arc<Mutex<Connection>>,
     raw_dir: PathBuf,
+    thumbnails_dir: PathBuf,
+    llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     handles: Mutex<HashMap<i64, WatchHandle>>,
     app_handle: AppHandle,
 }
@@ -95,11 +101,15 @@ impl WatcherManager {
     pub fn new(
         db: Arc<Mutex<Connection>>,
         raw_dir: PathBuf,
+        thumbnails_dir: PathBuf,
+        llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
         app_handle: AppHandle,
     ) -> Result<Self, WatcherError> {
         let manager = Self {
             db,
             raw_dir,
+            thumbnails_dir,
+            llm_config,
             handles: Mutex::new(HashMap::new()),
             app_handle,
         };
@@ -373,6 +383,8 @@ impl WatcherManager {
 
         let db = Arc::clone(&self.db);
         let raw_dir = self.raw_dir.clone();
+        let thumbnails_dir = self.thumbnails_dir.clone();
+        let llm_config = Arc::clone(&self.llm_config);
         let app_handle = self.app_handle.clone();
 
         std::thread::Builder::new()
@@ -381,6 +393,8 @@ impl WatcherManager {
                 watch_loop(
                     db,
                     raw_dir,
+                    thumbnails_dir,
+                    llm_config,
                     app_handle,
                     id,
                     path,
@@ -420,6 +434,8 @@ impl Drop for WatcherManager {
 fn watch_loop(
     db: Arc<Mutex<Connection>>,
     raw_dir: PathBuf,
+    thumbnails_dir: PathBuf,
+    llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     app_handle: AppHandle,
     watch_id: i64,
     path: PathBuf,
@@ -463,11 +479,12 @@ fn watch_loop(
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
-            // Process any remaining pending paths before exiting
             if !pending_paths.is_empty() {
                 process_pending(
                     &db,
                     &raw_dir,
+                    &thumbnails_dir,
+                    &llm_config,
                     &app_handle,
                     watch_id,
                     &path,
@@ -494,6 +511,8 @@ fn watch_loop(
                     process_pending(
                         &db,
                         &raw_dir,
+                        &thumbnails_dir,
+                        &llm_config,
                         &app_handle,
                         watch_id,
                         &path,
@@ -523,6 +542,8 @@ fn matches_filter(path: &Path, extensions: &[String]) -> bool {
 fn process_pending(
     db: &Arc<Mutex<Connection>>,
     raw_dir: &Path,
+    thumbnails_dir: &Path,
+    llm_config: &Arc<Mutex<Option<LlmProviderConfig>>>,
     app_handle: &AppHandle,
     watch_id: i64,
     watch_path: &Path,
@@ -538,8 +559,32 @@ fn process_pending(
     }
 
     let count = path_strs.len();
-    let imported = match db.lock() {
-        Ok(mut conn) => import_files(&mut conn, raw_dir, path_strs).unwrap_or_default(),
+    let (imported, raw_file_ids) = match db.lock() {
+        Ok(mut conn) => {
+            let jobs = import_files(&mut conn, raw_dir, path_strs).unwrap_or_default();
+            let ids: Vec<i64> = jobs
+                .iter()
+                .filter(|j| j.status == "completed" && j.raw_file_id.is_some())
+                .filter_map(|j| j.raw_file_id)
+                .collect();
+
+            // Record event and notification
+            let total = jobs.len();
+            let success = jobs.iter().filter(|j| j.status == "completed").count();
+            let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
+            let failed = jobs.iter().filter(|j| j.status == "failed").count();
+            let _ = event::record_import_event(&conn, total, success, dups, failed);
+            let _ = event::create_notification(
+                &conn,
+                "info",
+                &format!("监控导入: {total} 个文件"),
+                &format!("成功 {success}，重复 {dups}，失败 {failed}"),
+                None,
+                None,
+            );
+
+            (jobs, ids)
+        }
         Err(_) => return,
     };
 
@@ -552,6 +597,114 @@ fn process_pending(
             jobs: imported,
         },
     );
+
+    // Auto-recognize each imported file if LLM is configured
+    if !raw_file_ids.is_empty() {
+        if let Some(config) = llm_config.lock().ok().and_then(|c| c.clone()) {
+            let db = Arc::clone(db);
+            let thumbnails_dir = thumbnails_dir.to_path_buf();
+
+            tauri::async_runtime::spawn(async move {
+                for raw_file_id in raw_file_ids {
+                    recognize_raw_file_async(&db, &thumbnails_dir, raw_file_id, &config).await;
+                }
+            });
+        }
+    }
+}
+
+async fn recognize_raw_file_async(
+    db: &Arc<Mutex<Connection>>,
+    thumbnails_dir: &Path,
+    raw_file_id: i64,
+    config: &LlmProviderConfig,
+) {
+    let (storage_path, mime_type) = match db.lock() {
+        Ok(conn) => {
+            match conn.query_row(
+                "SELECT storage_path, COALESCE(mime_type, '') FROM raw_files WHERE id = ?1",
+                [raw_file_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            ) {
+                Ok(r) => r,
+                Err(_) => return,
+            }
+        }
+        Err(_) => return,
+    };
+
+    let storage_path = std::path::PathBuf::from(&storage_path);
+    let thumb_dir = thumbnails_dir.to_path_buf();
+
+    let recognition_inputs: Vec<(Option<String>, std::path::PathBuf, String)> =
+        if mime_type == "application/pdf" {
+            match render_pdf_pages(&storage_path, &thumb_dir, raw_file_id) {
+                Ok(pages) => pages
+                    .into_iter()
+                    .map(|page| {
+                        (
+                            Some(page.page_number.to_string()),
+                            page.image_path,
+                            "image/png".to_owned(),
+                        )
+                    })
+                    .collect(),
+                Err(_) => return,
+            }
+        } else {
+            vec![(None, storage_path, mime_type)]
+        };
+
+    for (page_range, image_path, mime) in recognition_inputs {
+        let recognition = match recognize_invoice_image(config.clone(), &image_path, &mime).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        let invoice = match db.lock() {
+            Ok(mut conn) => save_invoice_extraction(
+                &mut conn,
+                SaveInvoiceExtractionRequest {
+                    raw_file_id,
+                    source_page_range: page_range,
+                    provider_name: Some(config.base_url.clone()),
+                    model: Some(recognition.model.clone()),
+                    response_json: recognition.response_json,
+                },
+            )
+            .ok(),
+            Err(_) => None,
+        };
+
+        if let Some(invoice) = invoice {
+            let title = invoice
+                .seller_name
+                .clone()
+                .unwrap_or_else(|| "未知".into());
+            if let Ok(db) = db.lock() {
+                let _ = event::record_recognition_event(
+                    &db,
+                    invoice.id,
+                    &title,
+                    true,
+                    recognition.duration_ms,
+                    &recognition.model,
+                    1,
+                );
+                let _ = event::create_notification(
+                    &db,
+                    "info",
+                    &format!("自动识别完成: {title}"),
+                    &format!(
+                        "监控目录文件已自动识别为发票，模型 {}，耗时 {}ms",
+                        recognition.model, recognition.duration_ms
+                    ),
+                    Some("invoice"),
+                    Some(invoice.id),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

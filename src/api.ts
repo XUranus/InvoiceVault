@@ -252,3 +252,11 @@ export async function markAllNotificationsRead(): Promise<void> {
 export async function dismissNotification(id: number): Promise<void> {
   return invoke<void>("dismiss_notification", { id });
 }
+
+export async function setLlmConfig(config: {
+  base_url: string;
+  api_key: string;
+  model: string;
+}): Promise<void> {
+  return invoke<void>("set_llm_config", { config });
+}
