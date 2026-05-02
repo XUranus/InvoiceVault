@@ -9,8 +9,10 @@ import { ImportPage } from "./components/ImportPage";
 import { InvoicesPage } from "./components/InvoicesPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { AgentPage } from "./components/AgentPage";
+import { EventsPage } from "./components/EventsPage";
+import { NotificationsPage } from "./components/NotificationsPage";
 
-type Page = "dashboard" | "import" | "invoices" | "agent" | "settings";
+type Page = "dashboard" | "import" | "invoices" | "agent" | "events" | "notifications" | "settings";
 
 export default function App() {
   const [page, setPage] = React.useState<Page>("dashboard");
@@ -27,6 +29,29 @@ export default function App() {
   const [dashboardKey, setDashboardKey] = React.useState(0);
   const [importKey, setImportKey] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
+  const [theme, setTheme] = React.useState<"light" | "dark">(() => {
+    const stored = localStorage.getItem("theme");
+    return stored === "dark" ? "dark" : "light";
+  });
+  const [unreadNotificationCount, setUnreadNotificationCount] = React.useState(0);
+
+  const navigateToInvoice = (id: number) => {
+    setPage("invoices");
+    // Store the target invoice ID for the invoices page to pick up
+    sessionStorage.setItem("focusInvoiceId", String(id));
+  };
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === "dark" ? "light" : "dark";
+      localStorage.setItem("theme", next);
+      return next;
+    });
+  };
+
+  React.useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   const clearError = () => setError(null);
 
@@ -103,6 +128,7 @@ export default function App() {
         }}
         healthReady={health !== null}
         hasError={error !== null}
+        unreadNotificationCount={unreadNotificationCount}
       />
 
       <main className="app-main">
@@ -134,6 +160,13 @@ export default function App() {
             llmApiKey={llmApiKey}
             onError={setError}
           />
+        ) : page === "events" ? (
+          <EventsPage onNavigateToInvoice={navigateToInvoice} />
+        ) : page === "notifications" ? (
+          <NotificationsPage
+            onNavigateToInvoice={navigateToInvoice}
+            onUnreadCountChange={setUnreadNotificationCount}
+          />
         ) : (
           <SettingsPage
             health={health}
@@ -144,6 +177,8 @@ export default function App() {
             onBaseUrlChange={setLlmBaseUrl}
             onModelChange={setLlmModel}
             onApiKeyChange={setLlmApiKey}
+            theme={theme}
+            onToggleTheme={toggleTheme}
           />
         )}
       </main>

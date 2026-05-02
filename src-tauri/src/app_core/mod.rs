@@ -26,6 +26,7 @@ use crate::{
         generate_embedding, test_embedding_connection as run_embedding_test, EmbeddingConfig,
         EmbeddingError, EmbeddingTestResult,
     },
+    event::{self, EventError, EventListResult, NotificationRow},
     exporter::{export_invoices, ExportError, ExportInvoicesRequest, ExportResult},
     extractor::invoice_to_embedding_text,
     extractor::{
@@ -68,6 +69,8 @@ pub enum AppError {
     Embedding(#[from] EmbeddingError),
     #[error("agent error: {0}")]
     Agent(#[from] AgentError),
+    #[error("event error: {0}")]
+    Event(#[from] EventError),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,7 +147,21 @@ impl AppState {
 
     pub fn import_files(&self, paths: Vec<String>) -> Result<Vec<ImportJobSummary>, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
-        Ok(import_files(&mut db, &self.paths.raw_dir, paths)?)
+        let jobs = import_files(&mut db, &self.paths.raw_dir, paths)?;
+        let total = jobs.len();
+        let success = jobs.iter().filter(|j| j.status == "completed").count();
+        let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
+        let failed = jobs.iter().filter(|j| j.status == "failed").count();
+        let _ = event::record_import_event(&db, total, success, dups, failed);
+        let _ = event::create_notification(
+            &db,
+            "info",
+            &format!("导入完成: {total} 个文件"),
+            &format!("成功 {success}，重复 {dups}，失败 {failed}"),
+            None,
+            None,
+        );
+        Ok(jobs)
     }
 
     pub fn list_import_jobs(
@@ -330,6 +347,17 @@ impl AppState {
     pub fn set_chroma_config(&self, config: ChromaConfig) -> Result<(), AppError> {
         let mut cfg = self.chroma_config.lock().expect("lock");
         *cfg = config;
+        let db = self.db.lock().expect("db lock");
+        let _ = event::create_event(
+            &db,
+            "config_change",
+            "更新向量搜索配置",
+            "",
+            "completed",
+            None,
+            None,
+            None,
+        );
         Ok(())
     }
 
@@ -340,6 +368,17 @@ impl AppState {
     pub fn set_embedding_config(&self, config: EmbeddingConfig) -> Result<(), AppError> {
         let mut cfg = self.embedding_config.lock().expect("lock");
         *cfg = config;
+        let db = self.db.lock().expect("db lock");
+        let _ = event::create_event(
+            &db,
+            "config_change",
+            "更新 Embedding 配置",
+            "",
+            "completed",
+            None,
+            None,
+            None,
+        );
         Ok(())
     }
 
@@ -417,6 +456,73 @@ impl AppState {
             raw_file_id,
             page_number,
         )?)
+    }
+
+    // --- Event methods ---
+
+    pub fn list_events(
+        &self,
+        page: i64,
+        page_size: i64,
+        event_type: Option<&str>,
+    ) -> Result<EventListResult, AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::list_events(&db, page, page_size, event_type)?)
+    }
+
+    pub fn list_notifications(&self) -> Result<Vec<NotificationRow>, AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::list_notifications(&db)?)
+    }
+
+    pub fn get_unread_notification_count(&self) -> Result<i64, AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::get_unread_notification_count(&db)?)
+    }
+
+    pub fn mark_notification_read(&self, id: i64) -> Result<(), AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::mark_notification_read(&db, id)?)
+    }
+
+    pub fn mark_all_notifications_read(&self) -> Result<(), AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::mark_all_notifications_read(&db)?)
+    }
+
+    pub fn dismiss_notification(&self, id: i64) -> Result<(), AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::dismiss_notification(&db, id)?)
+    }
+
+    pub fn record_recognition_event(
+        &self,
+        invoice_id: i64,
+        invoice_title: &str,
+        success: bool,
+        duration_ms: u128,
+        model: &str,
+        page_count: usize,
+    ) -> Result<(), AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::record_recognition_event(
+            &db, invoice_id, invoice_title, success, duration_ms, model, page_count,
+        )?)
+    }
+
+    pub fn create_notification(
+        &self,
+        level: &str,
+        title: &str,
+        message: &str,
+        reference_type: Option<&str>,
+        reference_id: Option<i64>,
+    ) -> Result<(), AppError> {
+        let db = self.db.lock().expect("db lock");
+        event::create_notification(
+            &db, level, title, message, reference_type, reference_id,
+        )?;
+        Ok(())
     }
 
     // --- Agent methods ---
@@ -603,6 +709,16 @@ fn make_tool_executor(
             let conn = db.lock().expect("db lock");
             match export_invoices(&conn, request) {
                 Ok(result) => {
+                    let count = result.row_count;
+                    let format = &result.format;
+                    let _ = event::record_agent_event(
+                        &conn,
+                        "export",
+                        &format!("Agent 导出 {count} 张发票为 {format}"),
+                        "",
+                        None,
+                        None,
+                    );
                     let content = serde_json::to_string(&result).unwrap_or_default();
                     ToolExecResult::Success { content }
                 }
@@ -637,8 +753,17 @@ fn make_tool_executor(
                 }
             };
             let mut conn = db.lock().expect("db lock");
+            let invoice_id = request.id;
             match update_invoice(&mut conn, request) {
                 Ok(result) => {
+                    let _ = event::record_agent_event(
+                        &conn,
+                        "update",
+                        &format!("Agent 更新发票 #{invoice_id}"),
+                        "",
+                        Some("invoice"),
+                        Some(invoice_id),
+                    );
                     let content = serde_json::to_string(&result).unwrap_or_default();
                     ToolExecResult::Success { content }
                 }

@@ -17,6 +17,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         7,
         include_str!("../../migrations/0007_invoice_embeddings.sql"),
     ),
+    (
+        8,
+        include_str!("../../migrations/0008_events_notifications.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -73,6 +77,6 @@ mod tests {
             )
             .expect("read migration version");
 
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
     }
 }

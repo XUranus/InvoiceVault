@@ -25,6 +25,8 @@ type Props = {
   onBaseUrlChange: (v: string) => void;
   onModelChange: (v: string) => void;
   onApiKeyChange: (v: string) => void;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
 };
 
 export function SettingsPage({
@@ -36,6 +38,8 @@ export function SettingsPage({
   onBaseUrlChange,
   onModelChange,
   onApiKeyChange,
+  theme,
+  onToggleTheme,
 }: Props) {
   const [llmTestResult, setLlmTestResult] =
     React.useState<LlmConnectionTestResult | null>(null);
@@ -276,6 +280,16 @@ export function SettingsPage({
             </div>
           </div>
         ) : null}
+      </div>
+
+      <div className="section">
+        <h3>外观</h3>
+        <p className="section-desc">
+          当前: {theme === "dark" ? "暗色主题" : "亮色主题"}
+        </p>
+        <button className="btn-primary" onClick={onToggleTheme}>
+          {theme === "dark" ? "☀️ 切换到亮色主题" : "🌙 切换到暗色主题"}
+        </button>
       </div>
 
       {health ? (

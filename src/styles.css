@@ -14,6 +14,26 @@
   --color-warn-bg: #fff8f0;
   --color-sidebar: #1a2332;
   --color-sidebar-hover: #263446;
+  --color-drop-border: #c8d3dc;
+  --color-badge-neutral-bg: #f0f0f0;
+  --color-badge-neutral-text: #5f6b7a;
+  --color-badge-blue-bg: #e8f0fe;
+  --color-badge-blue-text: #1a3a6b;
+  --color-badge-green-bg: #e6f4ed;
+  --color-badge-green-text: #1b4d38;
+  --color-badge-orange-bg: #fff8f0;
+  --color-badge-orange-text: #b85c00;
+  --color-badge-red-bg: #fff5f5;
+  --color-badge-red-text: #c92a2a;
+  --color-tag-blue-bg: #e7f0ff;
+  --color-tag-blue-text: #1a56db;
+  --color-agent-sessions-bg: #eef1f5;
+  --color-confirm-bg: #fffdf0;
+  --color-confirm-border: #e6c840;
+  --color-chat-assistant-border: #c8cdd6;
+  --color-alert-error-border: #ffc9c9;
+  --color-alert-warn-border: #ffe0b2;
+  --color-job-card-hover-border: #b8c6d1;
   --sidebar-width: 220px;
   --radius: 8px;
   --radius-sm: 6px;
@@ -22,11 +42,50 @@
   --bg-main: var(--color-bg);
   --bg-card: var(--color-surface);
   --text-primary: var(--color-text);
+  --text-secondary: var(--color-text-secondary);
   --text-muted: var(--color-text-muted);
   --border-light: var(--color-border);
   --accent: var(--color-primary);
   --accent-soft: var(--color-primary-bg);
   --danger: var(--color-error);
+}
+
+[data-theme="dark"] {
+  --color-bg: #1a1d23;
+  --color-surface: #252830;
+  --color-border: #353840;
+  --color-text: #e8edf2;
+  --color-text-secondary: #9ca3b0;
+  --color-text-muted: #6b7280;
+  --color-primary: #4ade80;
+  --color-primary-hover: #6ee7a0;
+  --color-primary-bg: #164e35;
+  --color-error: #f87171;
+  --color-error-bg: #3b1a1a;
+  --color-warn: #fbbf24;
+  --color-warn-bg: #3b2e1a;
+  --color-sidebar: #111827;
+  --color-sidebar-hover: #1f2937;
+  --color-drop-border: #4b5563;
+  --color-badge-neutral-bg: #374151;
+  --color-badge-neutral-text: #9ca3b0;
+  --color-badge-blue-bg: #1e3a5f;
+  --color-badge-blue-text: #93c5fd;
+  --color-badge-green-bg: #164e35;
+  --color-badge-green-text: #6ee7b7;
+  --color-badge-orange-bg: #3b2e1a;
+  --color-badge-orange-text: #fcd34d;
+  --color-badge-red-bg: #3b1a1a;
+  --color-badge-red-text: #fca5a5;
+  --color-tag-blue-bg: #1e3a5f;
+  --color-tag-blue-text: #93c5fd;
+  --color-agent-sessions-bg: #1e2027;
+  --color-confirm-bg: #2d2a18;
+  --color-confirm-border: #8b7a28;
+  --color-chat-assistant-border: #404550;
+  --color-alert-error-border: #7f3030;
+  --color-alert-warn-border: #7a5a20;
+  --color-job-card-hover-border: #4b5563;
 }
 
 * {
@@ -134,6 +193,26 @@ body {
   white-space: nowrap;
 }
 
+.sidebar-theme-toggle {
+  padding: 8px 10px;
+  display: flex;
+  justify-content: center;
+}
+
+.theme-toggle-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--color-sidebar-hover);
+}
+
 .sidebar-footer {
   padding: 16px 20px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -225,13 +304,13 @@ body {
 .alert-error {
   background: var(--color-error-bg);
   color: var(--color-error);
-  border: 1px solid #ffc9c9;
+  border: 1px solid var(--color-alert-error-border);
 }
 
 .alert-warn {
   background: var(--color-warn-bg);
   color: var(--color-warn);
-  border: 1px solid #ffe0b2;
+  border: 1px solid var(--color-alert-warn-border);
 }
 
 /* ---- Stat Cards ---- */
@@ -356,7 +435,7 @@ body {
 }
 
 .drop-area {
-  border: 2px dashed #c8d3dc;
+  border: 2px dashed var(--color-drop-border);
   border-radius: var(--radius);
   padding: 36px 20px;
   text-align: center;
@@ -488,7 +567,7 @@ body {
 }
 
 .job-card:hover {
-  border-color: #b8c6d1;
+  border-color: var(--color-job-card-hover-border);
 }
 
 .job-card-expanded {
@@ -575,8 +654,8 @@ body {
 
 .tag-pending,
 .tag-processing {
-  background: #e7f0ff;
-  color: #1a56db;
+  background: var(--color-tag-blue-bg);
+  color: var(--color-tag-blue-text);
 }
 
 .mini-tag {
@@ -598,8 +677,8 @@ body {
 }
 
 .tag-reviewed {
-  background: #e7f0ff;
-  color: #1a56db;
+  background: var(--color-tag-blue-bg);
+  color: var(--color-tag-blue-text);
 }
 
 .tag-flagged {
@@ -608,8 +687,8 @@ body {
 }
 
 .tag-warn {
-  background: #fff5f5;
-  color: #c92a2a;
+  background: var(--color-badge-red-bg);
+  color: var(--color-badge-red-text);
 }
 
 /* ---- Invoice Cards ---- */
@@ -854,48 +933,48 @@ body {
 }
 
 .badge-status-recognized {
-  background: #e6f4ed;
-  color: #1b4d38;
+  background: var(--color-badge-green-bg);
+  color: var(--color-badge-green-text);
 }
 
 .badge-status-pending {
-  background: #fff8f0;
-  color: #b85c00;
+  background: var(--color-badge-orange-bg);
+  color: var(--color-badge-orange-text);
 }
 
 .badge-status-reviewed {
-  background: #e8f0fe;
-  color: #1a3a6b;
+  background: var(--color-badge-blue-bg);
+  color: var(--color-badge-blue-text);
 }
 
 .badge-dup-unique {
-  background: #e6f4ed;
-  color: #1b4d38;
+  background: var(--color-badge-green-bg);
+  color: var(--color-badge-green-text);
 }
 
 .badge-dup-possible_duplicate {
-  background: #fff8f0;
-  color: #b85c00;
+  background: var(--color-badge-orange-bg);
+  color: var(--color-badge-orange-text);
 }
 
 .badge-dup-probable_duplicate {
-  background: #fff5f5;
-  color: #c92a2a;
+  background: var(--color-badge-red-bg);
+  color: var(--color-badge-red-text);
 }
 
 .badge-dup-unknown {
-  background: #f0f0f0;
-  color: #5f6b7a;
+  background: var(--color-badge-neutral-bg);
+  color: var(--color-badge-neutral-text);
 }
 
 .badge-confidence {
-  background: #e8f0fe;
-  color: #1a3a6b;
+  background: var(--color-badge-blue-bg);
+  color: var(--color-badge-blue-text);
 }
 
 .badge-page {
-  background: #f0f0f0;
-  color: #5f6b7a;
+  background: var(--color-badge-neutral-bg);
+  color: var(--color-badge-neutral-text);
 }
 
 .badge {
@@ -1066,7 +1145,7 @@ body {
 
 /* Duplicate warning */
 .duplicate-warning {
-  border: 1px solid #ffc9c9;
+  border: 1px solid var(--color-alert-error-border);
   border-radius: var(--radius);
   background: var(--color-error-bg);
   padding: 14px;
@@ -1460,7 +1539,7 @@ body {
   padding: 16px 12px;
   gap: 12px;
   overflow-y: auto;
-  background: #eef1f5;
+  background: var(--color-agent-sessions-bg);
   height: 100%;
 }
 
@@ -1615,7 +1694,7 @@ body {
 
 .chat-message-assistant .chat-bubble {
   background: var(--bg-card);
-  border: 1px solid #c8cdd6;
+  border: 1px solid var(--color-chat-assistant-border);
   border-bottom-left-radius: 4px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
@@ -1692,8 +1771,8 @@ body {
 
 /* Confirmation panel */
 .confirmation-panel {
-  background: #fffdf0;
-  border: 1px solid #e6c840;
+  background: var(--color-confirm-bg);
+  border: 1px solid var(--color-confirm-border);
   border-radius: 10px;
   padding: 14px 16px;
   max-width: 360px;
@@ -1765,4 +1844,243 @@ body {
   .chat-message {
     max-width: 90%;
   }
+}
+
+/* ---- Nav badge ---- */
+.nav-badge {
+  background: var(--color-error);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: auto;
+  min-width: 20px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* ---- Event page ---- */
+.event-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.event-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.event-card-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.event-card-clickable:hover {
+  border-color: var(--accent);
+}
+
+.event-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.event-type-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+.event-type-import {
+  background: var(--color-tag-blue-bg);
+  color: var(--color-tag-blue-text);
+}
+
+.event-type-recognition {
+  background: var(--color-badge-green-bg);
+  color: var(--color-badge-green-text);
+}
+
+.event-type-config_change {
+  background: var(--color-badge-neutral-bg);
+  color: var(--color-badge-neutral-text);
+}
+
+.event-type-agent {
+  background: var(--color-badge-blue-bg);
+  color: var(--color-badge-blue-text);
+}
+
+.event-type-export {
+  background: var(--color-badge-orange-bg);
+  color: var(--color-badge-orange-text);
+}
+
+.event-badge-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.event-status-completed {
+  background: var(--color-badge-green-bg);
+  color: var(--color-badge-green-text);
+}
+
+.event-status-failed {
+  background: var(--color-badge-red-bg);
+  color: var(--color-badge-red-text);
+}
+
+.event-status-pending,
+.event-status-running {
+  background: var(--color-badge-orange-bg);
+  color: var(--color-badge-orange-text);
+}
+
+.event-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.event-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.event-card-body strong {
+  font-size: 14px;
+}
+
+.event-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.event-card-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+}
+
+.event-ref {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* ---- Notification page ---- */
+.notification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notification-card {
+  display: flex;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+
+.notification-unread {
+  opacity: 1;
+}
+
+.notification-indicator {
+  width: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.notification-level-info .notification-indicator {
+  background: #4ade80;
+}
+
+.notification-level-warning .notification-indicator {
+  background: #fbbf24;
+}
+
+.notification-level-error .notification-indicator {
+  background: #f87171;
+}
+
+.notification-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.notification-level-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.notification-tag-info {
+  background: var(--color-badge-green-bg);
+  color: var(--color-badge-green-text);
+}
+
+.notification-tag-warning {
+  background: var(--color-badge-orange-bg);
+  color: var(--color-badge-orange-text);
+}
+
+.notification-tag-error {
+  background: var(--color-badge-red-bg);
+  color: var(--color-badge-red-text);
+}
+
+.notification-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.notification-title {
+  font-size: 14px;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.notification-message {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 8px;
+}
+
+.notification-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }

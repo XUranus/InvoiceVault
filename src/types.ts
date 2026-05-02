@@ -336,3 +336,38 @@ export type AgentResponse = {
   messages: AgentMessage[];
   pending_confirmation: PendingConfirmation | null;
 };
+
+// Event types
+
+export type EventRow = {
+  id: number;
+  event_type: string;
+  title: string;
+  description: string;
+  status: string;
+  reference_type: string | null;
+  reference_id: number | null;
+  metadata_json: string | null;
+  created_at: string;
+};
+
+export type EventListResult = {
+  events: EventRow[];
+  total_count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
+// Notification types
+
+export type NotificationRow = {
+  id: number;
+  level: "info" | "warning" | "error";
+  title: string;
+  message: string;
+  is_read: boolean;
+  reference_type: string | null;
+  reference_id: number | null;
+  created_at: string;
+};

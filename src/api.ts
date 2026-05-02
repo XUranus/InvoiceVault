@@ -27,6 +27,8 @@ import type {
   AgentSession,
   AgentMessage,
   AgentResponse,
+  EventListResult,
+  NotificationRow,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -217,4 +219,36 @@ export async function confirmAgentAction(
     request: { session_id: sessionId, confirmed, extra_params: extraParams },
     config,
   });
+}
+
+// Event APIs
+
+export async function listEvents(
+  page?: number,
+  pageSize?: number,
+  eventType?: string,
+): Promise<EventListResult> {
+  return invoke<EventListResult>("list_events", { page, pageSize, eventType });
+}
+
+// Notification APIs
+
+export async function listNotifications(): Promise<NotificationRow[]> {
+  return invoke<NotificationRow[]>("list_notifications");
+}
+
+export async function getUnreadNotificationCount(): Promise<number> {
+  return invoke<number>("get_unread_notification_count");
+}
+
+export async function markNotificationRead(id: number): Promise<void> {
+  return invoke<void>("mark_notification_read", { id });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  return invoke<void>("mark_all_notifications_read");
+}
+
+export async function dismissNotification(id: number): Promise<void> {
+  return invoke<void>("dismiss_notification", { id });
 }

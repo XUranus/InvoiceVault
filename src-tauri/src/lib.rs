@@ -4,6 +4,7 @@ mod chroma;
 mod dedupe;
 mod document;
 mod embedding;
+mod event;
 mod exporter;
 mod extractor;
 mod importer;
@@ -17,6 +18,7 @@ use app_core::{AppHealth, AppState};
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
 use embedding::{EmbeddingConfig, EmbeddingTestResult};
+use event::{EventListResult, NotificationRow};
 use exporter::{ExportInvoicesRequest, ExportResult};
 use extractor::{
     DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult,
@@ -228,6 +230,7 @@ async fn recognize_raw_file(
             recognition.response_preview
         ));
 
+        let rec_model = recognition.model.clone();
         let invoice = state
             .save_invoice_extraction(SaveInvoiceExtractionRequest {
                 raw_file_id: raw_file.id,
@@ -237,8 +240,28 @@ async fn recognize_raw_file(
                 response_json: recognition.response_json,
             })
             .map_err(|err| err.to_string())?;
+
+        let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
+        let _ = state.record_recognition_event(
+            invoice.id,
+            &title,
+            true,
+            recognition.duration_ms,
+            &rec_model,
+            1,
+        );
         invoices.push(invoice);
     }
+
+    // Create notification
+    let count = invoices.len();
+    let _ = state.create_notification(
+        "info",
+        &format!("识别完成: {count} 张发票"),
+        &format!("共识别 {count} 张发票，模型 {model}，耗时 {total_duration_ms}ms"),
+        None,
+        None,
+    );
 
     Ok(RecognizeRawFileResult {
         invoices,
@@ -415,6 +438,55 @@ async fn confirm_agent_action(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn list_events(
+    state: State<'_, AppState>,
+    page: Option<i64>,
+    page_size: Option<i64>,
+    event_type: Option<String>,
+) -> Result<EventListResult, String> {
+    state
+        .list_events(
+            page.unwrap_or(1),
+            page_size.unwrap_or(20),
+            event_type.as_deref(),
+        )
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_notifications(state: State<'_, AppState>) -> Result<Vec<NotificationRow>, String> {
+    state.list_notifications().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn get_unread_notification_count(state: State<'_, AppState>) -> Result<i64, String> {
+    state
+        .get_unread_notification_count()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn mark_notification_read(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state
+        .mark_notification_read(id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn mark_all_notifications_read(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .mark_all_notifications_read()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn dismiss_notification(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state
+        .dismiss_notification(id)
+        .map_err(|err| err.to_string())
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -495,7 +567,13 @@ pub fn run() {
             get_agent_session,
             delete_agent_session,
             send_agent_message,
-            confirm_agent_action
+            confirm_agent_action,
+            list_events,
+            list_notifications,
+            get_unread_notification_count,
+            mark_notification_read,
+            mark_all_notifications_read,
+            dismiss_notification
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");
