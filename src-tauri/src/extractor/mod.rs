@@ -1417,6 +1417,18 @@ pub fn batch_delete_invoices(
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join(",");
+    // Collect raw_file_ids before deleting invoices (so we can clean up orphaned raw files)
+    let mut raw_file_ids: Vec<i64> = Vec::new();
+    {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT DISTINCT raw_file_id FROM invoices WHERE id IN ({})",
+            ids_str
+        ))?;
+        let rows: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        raw_file_ids = rows;
+    }
     // Delete referencing rows first (extraction_runs has no ON DELETE CASCADE)
     conn.execute(
         &format!("DELETE FROM extraction_runs WHERE invoice_id IN ({})", ids_str),
@@ -1426,7 +1438,6 @@ pub fn batch_delete_invoices(
         &format!("DELETE FROM events WHERE reference_type = 'invoice' AND reference_id IN ({})", ids_str),
         [],
     )?;
-    // These have ON DELETE CASCADE but be explicit for safety
     conn.execute(
         &format!(
             "DELETE FROM dedupe_candidates WHERE invoice_id IN ({0}) OR candidate_invoice_id IN ({0})",
@@ -1438,6 +1449,22 @@ pub fn batch_delete_invoices(
         &format!("DELETE FROM invoices WHERE id IN ({})", ids_str),
         [],
     )?;
+    // Also clean up raw_files and import_jobs for the deleted invoices
+    for raw_id in &raw_file_ids {
+        let remaining: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM invoices WHERE raw_file_id = ?1",
+            [raw_id],
+            |row| row.get(0),
+        )?;
+        if remaining == 0 {
+            conn.execute(
+                "DELETE FROM extraction_runs WHERE raw_file_id = ?1",
+                [raw_id],
+            )?;
+            conn.execute("DELETE FROM import_jobs WHERE raw_file_id = ?1", [raw_id])?;
+            conn.execute("DELETE FROM raw_files WHERE id = ?1", [raw_id])?;
+        }
+    }
     Ok(count)
 }
 
