@@ -1429,7 +1429,7 @@ pub fn batch_delete_invoices(
     // These have ON DELETE CASCADE but be explicit for safety
     conn.execute(
         &format!(
-            "DELETE FROM dedupe_candidates WHERE invoice_id_1 IN ({0}) OR invoice_id_2 IN ({0})",
+            "DELETE FROM dedupe_candidates WHERE invoice_id IN ({0}) OR candidate_invoice_id IN ({0})",
             ids_str
         ),
         [],
