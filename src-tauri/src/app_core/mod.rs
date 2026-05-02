@@ -18,11 +18,11 @@ use crate::{
         RenderedPdfPage,
     },
     extractor::{
-        get_invoice_detail, list_invoices, save_invoice_extraction, search_invoices,
-        update_invoice, update_invoice_items, ExtractorError, InvoiceDetail,
-        InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult, InvoiceSummary,
-        SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
-        UpdateInvoiceResult,
+        get_dashboard_stats, get_invoice_detail, list_invoices, save_invoice_extraction,
+        search_invoices, update_invoice, update_invoice_items, DashboardStats,
+        ExtractorError, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
+        InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest,
+        UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
     },
     exporter::{export_invoices, ExportError, ExportInvoicesRequest, ExportResult},
     importer::{import_files, list_import_jobs, ImportError, ImportJobSummary},
@@ -229,6 +229,11 @@ impl AppState {
 
     pub fn toggle_watch_dir(&self, id: i64, enabled: bool) -> Result<WatchDirStatus, AppError> {
         Ok(self.watcher_manager.toggle_watch_dir(id, enabled)?)
+    }
+
+    pub fn get_dashboard_stats(&self) -> Result<DashboardStats, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(get_dashboard_stats(&db)?)
     }
 
     pub fn raw_file_for_recognition(

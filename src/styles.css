@@ -1167,6 +1167,35 @@ body {
   font-size: 12px;
 }
 
+/* ---- Dashboard Charts ---- */
+.chart-container {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-top: 16px;
+}
+
+.chart-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 12px;
+  color: var(--color-text-secondary);
+}
+
+.chart-row-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 768px) {
+  .chart-row-split {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 768px) {
   .sidebar {

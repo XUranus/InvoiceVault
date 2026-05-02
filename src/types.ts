@@ -243,3 +243,36 @@ export type WatcherImportEvent = {
   imported_count: number;
   jobs: ImportJob[];
 };
+
+export type MonthlyTrendPoint = {
+  month: string;
+  count: number;
+  amount: number;
+};
+
+export type BreakdownItem = {
+  label: string;
+  count: number;
+  amount: number;
+};
+
+export type TopSellerItem = {
+  seller_name: string;
+  count: number;
+  amount: number;
+};
+
+export type DashboardStats = {
+  total_invoices: number;
+  total_amount: number;
+  currency: string;
+  average_confidence: number;
+  this_month_count: number;
+  this_month_amount: number;
+  pending_count: number;
+  duplicate_count: number;
+  monthly_trend: MonthlyTrendPoint[];
+  by_type: BreakdownItem[];
+  by_status: BreakdownItem[];
+  top_sellers: TopSellerItem[];
+};

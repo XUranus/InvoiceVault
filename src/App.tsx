@@ -24,6 +24,7 @@ export default function App() {
     "sk-0bfe76db71b74da59ef1fa085586e6ba",
   );
   const [isDraggingFiles, setIsDraggingFiles] = React.useState(false);
+  const [dashboardKey, setDashboardKey] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
 
   const clearError = () => setError(null);
@@ -88,6 +89,7 @@ export default function App() {
     const unlisten = listen<WatcherImportEvent>("watcher-import", (_event) => {
       refreshJobs();
       refreshInvoices();
+      setDashboardKey((k) => k + 1);
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -105,6 +107,7 @@ export default function App() {
         onNavigate={(p) => {
           setPage(p);
           clearError();
+          if (p === "dashboard") setDashboardKey((k) => k + 1);
           if (p === "invoices") refreshInvoices();
           if (p === "import") refreshJobs();
         }}
@@ -117,8 +120,7 @@ export default function App() {
           <DashboardPage
             health={health}
             error={error}
-            invoiceCount={invoices.length}
-            jobCount={jobs.length}
+            refreshKey={dashboardKey}
           />
         ) : page === "import" ? (
           <ImportPage

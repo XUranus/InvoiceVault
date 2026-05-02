@@ -13,9 +13,9 @@ use app_core::{AppHealth, AppState};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
 use exporter::{ExportInvoicesRequest, ExportResult};
 use extractor::{
-    InvoiceDetail, InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult,
-    InvoiceSummary, SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest,
-    UpdateInvoiceRequest, UpdateInvoiceResult,
+    DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
+    InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest,
+    UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
 };
 use importer::{ImportJobSummary, ImportRequest};
 use llm::{
@@ -247,6 +247,13 @@ struct RecognitionInput {
 }
 
 #[tauri::command]
+fn get_dashboard_stats(state: State<'_, AppState>) -> Result<DashboardStats, String> {
+    state
+        .get_dashboard_stats()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn test_llm_connection(config: LlmProviderConfig) -> Result<LlmConnectionTestResult, String> {
     run_llm_connection_test(config)
         .await
@@ -323,6 +330,7 @@ pub fn run() {
             export_invoices,
             recognize_raw_file,
             test_llm_connection,
+            get_dashboard_stats,
             add_watch_dir,
             remove_watch_dir,
             list_watch_dirs,

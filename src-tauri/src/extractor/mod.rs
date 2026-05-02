@@ -1089,6 +1089,191 @@ where
     }
 }
 
+// ---- Dashboard ----
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DashboardStats {
+    pub total_invoices: i64,
+    pub total_amount: f64,
+    pub currency: String,
+    pub average_confidence: f64,
+    pub this_month_count: i64,
+    pub this_month_amount: f64,
+    pub pending_count: i64,
+    pub duplicate_count: i64,
+    pub monthly_trend: Vec<MonthlyTrendPoint>,
+    pub by_type: Vec<BreakdownItem>,
+    pub by_status: Vec<BreakdownItem>,
+    pub top_sellers: Vec<TopSellerItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MonthlyTrendPoint {
+    pub month: String,
+    pub count: i64,
+    pub amount: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BreakdownItem {
+    pub label: String,
+    pub count: i64,
+    pub amount: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TopSellerItem {
+    pub seller_name: String,
+    pub count: i64,
+    pub amount: f64,
+}
+
+fn sum_amount() -> &'static str {
+    "COALESCE(SUM(CAST(total_amount AS REAL)), 0.0)"
+}
+
+pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, ExtractorError> {
+    let (total_invoices, total_amount): (i64, f64) = conn.query_row(
+        &format!("SELECT COUNT(*), {} FROM invoices", sum_amount()),
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+
+    let currency = conn
+        .query_row(
+            "SELECT currency FROM invoices GROUP BY currency ORDER BY COUNT(*) DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| "CNY".to_string());
+
+    let average_confidence: f64 = conn
+        .query_row(
+            "SELECT COALESCE(AVG(confidence), 0.0) FROM invoices WHERE confidence IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+    let this_month = chrono::Local::now().format("%Y-%m-01").to_string();
+    let (this_month_count, this_month_amount): (i64, f64) = conn.query_row(
+        &format!(
+            "SELECT COUNT(*), {} FROM invoices WHERE issue_date >= ?1",
+            sum_amount()
+        ),
+        [&this_month],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+
+    let pending_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM invoices WHERE status = 'pending_confirmation'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let duplicate_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM invoices WHERE duplicate_status IN ('possible_duplicate', 'probable_duplicate')",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let mut trend_stmt = conn.prepare(
+        &format!(
+            "SELECT strftime('%Y-%m', issue_date) as month, COUNT(*), {}
+            FROM invoices
+            WHERE issue_date IS NOT NULL
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT 12",
+            sum_amount()
+        ),
+    )?;
+    let trend_rows: Vec<(String, i64, f64)> = trend_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut monthly_trend: Vec<MonthlyTrendPoint> = trend_rows
+        .into_iter()
+        .map(|(month, count, amount)| MonthlyTrendPoint {
+            month,
+            count,
+            amount,
+        })
+        .collect();
+    monthly_trend.reverse(); // oldest first
+
+    let mut type_stmt = conn.prepare(
+        &format!(
+            "SELECT COALESCE(invoice_type, '未知') as label, COUNT(*), {}
+            FROM invoices
+            GROUP BY invoice_type
+            ORDER BY COUNT(*) DESC",
+            sum_amount()
+        ),
+    )?;
+    let by_type: Vec<BreakdownItem> = type_stmt
+        .query_map([], |row| {
+            Ok(BreakdownItem {
+                label: row.get(0)?,
+                count: row.get(1)?,
+                amount: row.get(2)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut status_stmt = conn.prepare(
+        &format!(
+            "SELECT status, COUNT(*), {}
+            FROM invoices
+            GROUP BY status
+            ORDER BY COUNT(*) DESC",
+            sum_amount()
+        ),
+    )?;
+    let by_status: Vec<BreakdownItem> = status_stmt
+        .query_map([], |row| {
+            Ok(BreakdownItem {
+                label: row.get(0)?,
+                count: row.get(1)?,
+                amount: row.get(2)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut seller_stmt = conn.prepare(
+        &format!(
+            "SELECT COALESCE(seller_name, '未知') as name, COUNT(*), {}
+            FROM invoices
+            GROUP BY seller_name
+            ORDER BY COUNT(*) DESC
+            LIMIT 5",
+            sum_amount()
+        ),
+    )?;
+    let top_sellers: Vec<TopSellerItem> = seller_stmt
+        .query_map([], |row| {
+            Ok(TopSellerItem {
+                seller_name: row.get(0)?,
+                count: row.get(1)?,
+                amount: row.get(2)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(DashboardStats {
+        total_invoices,
+        total_amount,
+        currency,
+        average_confidence,
+        this_month_count,
+        this_month_amount,
+        pending_count,
+        duplicate_count,
+        monthly_trend,
+        by_type,
+        by_status,
+        top_sellers,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1163,6 +1348,100 @@ mod tests {
         .expect_err("invalid issue date should fail");
 
         assert!(matches!(err, ExtractorError::InvalidIssueDate(_)));
+    }
+
+    #[test]
+    fn dashboard_stats_empty() {
+        let mut conn = Connection::open_in_memory().expect("open sqlite");
+        run_migrations(&mut conn).expect("migrate");
+
+        let stats = get_dashboard_stats(&conn).expect("get stats");
+        assert_eq!(stats.total_invoices, 0);
+        assert_eq!(stats.total_amount, 0.0);
+        assert_eq!(stats.this_month_count, 0);
+        assert_eq!(stats.pending_count, 0);
+        assert_eq!(stats.duplicate_count, 0);
+        assert!(stats.monthly_trend.is_empty());
+        assert!(stats.by_type.is_empty());
+        assert!(stats.by_status.is_empty());
+        assert!(stats.top_sellers.is_empty());
+    }
+
+    #[test]
+    fn dashboard_stats_with_data() {
+        let mut conn = Connection::open_in_memory().expect("open sqlite");
+        run_migrations(&mut conn).expect("migrate");
+        let raw = insert_test_raw_file(&conn);
+
+        // Insert two invoices
+        save_invoice_extraction(
+            &mut conn,
+            SaveInvoiceExtractionRequest {
+                raw_file_id: raw,
+                source_page_range: None,
+                provider_name: None,
+                model: None,
+                response_json: r#"{
+                    "is_invoice": true,
+                    "invoice_type": "增值税电子普通发票",
+                    "invoice_code": "C1",
+                    "invoice_number": "N1",
+                    "issue_date": "2026-05-01",
+                    "seller": {"name": "SellerA"},
+                    "buyer": {"name": "BuyerA"},
+                    "total_amount": 100.0,
+                    "confidence": 0.9,
+                    "needs_review": false
+                }"#
+                .into(),
+            },
+        )
+        .expect("save 1");
+
+        save_invoice_extraction(
+            &mut conn,
+            SaveInvoiceExtractionRequest {
+                raw_file_id: raw,
+                source_page_range: None,
+                provider_name: None,
+                model: None,
+                response_json: r#"{
+                    "is_invoice": true,
+                    "invoice_type": "增值税专用发票",
+                    "invoice_code": "C2",
+                    "invoice_number": "N2",
+                    "issue_date": "2026-04-15",
+                    "seller": {"name": "SellerB"},
+                    "buyer": {"name": "BuyerB"},
+                    "total_amount": 200.0,
+                    "confidence": 0.8,
+                    "needs_review": false
+                }"#
+                .into(),
+            },
+        )
+        .expect("save 2");
+
+        // Set one to pending_confirmation
+        conn.execute(
+            "UPDATE invoices SET status = 'pending_confirmation' WHERE invoice_number = 'N2'",
+            [],
+        )
+        .expect("update status");
+
+        let stats = get_dashboard_stats(&conn).expect("get stats");
+        assert_eq!(stats.total_invoices, 2);
+        assert_eq!(stats.total_amount, 300.0);
+        assert_eq!(stats.pending_count, 1);
+        assert_eq!(stats.by_type.len(), 2);
+        assert_eq!(stats.by_status.len(), 2);
+        assert_eq!(stats.top_sellers.len(), 2);
+        // Monthly trend: 2 invoices in different months
+        assert_eq!(stats.monthly_trend.len(), 2);
+        assert_eq!(stats.monthly_trend[0].month, "2026-04");
+        assert_eq!(stats.monthly_trend[0].count, 1);
+        assert_eq!(stats.monthly_trend[1].month, "2026-05");
+        assert_eq!(stats.monthly_trend[1].count, 1);
     }
 
     fn insert_test_raw_file(conn: &Connection) -> i64 {

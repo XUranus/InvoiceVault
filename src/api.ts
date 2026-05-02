@@ -18,6 +18,7 @@ import type {
   WatchDirStatus,
   AddWatchDirRequest,
   UpdateWatchDirRequest,
+  DashboardStats,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -117,6 +118,10 @@ export async function updateWatchDir(
   request: UpdateWatchDirRequest,
 ): Promise<WatchDirStatus> {
   return invoke<WatchDirStatus>("update_watch_dir", { id, request });
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  return invoke<DashboardStats>("get_dashboard_stats");
 }
 
 export async function toggleWatchDir(
