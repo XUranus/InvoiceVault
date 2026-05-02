@@ -34,6 +34,7 @@ use llm::{
     LlmConnectionTestResult,
 };
 use serde::{Deserialize, Serialize};
+use std::process::Command;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
@@ -53,6 +54,54 @@ const TRAY_ID: &str = "main-tray";
 const TRAY_WORKBENCH_ID: &str = "tray-workbench";
 const TRAY_VERSION_ID: &str = "tray-version";
 const TRAY_QUIT_ID: &str = "tray-quit";
+
+#[derive(Debug, Serialize)]
+struct ExternalDependencyStatus {
+    name: String,
+    command: String,
+    available: bool,
+    version: Option<String>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn check_external_dependencies() -> Vec<ExternalDependencyStatus> {
+    vec![
+        check_external_dependency("Poppler PDF renderer", "pdftoppm", &["-h"]),
+        check_external_dependency("ImageMagick", "magick", &["-version"]),
+    ]
+}
+
+fn check_external_dependency(name: &str, command: &str, args: &[&str]) -> ExternalDependencyStatus {
+    match Command::new(command).args(args).output() {
+        Ok(output) => {
+            let combined = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let version = combined
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .map(|line| line.chars().take(160).collect::<String>());
+            ExternalDependencyStatus {
+                name: name.to_owned(),
+                command: command.to_owned(),
+                available: output.status.success() || version.is_some(),
+                version,
+                error: (!output.status.success()).then(|| output.status.to_string()),
+            }
+        }
+        Err(err) => ExternalDependencyStatus {
+            name: name.to_owned(),
+            command: command.to_owned(),
+            available: false,
+            version: None,
+            error: Some(err.to_string()),
+        },
+    }
+}
 
 #[tauri::command]
 fn app_health(state: State<'_, AppState>) -> Result<AppHealth, String> {
@@ -721,7 +770,8 @@ pub fn run() {
             delete_all_events,
             delete_all_notifications,
             export_logs,
-            cleanup_storage
+            cleanup_storage,
+            check_external_dependencies
         ])
         .run(tauri::generate_context!())
         .expect("failed to run InvoiceVault");
@@ -739,7 +789,10 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     )?;
     let quit_separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, TRAY_QUIT_ID, "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&workbench, &separator, &version, &quit_separator, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&workbench, &separator, &version, &quit_separator, &quit],
+    )?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(tauri::include_image!("../icons/tray.png"))

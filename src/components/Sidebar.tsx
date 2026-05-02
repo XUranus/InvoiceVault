@@ -1,3 +1,14 @@
+import {
+  Activity,
+  Bell,
+  Bot,
+  LayoutDashboard,
+  ReceiptText,
+  Settings,
+  Upload,
+  type LucideIcon,
+} from "lucide-react";
+
 type Page = "dashboard" | "import" | "invoices" | "agent" | "events" | "notifications" | "settings";
 
 type Props = {
@@ -10,14 +21,14 @@ type Props = {
   invoiceBadgeCount?: number;
 };
 
-const NAV_ITEMS: { page: Page; label: string; emoji: string }[] = [
-  { page: "dashboard", label: "仪表盘", emoji: "📊" },
-  { page: "import", label: "导入", emoji: "📥" },
-  { page: "invoices", label: "发票库", emoji: "🧾" },
-  { page: "agent", label: "Agent", emoji: "🤖" },
-  { page: "events", label: "事件", emoji: "📋" },
-  { page: "notifications", label: "通知", emoji: "🔔" },
-  { page: "settings", label: "设置", emoji: "⚙️" },
+const NAV_ITEMS: { page: Page; label: string; icon: LucideIcon }[] = [
+  { page: "dashboard", label: "仪表盘", icon: LayoutDashboard },
+  { page: "import", label: "导入", icon: Upload },
+  { page: "invoices", label: "发票库", icon: ReceiptText },
+  { page: "agent", label: "Agent", icon: Bot },
+  { page: "events", label: "事件", icon: Activity },
+  { page: "notifications", label: "通知", icon: Bell },
+  { page: "settings", label: "设置", icon: Settings },
 ];
 
 export function Sidebar({ activePage, onNavigate, healthReady, hasError, unreadNotificationCount, importBadgeCount, invoiceBadgeCount }: Props) {
@@ -29,13 +40,15 @@ export function Sidebar({ activePage, onNavigate, healthReady, hasError, unreadN
       </div>
 
       <nav className="sidebar-nav">
-        {NAV_ITEMS.map((item) => (
-          <button
-            key={item.page}
-            className={`nav-item ${activePage === item.page ? "nav-item-active" : ""}`}
-            onClick={() => onNavigate(item.page)}
-          >
-            <span className="nav-emoji">{item.emoji}</span>
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.page}
+              className={`nav-item ${activePage === item.page ? "nav-item-active" : ""}`}
+              onClick={() => onNavigate(item.page)}
+            >
+            <Icon className="nav-icon" size={18} strokeWidth={2} />
             <span className="nav-label">{item.label}</span>
             {item.page === "import" && importBadgeCount ? (
               <span className="nav-badge nav-badge-import">
@@ -49,8 +62,9 @@ export function Sidebar({ activePage, onNavigate, healthReady, hasError, unreadN
             {item.page === "notifications" && unreadNotificationCount ? (
               <span className="nav-badge">{unreadNotificationCount}</span>
             ) : null}
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </nav>
 
       <div className="sidebar-footer">

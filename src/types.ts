@@ -392,3 +392,11 @@ export type CleanupStorageResult = {
   db_records_removed: number;
   bytes_freed: number;
 };
+
+export type ExternalDependencyStatus = {
+  name: string;
+  command: string;
+  available: boolean;
+  version: string | null;
+  error: string | null;
+};

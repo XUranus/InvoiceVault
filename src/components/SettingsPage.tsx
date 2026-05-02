@@ -5,6 +5,7 @@ import type {
   ChromaConfig,
   EmbeddingConfig,
   EmbeddingTestResult,
+  ExternalDependencyStatus,
 } from "../types";
 import {
   testLlmConnection,
@@ -18,6 +19,7 @@ import {
   setRecognitionConcurrency,
   exportLogs,
   cleanupStorage,
+  checkExternalDependencies,
 } from "../api";
 import type { ExportLogsResult, CleanupStorageResult } from "../types";
 import { WatchDirManager } from "./WatchDirManager";
@@ -79,6 +81,8 @@ export function SettingsPage({
   const [cleaning, setCleaning] = React.useState(false);
   const [cleanupResult, setCleanupResult] = React.useState<CleanupStorageResult | null>(null);
   const [cleanupError, setCleanupError] = React.useState<string | null>(null);
+  const [dependencyStatuses, setDependencyStatuses] = React.useState<ExternalDependencyStatus[]>([]);
+  const [checkingDependencies, setCheckingDependencies] = React.useState(false);
 
   // Gate all auto-save effects until async config load completes.
   // Without this, the initial render fires auto-save with default state
@@ -116,6 +120,22 @@ export function SettingsPage({
     });
     return () => { cancelled = true; };
   }, []);
+
+  const refreshExternalDependencies = React.useCallback(async () => {
+    setCheckingDependencies(true);
+    try {
+      const result = await checkExternalDependencies();
+      setDependencyStatuses(result);
+    } catch {
+      setDependencyStatuses([]);
+    } finally {
+      setCheckingDependencies(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    refreshExternalDependencies();
+  }, [refreshExternalDependencies]);
 
   // Auto-save LLM config on change
   React.useEffect(() => {
@@ -405,6 +425,49 @@ export function SettingsPage({
               setRecognitionConcurrency(v).catch(() => {});
             }}
           />
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-header">
+          <h3>外部依赖</h3>
+          <button
+            className="btn-small"
+            type="button"
+            onClick={refreshExternalDependencies}
+            disabled={checkingDependencies}
+          >
+            {checkingDependencies ? "检测中..." : "重新检测"}
+          </button>
+        </div>
+        <p className="section-desc">
+          PDF 渲染和图片标准化依赖本机命令。Windows 下需要确保 Poppler 和 ImageMagick 已安装并加入 PATH。
+        </p>
+        <div className="dependency-list">
+          {dependencyStatuses.map((dependency) => (
+            <div className="dependency-card" key={dependency.command}>
+              <div className="dependency-main">
+                <span
+                  className={`dependency-dot ${dependency.available ? "dependency-dot-ok" : "dependency-dot-error"}`}
+                />
+                <div>
+                  <strong>{dependency.name}</strong>
+                  <span className="dependency-command mono">{dependency.command}</span>
+                </div>
+              </div>
+              <div className="dependency-detail">
+                <span className={`mini-tag ${dependency.available ? "tag-recognized" : "tag-flagged"}`}>
+                  {dependency.available ? "可用" : "未找到"}
+                </span>
+                <span className="dependency-version">
+                  {dependency.version ?? dependency.error ?? "未返回版本信息"}
+                </span>
+              </div>
+            </div>
+          ))}
+          {!checkingDependencies && dependencyStatuses.length === 0 ? (
+            <p className="muted">暂未获取依赖状态。</p>
+          ) : null}
         </div>
       </div>
 

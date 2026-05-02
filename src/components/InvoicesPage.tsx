@@ -44,6 +44,10 @@ const BATCH_CATEGORY_OPTIONS = [
 
 export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey, onInvoiceDetailOpened }: Props) {
   const [view, setView] = React.useState<"list" | "detail">("list");
+  const [viewMode, setViewMode] = React.useState<"cards" | "table">(() => {
+    const stored = localStorage.getItem("invoiceViewMode");
+    return stored === "table" ? "table" : "cards";
+  });
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
   const [searchResult, setSearchResult] = React.useState<{
     invoices: Invoice[];
@@ -149,11 +153,20 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
   const totalCount = searchResult?.total_count ?? invoices.length;
   const currentPage = searchResult?.page ?? 1;
   const totalPages = searchResult?.total_pages ?? 1;
+  const hasSemanticResults =
+    searchMode === "semantic" && semanticResults !== null && semanticInvoices !== null;
+  const activeInvoices = hasSemanticResults && semanticInvoices ? semanticInvoices : displayInvoices;
+  const activeSimilarities = hasSemanticResults && semanticResults ? semanticResults : null;
+
+  const handleViewModeChange = (mode: "cards" | "table") => {
+    setViewMode(mode);
+    localStorage.setItem("invoiceViewMode", mode);
+  };
 
   // Clear selection when invoices change
   React.useEffect(() => {
     setSelected(new Set());
-  }, [displayInvoices]);
+  }, [displayInvoices, semanticInvoices, searchMode]);
 
   const toggleSelect = (id: number) => {
     setSelected((prev) => {
@@ -168,10 +181,10 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
   };
 
   const toggleSelectAll = () => {
-    if (selected.size === displayInvoices.length) {
+    if (selected.size === activeInvoices.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(displayInvoices.map((inv) => inv.id)));
+      setSelected(new Set(activeInvoices.map((inv) => inv.id)));
     }
   };
 
@@ -263,6 +276,22 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
         <h2 className="page-title">发票库</h2>
         <div className="page-header-actions">
           <span className="count-badge">{totalCount} 张</span>
+          <div className="view-toggle" aria-label="发票库视图切换">
+            <button
+              className={`view-toggle-btn ${viewMode === "cards" ? "active" : ""}`}
+              onClick={() => handleViewModeChange("cards")}
+              type="button"
+            >
+              卡片
+            </button>
+            <button
+              className={`view-toggle-btn ${viewMode === "table" ? "active" : ""}`}
+              onClick={() => handleViewModeChange("table")}
+              type="button"
+            >
+              表格
+            </button>
+          </div>
           <ExportButton
             onError={showError}
             onRefresh={onInvoicesChanged}
@@ -365,125 +394,44 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
       )}
 
       {/* Select all */}
-      {displayInvoices.length > 0 && (
+      {activeInvoices.length > 0 && (
         <label className="select-all-row">
           <input
             type="checkbox"
-            checked={selected.size === displayInvoices.length && displayInvoices.length > 0}
+            checked={selected.size === activeInvoices.length && activeInvoices.length > 0}
             onChange={toggleSelectAll}
           />
           <span>全选</span>
         </label>
       )}
 
-      {searchMode === "semantic" && semanticResults !== null && semanticInvoices !== null ? (
-        semanticInvoices.length === 0 ? (
+      {hasSemanticResults && activeInvoices.length === 0 ? (
           <p className="muted" style={{ marginTop: 16 }}>未找到语义相似结果。</p>
-        ) : (
-          <div className="invoice-cards" style={{ marginTop: 16 }}>
-            {semanticInvoices.map((invoice, i) => (
-              <article
-                className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""}`}
-                key={invoice.id}
-              >
-                <label className="invoice-card-check" onClick={(e) => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(invoice.id)}
-                    onChange={() => toggleSelect(invoice.id)}
-                  />
-                </label>
-                <div
-                  className="invoice-card-body"
-                  onClick={() => handleSelectInvoice(invoice.id)}
-                >
-                  <div className="invoice-card-main">
-                    <strong>
-                      {invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}
-                    </strong>
-                    <span className="invoice-card-amount">
-                      {invoice.total_amount ? `¥ ${invoice.total_amount}` : "金额未识别"}
-                    </span>
-                  </div>
-                  <div className="invoice-card-meta">
-                    <span>{invoice.issue_date ?? "日期未识别"}</span>
-                    <span>
-                      {invoice.invoice_number
-                        ? `No. ${invoice.invoice_number}`
-                        : "号码待确认"}
-                    </span>
-                    <span className="similarity-badge">
-                      相似度: {(semanticResults[i]?.similarity * 100).toFixed(0)}%
-                    </span>
-                  </div>
-                </div>
-                <div className="invoice-card-tags">
-                  <span className={`mini-tag tag-${invoice.status}`}>
-                    {statusLabel(invoice.status)}
-                  </span>
-                </div>
-              </article>
-            ))}
-          </div>
-        )
       ) : loading || semanticLoading ? (
         <p className="muted">查询中...</p>
-      ) : displayInvoices.length === 0 ? (
+      ) : activeInvoices.length === 0 ? (
         <div className="empty-state">
           <span className="empty-icon">🧾</span>
           <p>暂无发票记录</p>
           <span className="muted">导入发票文件并点击"识别"后，结构化数据将出现在这里</span>
         </div>
+      ) : viewMode === "table" ? (
+        <InvoiceTableView
+          invoices={activeInvoices}
+          similarities={activeSimilarities}
+          selected={selected}
+          onToggleSelect={toggleSelect}
+          onSelectInvoice={handleSelectInvoice}
+          onSort={hasSemanticResults ? undefined : handleSort}
+        />
       ) : (
-        <div className="invoice-cards">
-          {displayInvoices.map((invoice) => (
-            <article
-              className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""}`}
-              key={invoice.id}
-            >
-              <label className="invoice-card-check" onClick={(e) => e.stopPropagation()}>
-                <input
-                  type="checkbox"
-                  checked={selected.has(invoice.id)}
-                  onChange={() => toggleSelect(invoice.id)}
-                />
-              </label>
-              <div
-                className="invoice-card-body"
-                onClick={() => handleSelectInvoice(invoice.id)}
-              >
-                <div className="invoice-card-main">
-                  <strong>
-                    {invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}
-                  </strong>
-                  <span className="invoice-card-amount">
-                    {invoice.total_amount ? `¥ ${invoice.total_amount}` : "金额未识别"}
-                  </span>
-                </div>
-                <div className="invoice-card-meta">
-                  <span>{invoice.issue_date ?? "日期未识别"}</span>
-                  <span>
-                    {invoice.invoice_number
-                      ? `No. ${invoice.invoice_number}`
-                      : "号码待确认"}
-                  </span>
-                  {invoice.source_page_range ? (
-                    <span>第 {invoice.source_page_range} 页</span>
-                  ) : null}
-                </div>
-              </div>
-              <div className="invoice-card-tags">
-                <span className={`mini-tag tag-${invoice.status}`}>
-                  {statusLabel(invoice.status)}
-                </span>
-                {invoice.duplicate_status !== "unique" &&
-                invoice.duplicate_status !== "unknown" ? (
-                  <span className="mini-tag tag-warn">{dupLabel(invoice.duplicate_status)}</span>
-                ) : null}
-              </div>
-            </article>
-          ))}
-        </div>
+        <InvoiceCardView
+          invoices={activeInvoices}
+          similarities={activeSimilarities}
+          selected={selected}
+          onToggleSelect={toggleSelect}
+          onSelectInvoice={handleSelectInvoice}
+        />
       )}
 
       {/* Delete confirmation dialog */}
@@ -491,7 +439,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
         open={deleteDialogOpen}
         title="确认删除"
         message={`确定要删除选中的 ${selected.size} 张发票吗？此操作不可撤销。`}
-        detail={getSelectedSummary(displayInvoices, selected)}
+        detail={getSelectedSummary(activeInvoices, selected)}
         confirmLabel="删除"
         danger
         loading={batchDeleting}
@@ -510,6 +458,177 @@ function statusLabel(status: string) {
     flagged: "已标记",
   };
   return labels[status] ?? status;
+}
+
+function InvoiceCardView({
+  invoices,
+  similarities,
+  selected,
+  onToggleSelect,
+  onSelectInvoice,
+}: {
+  invoices: Invoice[];
+  similarities: SimilarResult[] | null;
+  selected: Set<number>;
+  onToggleSelect: (id: number) => void;
+  onSelectInvoice: (id: number) => void;
+}) {
+  return (
+    <div className="invoice-cards">
+      {invoices.map((invoice, i) => (
+        <article
+          className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""}`}
+          key={invoice.id}
+        >
+          <label className="invoice-card-check" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={selected.has(invoice.id)}
+              onChange={() => onToggleSelect(invoice.id)}
+            />
+          </label>
+          <div
+            className="invoice-card-body"
+            onClick={() => onSelectInvoice(invoice.id)}
+          >
+            <div className="invoice-card-main">
+              <strong>
+                {invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}
+              </strong>
+              <span className="invoice-card-amount">
+                {formatInvoiceAmount(invoice)}
+              </span>
+            </div>
+            <div className="invoice-card-meta">
+              <span>{invoice.issue_date ?? "日期未识别"}</span>
+              <span>
+                {invoice.invoice_number
+                  ? `No. ${invoice.invoice_number}`
+                  : "号码待确认"}
+              </span>
+              {invoice.source_page_range ? (
+                <span>第 {invoice.source_page_range} 页</span>
+              ) : null}
+              {similarities ? (
+                <span className="similarity-badge">
+                  相似度: {formatSimilarity(similarities[i]?.similarity)}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <div className="invoice-card-tags">
+            <span className={`mini-tag tag-${invoice.status}`}>
+              {statusLabel(invoice.status)}
+            </span>
+            {invoice.duplicate_status !== "unique" &&
+            invoice.duplicate_status !== "unknown" ? (
+              <span className="mini-tag tag-warn">{dupLabel(invoice.duplicate_status)}</span>
+            ) : null}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function InvoiceTableView({
+  invoices,
+  similarities,
+  selected,
+  onToggleSelect,
+  onSelectInvoice,
+  onSort,
+}: {
+  invoices: Invoice[];
+  similarities: SimilarResult[] | null;
+  selected: Set<number>;
+  onToggleSelect: (id: number) => void;
+  onSelectInvoice: (id: number) => void;
+  onSort?: (sortBy: string) => void;
+}) {
+  const sortableHeader = (label: string, sortBy: string) => (
+    <button
+      className="invoice-table-sort"
+      type="button"
+      onClick={() => onSort?.(sortBy)}
+      disabled={!onSort}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="invoice-table-wrap">
+      <table className="invoice-table">
+        <thead>
+          <tr>
+            <th className="invoice-table-check-col" aria-label="选择" />
+            <th>{sortableHeader("供应商", "seller_name")}</th>
+            <th>{sortableHeader("发票号码", "invoice_number")}</th>
+            <th>{sortableHeader("日期", "issue_date")}</th>
+            <th>{sortableHeader("金额", "total_amount")}</th>
+            <th>类别</th>
+            <th>状态</th>
+            <th>重复</th>
+            {similarities ? <th>相似度</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {invoices.map((invoice, i) => (
+            <tr
+              key={invoice.id}
+              className={selected.has(invoice.id) ? "invoice-table-row-selected" : ""}
+              onClick={() => onSelectInvoice(invoice.id)}
+            >
+              <td onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(invoice.id)}
+                  onChange={() => onToggleSelect(invoice.id)}
+                />
+              </td>
+              <td>
+                <strong>{invoice.seller_name ?? "未命名发票"}</strong>
+                <span className="invoice-table-subtext">{invoice.invoice_type ?? "类型未识别"}</span>
+              </td>
+              <td>{invoice.invoice_number ?? "待确认"}</td>
+              <td>{invoice.issue_date ?? "未识别"}</td>
+              <td className="invoice-table-amount">{formatInvoiceAmount(invoice)}</td>
+              <td>{invoice.category ?? "未分类"}</td>
+              <td>
+                <span className={`mini-tag tag-${invoice.status}`}>
+                  {statusLabel(invoice.status)}
+                </span>
+              </td>
+              <td>
+                {invoice.duplicate_status !== "unique" &&
+                invoice.duplicate_status !== "unknown" ? (
+                  <span className="mini-tag tag-warn">{dupLabel(invoice.duplicate_status)}</span>
+                ) : (
+                  <span className="muted">-</span>
+                )}
+              </td>
+              {similarities ? (
+                <td className="similarity-badge">
+                  {formatSimilarity(similarities[i]?.similarity)}
+                </td>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatInvoiceAmount(invoice: Invoice): string {
+  if (!invoice.total_amount) return "金额未识别";
+  return `${invoice.currency || "¥"} ${invoice.total_amount}`;
+}
+
+function formatSimilarity(value: number | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return `${(value * 100).toFixed(0)}%`;
 }
 
 function dupLabel(status: string) {

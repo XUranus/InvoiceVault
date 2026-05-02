@@ -32,6 +32,7 @@ import type {
   RecognitionQueueStatus,
   ExportLogsResult,
   CleanupStorageResult,
+  ExternalDependencyStatus,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -319,4 +320,8 @@ export async function exportLogs(outputPath: string): Promise<ExportLogsResult> 
 
 export async function cleanupStorage(): Promise<CleanupStorageResult> {
   return invoke<CleanupStorageResult>("cleanup_storage");
+}
+
+export async function checkExternalDependencies(): Promise<ExternalDependencyStatus[]> {
+  return invoke<ExternalDependencyStatus[]>("check_external_dependencies");
 }
