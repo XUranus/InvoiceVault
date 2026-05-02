@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use tracing::{error, warn};
 
 use crate::llm::{headers, LlmError, LlmProviderConfig};
 
@@ -476,6 +477,7 @@ async fn send_chat_request(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
+        error!("Agent: LLM HTTP {status}: {}", crate::llm::truncate(&body, 200));
         return Err(LlmError::ProviderStatus {
             status: status.as_u16(),
             body: crate::llm::truncate(&body, 500),
@@ -785,6 +787,7 @@ async fn run_agent_loop_from_inner(
                         });
                     }
                     ToolExecResult::Error { message } => {
+                        error!("Agent tool {} error: {message}", tc.function.name);
                         let tool_msg = LlmMessage {
                             role: "tool".to_owned(),
                             content: Some(format!("Error: {message}")),
@@ -818,6 +821,7 @@ async fn run_agent_loop_from_inner(
         }
     }
 
+    warn!("Agent session {session_id}: too many iterations");
     Err(AgentError::TooManyIterations)
 }
 

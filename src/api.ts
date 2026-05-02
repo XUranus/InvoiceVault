@@ -30,6 +30,8 @@ import type {
   EventListResult,
   NotificationRow,
   RecognitionQueueStatus,
+  ExportLogsResult,
+  CleanupStorageResult,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -309,4 +311,12 @@ export async function deleteAllEvents(): Promise<number> {
 
 export async function deleteAllNotifications(): Promise<number> {
   return invoke<number>("delete_all_notifications");
+}
+
+export async function exportLogs(outputPath: string): Promise<ExportLogsResult> {
+  return invoke<ExportLogsResult>("export_logs", { outputPath });
+}
+
+export async function cleanupStorage(): Promise<CleanupStorageResult> {
+  return invoke<CleanupStorageResult>("cleanup_storage");
 }

@@ -1,9 +1,12 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
+
+use tracing::{error, info, warn};
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -82,6 +85,7 @@ pub struct AppPaths {
     pub database_path: PathBuf,
     pub raw_dir: PathBuf,
     pub thumbnails_dir: PathBuf,
+    pub logs_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -104,6 +108,19 @@ pub struct RecognitionQueueStatus {
     pub pending: i64,
     pub running: i64,
     pub max_concurrent: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportLogsResult {
+    pub file_path: String,
+    pub byte_size: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CleanupStorageResult {
+    pub files_removed: usize,
+    pub db_records_removed: usize,
+    pub bytes_freed: u64,
 }
 
 pub struct AppState {
@@ -162,7 +179,7 @@ impl AppState {
             app.clone(),
         )?;
 
-        Ok(Self {
+        let state = Self {
             paths,
             db,
             watcher_manager,
@@ -172,7 +189,10 @@ impl AppState {
             recognition_pending: Arc::new(Mutex::new(0)),
             recognition_running: Arc::new(Mutex::new(0)),
             recognition_max_concurrent: Arc::new(Mutex::new(recognition_max_concurrent)),
-        })
+        };
+
+        info!("AppState initialized, concurrency={}", recognition_max_concurrent);
+        Ok(state)
     }
 
     pub fn health(&self) -> Result<AppHealth, AppError> {
@@ -193,11 +213,17 @@ impl AppState {
     pub fn import_files(&self, paths: Vec<String>) -> Result<Vec<ImportJobSummary>, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let source_paths: Vec<String> = paths.iter().map(|p| p.clone()).collect();
+        info!("Importing {} files", paths.len());
         let jobs = import_files(&mut db, &self.paths.raw_dir, paths)?;
         let total = jobs.len();
         let success = jobs.iter().filter(|j| j.status == "completed").count();
         let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
         let failed = jobs.iter().filter(|j| j.status == "failed").count();
+        if failed > 0 {
+            warn!("Import completed with {failed} failures, {success} success, {dups} duplicates");
+        } else {
+            info!("Import completed: {success} success, {dups} duplicates");
+        }
         let _ = event::record_import_event(&db, total, success, dups, failed, &source_paths);
         let _ = event::create_notification(
             &db,
@@ -342,6 +368,7 @@ impl AppState {
             }
 
             if let Err(e) = result {
+                error!("Auto recognition failed: {e}");
                 if let Ok(db) = db.lock() {
                     let _ = event::notify_error(&db, "自动识别失败", &e);
                 }
@@ -600,11 +627,13 @@ impl AppState {
     pub fn set_llm_config(&self, config: LlmProviderConfig) -> Result<(), AppError> {
         let mut cfg = self.llm_config.lock().expect("lock");
         *cfg = Some(config.clone());
-        // Persist to file
         let path = self.paths.app_data_dir.join("llm_config.json");
         if let Ok(json) = serde_json::to_string_pretty(&config) {
-            let _ = std::fs::write(&path, json);
+            if let Err(e) = std::fs::write(&path, json) {
+                error!("Failed to persist LLM config: {e}");
+            }
         }
+        info!("LLM config updated");
         Ok(())
     }
 
@@ -801,12 +830,201 @@ impl AppState {
             let mut curr = self.recognition_max_concurrent.lock().expect("lock");
             *curr = max;
         }
-        // Persist
         let path = self.paths.app_data_dir.join("recognition_config.json");
         if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({ "max_concurrent": max })) {
-            let _ = std::fs::write(&path, json);
+            if let Err(e) = std::fs::write(&path, json) {
+                error!("Failed to persist recognition config: {e}");
+            }
         }
+        info!("Recognition concurrency set to {max}");
         Ok(())
+    }
+
+    pub fn export_logs(&self, output_path: &str) -> Result<ExportLogsResult, AppError> {
+        info!("Exporting logs to {}", output_path);
+        let output_path = Path::new(output_path);
+        let file = std::fs::File::create(output_path)?;
+        let mut zip_writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        // Add database file
+        if self.paths.database_path.exists() {
+            zip_writer
+                .start_file("receiptier.sqlite3", options)
+                .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            let db_bytes = std::fs::read(&self.paths.database_path)?;
+            zip_writer
+                .write_all(&db_bytes)
+                .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        }
+
+        // Add config files
+        for config_name in &[
+            "llm_config.json",
+            "embedding_config.json",
+            "recognition_config.json",
+        ] {
+            let config_path = self.paths.app_data_dir.join(config_name);
+            if config_path.exists() {
+                zip_writer
+                    .start_file(*config_name, options)
+                    .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+                let bytes = std::fs::read(&config_path)?;
+                zip_writer
+                    .write_all(&bytes)
+                    .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            }
+        }
+
+        // Add log files
+        if self.paths.logs_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&self.paths.logs_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                            zip_writer
+                                .start_file(format!("logs/{}", name), options)
+                                .map_err(|e| {
+                                    AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
+                                })?;
+                            let bytes = std::fs::read(&path)?;
+                            zip_writer.write_all(&bytes).map_err(|e| {
+                                AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
+                            })?;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add system info
+        let health = self.health()?;
+        let sys_info = format!(
+            "Receiptier System Info\n\
+             ======================\n\
+             App Data Dir: {}\n\
+             Database Path: {}\n\
+             Migration Version: {}\n",
+            health.app_data_dir, health.database_path, health.migration_version,
+        );
+        zip_writer
+            .start_file("system_info.txt", options)
+            .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        zip_writer
+            .write_all(sys_info.as_bytes())
+            .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+
+        let finished = zip_writer
+            .finish()
+            .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        let metadata = finished.metadata()?;
+        let file_size = metadata.len();
+
+        info!("Log export complete: {} bytes", file_size);
+
+        // Record event
+        let db = self.db.lock().expect("db lock");
+        let _ = event::create_event(
+            &db,
+            "export",
+            "导出日志",
+            &format!("日志已导出至 {}，大小 {} 字节", output_path.display(), file_size),
+            "completed",
+            None,
+            None,
+            None,
+        );
+
+        Ok(ExportLogsResult {
+            file_path: output_path.to_string_lossy().into_owned(),
+            byte_size: file_size,
+        })
+    }
+
+    pub fn cleanup_storage(&self) -> Result<CleanupStorageResult, AppError> {
+        info!("Starting storage cleanup");
+        let db = self.db.lock().expect("db lock");
+
+        // Collect all known storage paths from raw_files table
+        let mut stmt = db.prepare("SELECT id, storage_path FROM raw_files")?;
+        let db_records: Vec<(i64, PathBuf)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, PathBuf::from(row.get::<_, String>(1)?)))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+
+        let db_paths: std::collections::HashSet<PathBuf> =
+            db_records.iter().map(|(_, p)| p.clone()).collect();
+
+        // Scan raw_dir for all files
+        let mut disk_files: Vec<PathBuf> = Vec::new();
+        walk_dir(&self.paths.raw_dir, &mut disk_files)?;
+
+        // 1. Remove files on disk not in DB (orphan files)
+        let mut files_removed = 0_usize;
+        let mut bytes_freed = 0_u64;
+        for disk_file in &disk_files {
+            if !db_paths.contains(disk_file) {
+                if let Ok(meta) = std::fs::metadata(disk_file) {
+                    bytes_freed += meta.len();
+                }
+                if std::fs::remove_file(disk_file).is_ok() {
+                    files_removed += 1;
+                }
+            }
+        }
+
+        // 2. Remove DB records where file doesn't exist (orphan records)
+        let mut db_records_removed = 0_usize;
+        let mut orphan_ids: Vec<i64> = Vec::new();
+        for (id, storage_path) in &db_records {
+            if !storage_path.exists() {
+                orphan_ids.push(*id);
+            }
+        }
+
+        for raw_id in &orphan_ids {
+            // Delete dependent records and the raw_file itself in order
+            let _ = db.execute("DELETE FROM import_jobs WHERE raw_file_id = ?1", [*raw_id]);
+            let _ = db.execute("DELETE FROM extraction_runs WHERE raw_file_id = ?1", [*raw_id]);
+            let _ = db.execute("DELETE FROM invoices WHERE raw_file_id = ?1", [*raw_id]);
+            let _ = db.execute("DELETE FROM raw_files WHERE id = ?1", [*raw_id]);
+            db_records_removed += 1;
+        }
+
+        // Clean up empty year/month directories under raw_dir
+        remove_empty_dirs(&self.paths.raw_dir);
+
+        info!(
+            "Storage cleanup done: {} files removed, {} db records removed, {} bytes freed",
+            files_removed, db_records_removed, bytes_freed,
+        );
+
+        let result = CleanupStorageResult {
+            files_removed,
+            db_records_removed,
+            bytes_freed,
+        };
+
+        // Record event
+        let _ = event::create_event(
+            &db,
+            "agent",
+            "存储清理",
+            &format!(
+                "清理了 {} 个失效文件（{} 字节），{} 条失效数据库记录",
+                files_removed, bytes_freed, db_records_removed,
+            ),
+            "completed",
+            None,
+            None,
+            None,
+        );
+
+        Ok(result)
     }
 
     pub fn raw_file_has_invoices(&self, raw_file_id: i64) -> Result<bool, AppError> {
@@ -1069,19 +1287,50 @@ fn make_tool_executor(
 fn create_app_paths(app_data_dir: &Path) -> Result<AppPaths, AppError> {
     let raw_dir = app_data_dir.join("raw");
     let thumbnails_dir = app_data_dir.join("thumbnails");
+    let logs_dir = app_data_dir.join("logs");
     fs::create_dir_all(&raw_dir)?;
     fs::create_dir_all(&thumbnails_dir)?;
+    fs::create_dir_all(&logs_dir)?;
 
     Ok(AppPaths {
         app_data_dir: app_data_dir.to_path_buf(),
         database_path: app_data_dir.join("receiptier.sqlite3"),
         raw_dir,
         thumbnails_dir,
+        logs_dir,
     })
 }
 
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            files.push(path);
+        } else if path.is_dir() {
+            walk_dir(&path, files)?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_empty_dirs(dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                remove_empty_dirs(&path);
+                let _ = std::fs::remove_dir(&path);
+            }
+        }
+    }
 }
 
 impl From<rusqlite::Error> for AppError {

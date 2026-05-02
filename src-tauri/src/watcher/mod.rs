@@ -8,6 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use tracing::{error, info};
+
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -559,6 +561,7 @@ fn process_pending(
     }
 
     let count = path_strs.len();
+    info!("Watcher import: {count} files from watch_dir {watch_id}");
     let (imported, raw_file_ids) = match db.lock() {
         Ok(mut conn) => {
             let jobs = import_files(&mut conn, raw_dir, path_strs).unwrap_or_default();
@@ -627,10 +630,16 @@ async fn recognize_raw_file_async(
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             ) {
                 Ok(r) => r,
-                Err(_) => return,
+                Err(e) => {
+                    error!("Watcher: raw_file {raw_file_id} not found: {e}");
+                    return;
+                }
             }
         }
-        Err(_) => return,
+        Err(e) => {
+            error!("Watcher: failed to lock db for recognition: {e}");
+            return;
+        }
     };
 
     let storage_path = std::path::PathBuf::from(&storage_path);
@@ -649,7 +658,10 @@ async fn recognize_raw_file_async(
                         )
                     })
                     .collect(),
-                Err(_) => return,
+                Err(e) => {
+                    error!("Watcher: PDF render failed for raw_file {raw_file_id}: {e}");
+                    return;
+                }
             }
         } else {
             vec![(None, storage_path, mime_type)]
@@ -658,7 +670,10 @@ async fn recognize_raw_file_async(
     for (page_range, image_path, mime) in recognition_inputs {
         let recognition = match recognize_invoice_image(config.clone(), &image_path, &mime).await {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(e) => {
+                error!("Watcher: recognition failed for raw_file {raw_file_id}: {e}");
+                continue;
+            }
         };
 
         let invoice = match db.lock() {

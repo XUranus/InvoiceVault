@@ -5,6 +5,7 @@ use std::{
 };
 
 use chrono::{Datelike, Local};
+use tracing::error;
 use md5::Md5;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -48,7 +49,8 @@ pub fn inspect_file(source_path: &Path) -> Result<RawFileInput, RawStoreError> {
         .ok_or_else(|| RawStoreError::MissingFileName(source_path.to_path_buf()))?
         .to_owned();
 
-    let (sha256, md5, byte_size) = hash_file(source_path)?;
+    let (sha256, md5, byte_size) = hash_file(source_path)
+        .inspect_err(|e| error!("File hash failed for {}: {e}", source_path.display()))?;
     let mime_type = mime_guess::from_ext(&extension)
         .first_or_octet_stream()
         .essence_str()

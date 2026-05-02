@@ -4,6 +4,7 @@ use std::{
 };
 
 use rusqlite::{params, Connection, OptionalExtension};
+use tracing::error;
 use serde::{Deserialize, Serialize};
 
 use crate::raw_store::{inspect_file, store_original_file, RawFileInput, RawStoreError};
@@ -145,6 +146,7 @@ fn import_one(
             load_import_job(conn, job_id)
         }
         Err(err) => {
+            error!("Import failed for {source_path_text}: {err}");
             let status = "failed";
             let error_message = err.to_string();
             let job_id =

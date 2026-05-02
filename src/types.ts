@@ -381,3 +381,14 @@ export type RecognitionQueueStatus = {
   running: number;
   max_concurrent: number;
 };
+
+export type ExportLogsResult = {
+  file_path: string;
+  byte_size: number;
+};
+
+export type CleanupStorageResult = {
+  files_removed: number;
+  db_records_removed: number;
+  bytes_freed: number;
+};

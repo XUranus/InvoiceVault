@@ -16,8 +16,12 @@ import {
   setLlmConfig,
   getRecognitionQueueStatus,
   setRecognitionConcurrency,
+  exportLogs,
+  cleanupStorage,
 } from "../api";
+import type { ExportLogsResult, CleanupStorageResult } from "../types";
 import { WatchDirManager } from "./WatchDirManager";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
   health: AppHealth | null;
@@ -66,6 +70,15 @@ export function SettingsPage({
   const [embTestError, setEmbTestError] = React.useState<string | null>(null);
 
   const [recognitionConcurrency, setRecognitionConcurrencyState] = React.useState(3);
+
+  const [exporting, setExporting] = React.useState(false);
+  const [exportResult, setExportResult] = React.useState<ExportLogsResult | null>(null);
+  const [exportError, setExportError] = React.useState<string | null>(null);
+
+  const [cleanupDialogOpen, setCleanupDialogOpen] = React.useState(false);
+  const [cleaning, setCleaning] = React.useState(false);
+  const [cleanupResult, setCleanupResult] = React.useState<CleanupStorageResult | null>(null);
+  const [cleanupError, setCleanupError] = React.useState<string | null>(null);
 
   // Gate all auto-save effects until async config load completes.
   // Without this, the initial render fires auto-save with default state
@@ -179,6 +192,43 @@ export function SettingsPage({
       setEmbTestError(String(err));
     } finally {
       setIsTestingEmb(false);
+    }
+  };
+
+  const handleExportLogs = async () => {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const filePath = await save({
+        title: "选择导出位置",
+        defaultPath: "receiptier-logs.zip",
+        filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }],
+      });
+      if (!filePath) return;
+
+      setExporting(true);
+      setExportResult(null);
+      setExportError(null);
+      const result = await exportLogs(filePath);
+      setExportResult(result);
+    } catch (err) {
+      setExportError(String(err));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleCleanupStorage = async () => {
+    setCleanupDialogOpen(false);
+    setCleaning(true);
+    setCleanupResult(null);
+    setCleanupError(null);
+    try {
+      const result = await cleanupStorage();
+      setCleanupResult(result);
+    } catch (err) {
+      setCleanupError(String(err));
+    } finally {
+      setCleaning(false);
     }
   };
 
@@ -398,7 +448,86 @@ export function SettingsPage({
         </div>
       ) : null}
 
+      <div className="section">
+        <h3>数据管理</h3>
+
+        <div className="section-sub">
+          <h4>导出日志</h4>
+          <p className="section-desc">
+            将数据库、配置文件及系统信息打包为 ZIP 压缩包用于问题诊断。
+          </p>
+          <button className="btn-primary" onClick={handleExportLogs} disabled={exporting}>
+            {exporting ? "导出中..." : "导出日志"}
+          </button>
+          {exportResult ? (
+            <div className="test-result" style={{ marginTop: 12 }}>
+              <div className="test-result-row">
+                <span>文件路径</span>
+                <strong className="mono" style={{ wordBreak: "break-all" }}>{exportResult.file_path}</strong>
+              </div>
+              <div className="test-result-row">
+                <span>文件大小</span>
+                <strong>{formatFileSize(exportResult.byte_size)}</strong>
+              </div>
+            </div>
+          ) : null}
+          {exportError ? (
+            <div className="alert alert-error" style={{ marginTop: 12 }}>{exportError}</div>
+          ) : null}
+        </div>
+
+        <div className="section-sub" style={{ marginTop: 20 }}>
+          <h4>存储清理</h4>
+          <p className="section-desc">
+            扫描文件归档目录，清理未被数据库引用的失效文件及无效数据库记录。
+          </p>
+          <button
+            className="btn-danger"
+            onClick={() => setCleanupDialogOpen(true)}
+            disabled={cleaning}
+          >
+            {cleaning ? "清理中..." : "存储清理"}
+          </button>
+          {cleanupResult ? (
+            <div className="test-result" style={{ marginTop: 12 }}>
+              <div className="test-result-row">
+                <span>清理文件数</span>
+                <strong>{cleanupResult.files_removed}</strong>
+              </div>
+              <div className="test-result-row">
+                <span>清理记录数</span>
+                <strong>{cleanupResult.db_records_removed}</strong>
+              </div>
+              <div className="test-result-row">
+                <span>释放空间</span>
+                <strong>{formatFileSize(cleanupResult.bytes_freed)}</strong>
+              </div>
+            </div>
+          ) : null}
+          {cleanupError ? (
+            <div className="alert alert-error" style={{ marginTop: 12 }}>{cleanupError}</div>
+          ) : null}
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={cleanupDialogOpen}
+        title="存储清理"
+        message="将扫描文件归档目录并清理失效文件及无效数据库记录。清理操作不可撤销，是否继续？"
+        confirmLabel="开始清理"
+        danger
+        loading={cleaning}
+        onConfirm={handleCleanupStorage}
+        onCancel={() => setCleanupDialogOpen(false)}
+      />
+
       <WatchDirManager />
     </div>
   );
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

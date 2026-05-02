@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingConfig {
@@ -76,11 +77,15 @@ pub async fn generate_embedding(
     let resp = req
         .send()
         .await
-        .map_err(|e| EmbeddingError::Connection(e.to_string()))?;
+        .map_err(|e| {
+            error!("Embedding API connection error: {e}");
+            EmbeddingError::Connection(e.to_string())
+        })?;
 
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
         let text = resp.text().await.unwrap_or_default();
+        error!("Embedding API HTTP {status}: {text}");
         return Err(EmbeddingError::Api(format!("HTTP {status}: {text}")));
     }
 

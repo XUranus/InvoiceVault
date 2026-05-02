@@ -5,6 +5,7 @@ use std::{
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use tracing::{error, info};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 
@@ -152,6 +153,7 @@ pub async fn test_llm_connection(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
+        error!("LLM connection test returned HTTP {status}: {}", truncate(&body, 200));
         return Err(LlmError::ProviderStatus {
             status: status.as_u16(),
             body: truncate(&body, 500),
@@ -167,6 +169,7 @@ pub async fn test_llm_connection(
         .filter(|content| !content.is_empty())
         .ok_or(LlmError::MissingAssistantContent)?;
 
+    info!("LLM connection test OK: model={model}, {}ms", started.elapsed().as_millis());
     Ok(LlmConnectionTestResult {
         model: model.to_owned(),
         duration_ms: started.elapsed().as_millis(),
@@ -198,9 +201,11 @@ pub async fn recognize_invoice_image(
 
     let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(90).clamp(1, 300));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
-    let image_bytes = fs::read(image_path)?;
+    let image_bytes = fs::read(image_path).inspect_err(|e| error!("Failed to read image for recognition: {e}"))?;
+    let image_len = image_bytes.len();
     let image_data_url = format!("data:{mime_type};base64,{}", STANDARD.encode(image_bytes));
     let started = Instant::now();
+    info!("Sending recognition request, model={model}, {image_len} bytes");
     let request = VisionChatCompletionRequest {
         model,
         messages: vec![VisionChatMessage {
@@ -230,6 +235,7 @@ pub async fn recognize_invoice_image(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
+        error!("LLM recognition HTTP {status}: {}", truncate(&body, 200));
         return Err(LlmError::ProviderStatus {
             status: status.as_u16(),
             body: truncate(&body, 500),
@@ -243,9 +249,13 @@ pub async fn recognize_invoice_image(
         .and_then(|choice| choice.message.content.as_deref())
         .map(str::trim)
         .filter(|content| !content.is_empty())
-        .ok_or(LlmError::MissingAssistantContent)?;
-    let response_json = extract_json_object(content)?;
+        .ok_or_else(|| {
+            error!("LLM recognition returned empty response content");
+            LlmError::MissingAssistantContent
+        })?;
+    let response_json = extract_json_object(content).inspect_err(|e| error!("Failed to extract JSON from recognition response: {e}"))?;
 
+    info!("Recognition OK: model={model}, {}ms", started.elapsed().as_millis());
     Ok(InvoiceRecognitionResult {
         model: model.to_owned(),
         duration_ms: started.elapsed().as_millis(),

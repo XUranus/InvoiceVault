@@ -13,8 +13,9 @@ mod raw_store;
 mod storage;
 mod watcher;
 
+use tracing::{error, info};
 use agent::{AgentMessageRow, AgentResponse, AgentSession, ConfirmRequest};
-use app_core::{AppHealth, AppState, RecognitionQueueStatus};
+use app_core::{AppHealth, AppState, CleanupStorageResult, ExportLogsResult, RecognitionQueueStatus};
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
 use embedding::{EmbeddingConfig, EmbeddingTestResult};
@@ -191,12 +192,14 @@ async fn recognize_raw_file(
 ) -> Result<RecognizeRawFileResult, String> {
     let raw_file = state
         .raw_file_for_recognition(request.raw_file_id)
+        .inspect_err(|e| error!("Failed to load raw file for recognition: {e}"))
         .map_err(|err| err.to_string())?;
     let recognition_inputs = if raw_file.mime_type == "application/pdf" {
-        state
+        let pages = state
             .render_pdf_pages_for_recognition(raw_file.id, &raw_file.storage_path)
-            .map_err(|err| err.to_string())?
-            .into_iter()
+            .inspect_err(|e| error!("PDF render failed: {e}"))
+            .map_err(|err| err.to_string())?;
+        pages.into_iter()
             .map(|page| {
                 let prepared = state
                     .prepare_image_for_recognition(
@@ -204,6 +207,7 @@ async fn recognize_raw_file(
                         &page.image_path,
                         Some(page.page_number),
                     )
+                    .inspect_err(|e| error!("Image preparation failed for page {}: {e}", page.page_number))
                     .map_err(|err| err.to_string())?;
                 Ok(RecognitionInput {
                     source_page_range: Some(page.page_number.to_string()),
@@ -216,6 +220,7 @@ async fn recognize_raw_file(
     } else {
         let prepared = state
             .prepare_image_for_recognition(raw_file.id, &raw_file.storage_path, None)
+            .inspect_err(|e| error!("Image preparation failed: {e}"))
             .map_err(|err| err.to_string())?;
         vec![RecognitionInput {
             source_page_range: None,
@@ -225,6 +230,7 @@ async fn recognize_raw_file(
         }]
     };
 
+    info!("Starting recognition for {} pages", recognition_inputs.len());
     let page_count = recognition_inputs.len();
     let mut invoices = Vec::new();
     let mut total_duration_ms = 0_u128;
@@ -237,6 +243,7 @@ async fn recognize_raw_file(
         let recognition =
             recognize_invoice_image(request.config.clone(), &input.image_path, &input.mime_type)
                 .await
+                .inspect_err(|e| error!("LLM recognition failed: {e}"))
                 .map_err(|err| err.to_string())?;
 
         model = recognition.model.clone();
@@ -260,6 +267,7 @@ async fn recognize_raw_file(
                 model: Some(recognition.model),
                 response_json: recognition.response_json,
             })
+            .inspect_err(|e| error!("Failed to save invoice extraction: {e}"))
             .map_err(|err| err.to_string())?;
 
         let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
@@ -274,8 +282,10 @@ async fn recognize_raw_file(
         invoices.push(invoice);
     }
 
-    // Create notification
     let count = invoices.len();
+    info!("Recognition complete: {count} invoices, model {model}, {total_duration_ms}ms");
+
+    // Create notification
     let _ = state.create_notification(
         "info",
         &format!("识别完成: {count} 张发票"),
@@ -559,6 +569,21 @@ fn raw_file_has_invoices(
 }
 
 #[tauri::command]
+fn export_logs(
+    state: State<'_, AppState>,
+    output_path: String,
+) -> Result<ExportLogsResult, String> {
+    state.export_logs(&output_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cleanup_storage(
+    state: State<'_, AppState>,
+) -> Result<CleanupStorageResult, String> {
+    state.cleanup_storage().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn delete_all_events(state: State<'_, AppState>) -> Result<usize, String> {
     state.delete_all_events().map_err(|e| e.to_string())
 }
@@ -569,17 +594,31 @@ fn delete_all_notifications(state: State<'_, AppState>) -> Result<usize, String>
 }
 
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "receiptier=info".into()),
-        )
-        .init();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            // Set up logging directory and file-based tracing subscriber
+            let app_data_dir = app.path().app_data_dir().expect("app data dir");
+            let log_dir = app_data_dir.join("logs");
+            std::fs::create_dir_all(&log_dir).expect("create log dir");
+
+            let file_appender = tracing_appender::rolling::daily(&log_dir, "receiptier");
+            let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+            let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "receiptier=info".into());
+
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .init();
+
+            // Keep the guard alive — when dropped it flushes remaining logs
+            // Leak it so it lives for the lifetime of the app
+            std::mem::forget(_guard);
+
             let state = AppState::initialize(app.handle())?;
             app.manage(state);
 
@@ -663,7 +702,9 @@ pub fn run() {
             set_recognition_concurrency,
             raw_file_has_invoices,
             delete_all_events,
-            delete_all_notifications
+            delete_all_notifications,
+            export_logs,
+            cleanup_storage
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");
