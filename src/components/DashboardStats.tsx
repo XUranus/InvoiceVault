@@ -34,13 +34,6 @@ const chartTooltip = {
   fontSize: 13,
 };
 
-function formatAmount(value: number): string {
-  if (value >= 10000) {
-    return (value / 10000).toFixed(1) + " 万";
-  }
-  return value.toFixed(2);
-}
-
 type Props = {
   stats: DashboardStatsType;
 };
@@ -48,30 +41,8 @@ type Props = {
 export function DashboardStats({ stats }: Props) {
   return (
     <>
-      {/* Stat cards */}
-      <div className="stat-cards">
-        <div className="stat-card">
-          <span className="stat-value">{stats.total_invoices}</span>
-          <span className="stat-label">已入库发票</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value">
-            {stats.currency} {formatAmount(stats.total_amount)}
-          </span>
-          <span className="stat-label">金额合计</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value">{stats.this_month_count}</span>
-          <span className="stat-label">本月新增</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value">{stats.pending_count}</span>
-          <span className="stat-label">待确认</span>
-        </div>
-      </div>
-
       {stats.total_invoices === 0 ? (
-        <p className="muted" style={{ marginTop: 24 }}>
+        <p className="dashboard-empty dashboard-chart-empty">
           暂无数据。导入发票后这里会展示统计图表。
         </p>
       ) : (
