@@ -202,6 +202,9 @@ export type ExportInvoicesRequest = {
   format: string;
   output_path: string;
   invoice_ids?: number[];
+  columns?: string[];
+  date_from?: string;
+  date_to?: string;
 };
 
 export type ExportResult = {
@@ -209,6 +212,7 @@ export type ExportResult = {
   row_count: number;
   format: string;
   byte_size: number;
+  columns: string[];
 };
 
 export type WatchDirConfig = {

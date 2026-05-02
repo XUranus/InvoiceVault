@@ -1330,14 +1330,62 @@ body {
 .export-group {
   display: flex;
   gap: 6px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  flex-direction: column;
+}
+
+.export-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  min-width: 360px;
+}
+
+.export-panel-row {
+  display: flex;
   align-items: center;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
-.export-group small {
+.export-panel-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  min-width: 36px;
+}
+
+.export-column-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px 8px;
+}
+
+.export-column-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.export-column-check input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.export-result {
   color: var(--color-text-muted);
   font-size: 12px;
-  flex-basis: 100%;
 }
 
 /* ---- Settings Form ---- */

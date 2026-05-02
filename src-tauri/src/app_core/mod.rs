@@ -756,6 +756,9 @@ fn make_tool_executor(
                 format,
                 output_path: output_path.to_owned(),
                 invoice_ids,
+                columns: None,
+                date_from: None,
+                date_to: None,
             };
             let conn = db.lock().expect("db lock");
             match export_invoices(&conn, request) {

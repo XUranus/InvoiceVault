@@ -7,6 +7,9 @@ pub struct ExportInvoicesRequest {
     pub format: String,
     pub output_path: String,
     pub invoice_ids: Option<Vec<i64>>,
+    pub columns: Option<Vec<String>>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -15,6 +18,7 @@ pub struct ExportResult {
     pub row_count: usize,
     pub format: String,
     pub byte_size: u64,
+    pub columns: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -29,6 +33,53 @@ pub enum ExportError {
     UnsupportedFormat(String),
     #[error("xlsx error: {0}")]
     Xlsx(String),
+}
+
+#[derive(Debug, Clone)]
+struct ColumnDef {
+    key: &'static str,
+    label: &'static str,
+    numeric: bool,
+}
+
+const ALL_COLUMNS: &[ColumnDef] = &[
+    ColumnDef { key: "invoice_type", label: "发票类型", numeric: false },
+    ColumnDef { key: "invoice_code", label: "发票代码", numeric: false },
+    ColumnDef { key: "invoice_number", label: "发票号码", numeric: false },
+    ColumnDef { key: "issue_date", label: "开票日期", numeric: false },
+    ColumnDef { key: "seller_name", label: "销售方", numeric: false },
+    ColumnDef { key: "seller_tax_id", label: "销售方税号", numeric: false },
+    ColumnDef { key: "buyer_name", label: "购买方", numeric: false },
+    ColumnDef { key: "buyer_tax_id", label: "购买方税号", numeric: false },
+    ColumnDef { key: "currency", label: "币种", numeric: false },
+    ColumnDef { key: "amount_without_tax", label: "不含税金额", numeric: true },
+    ColumnDef { key: "tax_amount", label: "税额", numeric: true },
+    ColumnDef { key: "total_amount", label: "价税合计", numeric: true },
+    ColumnDef { key: "category", label: "类别", numeric: false },
+    ColumnDef { key: "remarks", label: "备注", numeric: false },
+    ColumnDef { key: "source_page_range", label: "页码范围", numeric: false },
+    ColumnDef { key: "confidence", label: "置信度", numeric: true },
+    ColumnDef { key: "status", label: "状态", numeric: false },
+    ColumnDef { key: "duplicate_status", label: "重复状态", numeric: false },
+    ColumnDef { key: "created_at", label: "创建时间", numeric: false },
+];
+
+fn resolve_columns(requested: Option<&[String]>) -> Vec<ColumnDef> {
+    if let Some(cols) = requested {
+        let mut selected: Vec<ColumnDef> = Vec::new();
+        for key in cols {
+            if let Some(def) = ALL_COLUMNS.iter().find(|c| c.key == key) {
+                selected.push(def.clone());
+            }
+        }
+        if selected.is_empty() {
+            ALL_COLUMNS.to_vec()
+        } else {
+            selected
+        }
+    } else {
+        ALL_COLUMNS.to_vec()
+    }
 }
 
 struct InvoiceRow {
@@ -54,64 +105,120 @@ struct InvoiceRow {
     created_at: String,
 }
 
+impl InvoiceRow {
+    fn field_by_key(&self, key: &str) -> String {
+        match key {
+            "invoice_type" => self.invoice_type.clone().unwrap_or_default(),
+            "invoice_code" => self.invoice_code.clone().unwrap_or_default(),
+            "invoice_number" => self.invoice_number.clone().unwrap_or_default(),
+            "issue_date" => self.issue_date.clone().unwrap_or_default(),
+            "seller_name" => self.seller_name.clone().unwrap_or_default(),
+            "seller_tax_id" => self.seller_tax_id.clone().unwrap_or_default(),
+            "buyer_name" => self.buyer_name.clone().unwrap_or_default(),
+            "buyer_tax_id" => self.buyer_tax_id.clone().unwrap_or_default(),
+            "currency" => self.currency.clone(),
+            "amount_without_tax" => self.amount_without_tax.clone().unwrap_or_default(),
+            "tax_amount" => self.tax_amount.clone().unwrap_or_default(),
+            "total_amount" => self.total_amount.clone().unwrap_or_default(),
+            "category" => self.category.clone().unwrap_or_default(),
+            "remarks" => self.remarks.clone().unwrap_or_default(),
+            "source_page_range" => self.source_page_range.clone().unwrap_or_default(),
+            "confidence" => self.confidence.map(|c| format!("{:.2}", c)).unwrap_or_default(),
+            "status" => self.status.clone(),
+            "duplicate_status" => self.duplicate_status.clone(),
+            "created_at" => self.created_at.clone(),
+            _ => String::new(),
+        }
+    }
+
+    fn number_by_key(&self, key: &str) -> Option<f64> {
+        match key {
+            "amount_without_tax" => self.amount_without_tax.as_deref()?.parse().ok(),
+            "tax_amount" => self.tax_amount.as_deref()?.parse().ok(),
+            "total_amount" => self.total_amount.as_deref()?.parse().ok(),
+            "confidence" => self.confidence,
+            _ => None,
+        }
+    }
+}
+
 pub fn export_invoices(
     conn: &Connection,
     request: ExportInvoicesRequest,
 ) -> Result<ExportResult, ExportError> {
-    let rows = load_invoices_for_export(conn, request.invoice_ids.as_deref())?;
+    let columns = resolve_columns(request.columns.as_deref());
+    let column_labels: Vec<String> = columns.iter().map(|c| c.label.to_string()).collect();
+    let rows = load_invoices_for_export(
+        conn,
+        request.invoice_ids.as_deref(),
+        request.date_from.as_deref(),
+        request.date_to.as_deref(),
+    )?;
 
-    match request.format.as_str() {
-        "csv" => export_csv(&request.output_path, &rows),
-        "xlsx" => export_xlsx(&request.output_path, &rows),
-        other => Err(ExportError::UnsupportedFormat(other.into())),
-    }
+    let result = match request.format.as_str() {
+        "csv" => export_csv(&request.output_path, &rows, &columns)?,
+        "xlsx" => export_xlsx(&request.output_path, &rows, &columns)?,
+        other => return Err(ExportError::UnsupportedFormat(other.into())),
+    };
+
+    Ok(ExportResult {
+        columns: column_labels,
+        ..result
+    })
 }
 
 fn load_invoices_for_export(
     conn: &Connection,
     invoice_ids: Option<&[i64]>,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
 ) -> Result<Vec<InvoiceRow>, ExportError> {
-    let sql = if let Some(ids) = invoice_ids {
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ids) = invoice_ids {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
         let placeholders: Vec<String> = ids.iter().map(|_| "?".into()).collect();
-        format!(
-            "SELECT id, invoice_type, invoice_code, invoice_number, issue_date,
-                seller_name, seller_tax_id, buyer_name, buyer_tax_id, currency,
-                amount_without_tax, tax_amount, total_amount, category, remarks,
-                source_page_range, confidence, status, duplicate_status, created_at
-            FROM invoices
-            WHERE id IN ({})
-            ORDER BY id DESC",
-            placeholders.join(",")
-        )
+        conditions.push(format!("id IN ({})", placeholders.join(",")));
+        for id in ids {
+            params.push(Box::new(*id));
+        }
+    }
+
+    if let Some(from) = date_from {
+        conditions.push("issue_date >= ?".into());
+        params.push(Box::new(from.to_string()));
+    }
+    if let Some(to) = date_to {
+        conditions.push("issue_date <= ?".into());
+        params.push(Box::new(to.to_string()));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
     } else {
-        String::from(
-            "SELECT id, invoice_type, invoice_code, invoice_number, issue_date,
-                seller_name, seller_tax_id, buyer_name, buyer_tax_id, currency,
-                amount_without_tax, tax_amount, total_amount, category, remarks,
-                source_page_range, confidence, status, duplicate_status, created_at
-            FROM invoices
-            ORDER BY id DESC",
-        )
+        format!("WHERE {}", conditions.join(" AND "))
     };
+
+    let sql = format!(
+        "SELECT id, invoice_type, invoice_code, invoice_number, issue_date,
+            seller_name, seller_tax_id, buyer_name, buyer_tax_id, currency,
+            amount_without_tax, tax_amount, total_amount, category, remarks,
+            source_page_range, confidence, status, duplicate_status, created_at
+        FROM invoices
+        {}
+        ORDER BY id DESC",
+        where_clause
+    );
 
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = if let Some(ids) = invoice_ids {
-        let param_refs: Vec<Box<dyn rusqlite::types::ToSql>> = ids
-            .iter()
-            .map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>)
-            .collect();
-        let refs: Vec<&dyn rusqlite::types::ToSql> =
-            param_refs.iter().map(|v| v.as_ref()).collect();
-        stmt.query_map(refs.as_slice(), map_invoice_row)?
-            .collect::<Result<Vec<_>, _>>()?
-    } else {
-        stmt.query_map([], map_invoice_row)?
-            .collect::<Result<Vec<_>, _>>()?
-    };
+    let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|v| v.as_ref()).collect();
+    let rows = stmt
+        .query_map(refs.as_slice(), map_invoice_row)?
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows)
 }
@@ -147,7 +254,11 @@ fn map_invoice_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceRow> {
     })
 }
 
-fn export_csv(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportError> {
+fn export_csv(
+    path: &str,
+    rows: &[InvoiceRow],
+    columns: &[ColumnDef],
+) -> Result<ExportResult, ExportError> {
     let mut file = std::fs::File::create(path)?;
 
     // UTF-8 BOM for Excel compatibility
@@ -156,54 +267,13 @@ fn export_csv(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportErr
     let mut wtr = csv_writer(&mut file);
 
     // Header
-    wtr.write_record(&[
-        "ID",
-        "发票类型",
-        "发票代码",
-        "发票号码",
-        "开票日期",
-        "销售方",
-        "销售方税号",
-        "购买方",
-        "购买方税号",
-        "币种",
-        "不含税金额",
-        "税额",
-        "价税合计",
-        "类别",
-        "备注",
-        "页码范围",
-        "置信度",
-        "状态",
-        "重复状态",
-        "创建时间",
-    ])?;
+    let headers: Vec<&str> = columns.iter().map(|c| c.label).collect();
+    wtr.write_record(&headers)?;
 
     for row in rows {
-        wtr.write_record(&[
-            row.id.to_string(),
-            row.invoice_type.clone().unwrap_or_default(),
-            row.invoice_code.clone().unwrap_or_default(),
-            row.invoice_number.clone().unwrap_or_default(),
-            row.issue_date.clone().unwrap_or_default(),
-            row.seller_name.clone().unwrap_or_default(),
-            row.seller_tax_id.clone().unwrap_or_default(),
-            row.buyer_name.clone().unwrap_or_default(),
-            row.buyer_tax_id.clone().unwrap_or_default(),
-            row.currency.clone(),
-            row.amount_without_tax.clone().unwrap_or_default(),
-            row.tax_amount.clone().unwrap_or_default(),
-            row.total_amount.clone().unwrap_or_default(),
-            row.category.clone().unwrap_or_default(),
-            row.remarks.clone().unwrap_or_default(),
-            row.source_page_range.clone().unwrap_or_default(),
-            row.confidence
-                .map(|c| format!("{:.2}", c))
-                .unwrap_or_default(),
-            row.status.clone(),
-            row.duplicate_status.clone(),
-            row.created_at.clone(),
-        ])?;
+        let values: Vec<String> = columns.iter().map(|c| row.field_by_key(c.key)).collect();
+        let refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+        wtr.write_record(&refs)?;
     }
 
     wtr.flush()?;
@@ -215,94 +285,76 @@ fn export_csv(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportErr
         row_count: rows.len(),
         format: "csv".into(),
         byte_size,
+        columns: columns.iter().map(|c| c.label.into()).collect(),
     })
 }
 
-// Write CSV with proper quoting — manual to avoid adding csv crate
 fn csv_writer<W: Write>(w: W) -> csv::Writer<W> {
     csv::WriterBuilder::new().has_headers(false).from_writer(w)
 }
 
-fn export_xlsx(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportError> {
+fn export_xlsx(
+    path: &str,
+    rows: &[InvoiceRow],
+    columns: &[ColumnDef],
+) -> Result<ExportResult, ExportError> {
     use rust_xlsxwriter::*;
 
     let mut workbook = Workbook::new();
-
-    // Invoices sheet
     let sheet = workbook.add_worksheet();
     sheet
         .set_name("Invoices")
         .map_err(|e| ExportError::Xlsx(e.to_string()))?;
 
-    let headers = [
-        "ID",
-        "发票类型",
-        "发票代码",
-        "发票号码",
-        "开票日期",
-        "销售方",
-        "销售方税号",
-        "购买方",
-        "购买方税号",
-        "币种",
-        "不含税金额",
-        "税额",
-        "价税合计",
-        "类别",
-        "备注",
-        "页码范围",
-        "置信度",
-        "状态",
-        "重复状态",
-        "创建时间",
-    ];
+    let header_format = Format::new().set_bold().set_background_color(Color::RGB(0xE0E0E0));
+    let number_format = Format::new().set_num_format("0.00");
 
-    let header_format = Format::new().set_bold();
-    for (col, header) in headers.iter().enumerate() {
+    // Write headers
+    for (col, col_def) in columns.iter().enumerate() {
         sheet
-            .write_string_with_format(0, col as u16, *header, &header_format)
+            .write_string_with_format(0, col as u16, col_def.label, &header_format)
             .map_err(|e| ExportError::Xlsx(e.to_string()))?;
     }
 
+    // Write data rows
     for (row_idx, row) in rows.iter().enumerate() {
         let r = (row_idx + 1) as u32;
-        let mut write = |col: u16, val: &str| -> Result<(), ExportError> {
-            sheet
-                .write_string(r, col, val)
-                .map_err(|e| ExportError::Xlsx(e.to_string()))?;
-            Ok(())
-        };
-        write(0, &row.id.to_string())?;
-        write(1, row.invoice_type.as_deref().unwrap_or(""))?;
-        write(2, row.invoice_code.as_deref().unwrap_or(""))?;
-        write(3, row.invoice_number.as_deref().unwrap_or(""))?;
-        write(4, row.issue_date.as_deref().unwrap_or(""))?;
-        write(5, row.seller_name.as_deref().unwrap_or(""))?;
-        write(6, row.seller_tax_id.as_deref().unwrap_or(""))?;
-        write(7, row.buyer_name.as_deref().unwrap_or(""))?;
-        write(8, row.buyer_tax_id.as_deref().unwrap_or(""))?;
-        write(9, &row.currency)?;
-        write(10, row.amount_without_tax.as_deref().unwrap_or(""))?;
-        write(11, row.tax_amount.as_deref().unwrap_or(""))?;
-        write(12, row.total_amount.as_deref().unwrap_or(""))?;
-        write(13, row.category.as_deref().unwrap_or(""))?;
-        write(14, row.remarks.as_deref().unwrap_or(""))?;
-        write(15, row.source_page_range.as_deref().unwrap_or(""))?;
-        write(
-            16,
-            &row.confidence
-                .map(|c| format!("{:.2}", c))
-                .unwrap_or_default(),
-        )?;
-        write(17, &row.status)?;
-        write(18, &row.duplicate_status)?;
-        write(19, &row.created_at)?;
+        for (col, col_def) in columns.iter().enumerate() {
+            let c = col as u16;
+            if col_def.numeric {
+                if let Some(num) = row.number_by_key(col_def.key) {
+                    sheet
+                        .write_number_with_format(r, c, num, &number_format)
+                        .map_err(|e| ExportError::Xlsx(e.to_string()))?;
+                } else {
+                    sheet
+                        .write_string(r, c, "")
+                        .map_err(|e| ExportError::Xlsx(e.to_string()))?;
+                }
+            } else {
+                let val = row.field_by_key(col_def.key);
+                sheet
+                    .write_string(r, c, &val)
+                    .map_err(|e| ExportError::Xlsx(e.to_string()))?;
+            }
+        }
     }
 
-    // Auto-fit columns
-    for col in 0..headers.len() as u16 {
+    // Auto-fit columns based on content
+    for (col, col_def) in columns.iter().enumerate() {
+        let mut max_width = col_def.label.len() as f64 * 1.2;
+        for row in rows {
+            let val = row.field_by_key(col_def.key);
+            let width = val.chars().fold(0.0, |acc, ch| {
+                acc + if ch.is_ascii() { 1.0 } else { 2.0 }
+            });
+            if width > max_width {
+                max_width = width;
+            }
+        }
+        let width = (max_width + 2.0).min(50.0).max(8.0);
         sheet
-            .set_column_width(col, 14)
+            .set_column_width(col as u16, width)
             .map_err(|e| ExportError::Xlsx(e.to_string()))?;
     }
 
@@ -316,5 +368,6 @@ fn export_xlsx(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportEr
         row_count: rows.len(),
         format: "xlsx".into(),
         byte_size,
+        columns: columns.iter().map(|c| c.label.into()).collect(),
     })
 }
