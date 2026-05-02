@@ -254,7 +254,7 @@ pub async fn recognize_invoice_image(
     })
 }
 
-fn headers(api_key: &str) -> Result<HeaderMap, LlmError> {
+pub(crate) fn headers(api_key: &str) -> Result<HeaderMap, LlmError> {
     let mut headers = HeaderMap::new();
     let authorization = HeaderValue::from_str(&format!("Bearer {api_key}"))
         .map_err(|_| LlmError::InvalidAuthorizationHeader)?;
@@ -263,7 +263,7 @@ fn headers(api_key: &str) -> Result<HeaderMap, LlmError> {
     Ok(headers)
 }
 
-fn truncate(value: &str, max_chars: usize) -> String {
+pub(crate) fn truncate(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 

@@ -100,9 +100,12 @@ fn load_invoices_for_export(
     let mut stmt = conn.prepare(&sql)?;
 
     let rows = if let Some(ids) = invoice_ids {
-        let param_refs: Vec<Box<dyn rusqlite::types::ToSql>> =
-            ids.iter().map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>).collect();
-        let refs: Vec<&dyn rusqlite::types::ToSql> = param_refs.iter().map(|v| v.as_ref()).collect();
+        let param_refs: Vec<Box<dyn rusqlite::types::ToSql>> = ids
+            .iter()
+            .map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>)
+            .collect();
+        let refs: Vec<&dyn rusqlite::types::ToSql> =
+            param_refs.iter().map(|v| v.as_ref()).collect();
         stmt.query_map(refs.as_slice(), map_invoice_row)?
             .collect::<Result<Vec<_>, _>>()?
     } else {
@@ -124,7 +127,9 @@ fn map_invoice_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceRow> {
         seller_tax_id: row.get(6)?,
         buyer_name: row.get(7)?,
         buyer_tax_id: row.get(8)?,
-        currency: row.get::<_, Option<String>>(9)?.unwrap_or_else(|| "CNY".into()),
+        currency: row
+            .get::<_, Option<String>>(9)?
+            .unwrap_or_else(|| "CNY".into()),
         amount_without_tax: row.get(10)?,
         tax_amount: row.get(11)?,
         total_amount: row.get(12)?,
@@ -132,8 +137,12 @@ fn map_invoice_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceRow> {
         remarks: row.get(14)?,
         source_page_range: row.get(15)?,
         confidence: row.get(16)?,
-        status: row.get::<_, Option<String>>(17)?.unwrap_or_else(|| "unknown".into()),
-        duplicate_status: row.get::<_, Option<String>>(18)?.unwrap_or_else(|| "unknown".into()),
+        status: row
+            .get::<_, Option<String>>(17)?
+            .unwrap_or_else(|| "unknown".into()),
+        duplicate_status: row
+            .get::<_, Option<String>>(18)?
+            .unwrap_or_else(|| "unknown".into()),
         created_at: row.get(19)?,
     })
 }
@@ -148,10 +157,26 @@ fn export_csv(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportErr
 
     // Header
     wtr.write_record(&[
-        "ID", "发票类型", "发票代码", "发票号码", "开票日期",
-        "销售方", "销售方税号", "购买方", "购买方税号", "币种",
-        "不含税金额", "税额", "价税合计", "类别", "备注",
-        "页码范围", "置信度", "状态", "重复状态", "创建时间",
+        "ID",
+        "发票类型",
+        "发票代码",
+        "发票号码",
+        "开票日期",
+        "销售方",
+        "销售方税号",
+        "购买方",
+        "购买方税号",
+        "币种",
+        "不含税金额",
+        "税额",
+        "价税合计",
+        "类别",
+        "备注",
+        "页码范围",
+        "置信度",
+        "状态",
+        "重复状态",
+        "创建时间",
     ])?;
 
     for row in rows {
@@ -172,7 +197,9 @@ fn export_csv(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportErr
             row.category.clone().unwrap_or_default(),
             row.remarks.clone().unwrap_or_default(),
             row.source_page_range.clone().unwrap_or_default(),
-            row.confidence.map(|c| format!("{:.2}", c)).unwrap_or_default(),
+            row.confidence
+                .map(|c| format!("{:.2}", c))
+                .unwrap_or_default(),
             row.status.clone(),
             row.duplicate_status.clone(),
             row.created_at.clone(),
@@ -193,9 +220,7 @@ fn export_csv(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportErr
 
 // Write CSV with proper quoting — manual to avoid adding csv crate
 fn csv_writer<W: Write>(w: W) -> csv::Writer<W> {
-    csv::WriterBuilder::new()
-        .has_headers(false)
-        .from_writer(w)
+    csv::WriterBuilder::new().has_headers(false).from_writer(w)
 }
 
 fn export_xlsx(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportError> {
@@ -205,13 +230,31 @@ fn export_xlsx(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportEr
 
     // Invoices sheet
     let sheet = workbook.add_worksheet();
-    sheet.set_name("Invoices").map_err(|e| ExportError::Xlsx(e.to_string()))?;
+    sheet
+        .set_name("Invoices")
+        .map_err(|e| ExportError::Xlsx(e.to_string()))?;
 
     let headers = [
-        "ID", "发票类型", "发票代码", "发票号码", "开票日期",
-        "销售方", "销售方税号", "购买方", "购买方税号", "币种",
-        "不含税金额", "税额", "价税合计", "类别", "备注",
-        "页码范围", "置信度", "状态", "重复状态", "创建时间",
+        "ID",
+        "发票类型",
+        "发票代码",
+        "发票号码",
+        "开票日期",
+        "销售方",
+        "销售方税号",
+        "购买方",
+        "购买方税号",
+        "币种",
+        "不含税金额",
+        "税额",
+        "价税合计",
+        "类别",
+        "备注",
+        "页码范围",
+        "置信度",
+        "状态",
+        "重复状态",
+        "创建时间",
     ];
 
     let header_format = Format::new().set_bold();
@@ -245,7 +288,12 @@ fn export_xlsx(path: &str, rows: &[InvoiceRow]) -> Result<ExportResult, ExportEr
         write(13, row.category.as_deref().unwrap_or(""))?;
         write(14, row.remarks.as_deref().unwrap_or(""))?;
         write(15, row.source_page_range.as_deref().unwrap_or(""))?;
-        write(16, &row.confidence.map(|c| format!("{:.2}", c)).unwrap_or_default())?;
+        write(
+            16,
+            &row.confidence
+                .map(|c| format!("{:.2}", c))
+                .unwrap_or_default(),
+        )?;
         write(17, &row.status)?;
         write(18, &row.duplicate_status)?;
         write(19, &row.created_at)?;

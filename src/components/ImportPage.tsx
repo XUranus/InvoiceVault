@@ -1,61 +1,62 @@
 import React from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { ImportJob } from "../types";
-import { importFiles, recognizeRawFile } from "../api";
+import type { ImportJob, ImportJobListResult } from "../types";
+import { importFiles, listImportJobs, recognizeRawFile } from "../api";
 
 type Props = {
-  jobs: ImportJob[];
   isDraggingFiles: boolean;
   llmApiKey: string;
   llmBaseUrl: string;
   llmModel: string;
-  onJobsChange: (imported: ImportJob[]) => void;
+  refreshKey: number;
   onInvoicesAdded: () => void;
   onError: (error: string) => void;
 };
 
 export function ImportPage({
-  jobs,
   isDraggingFiles,
   llmApiKey,
   llmBaseUrl,
   llmModel,
-  onJobsChange,
+  refreshKey,
   onInvoicesAdded,
   onError,
 }: Props) {
-  const [pathsText, setPathsText] = React.useState("");
   const [isImporting, setIsImporting] = React.useState(false);
   const [recognizingJobId, setRecognizingJobId] = React.useState<number | null>(null);
   const [expandedJobId, setExpandedJobId] = React.useState<number | null>(null);
+  const [result, setResult] = React.useState<ImportJobListResult | null>(null);
+  const [page, setPage] = React.useState(1);
+  const pageSize = 5;
+
+  const fetchJobs = React.useCallback(async (p: number) => {
+    try {
+      const r = await listImportJobs(p, pageSize);
+      setResult(r);
+      setPage(r.page);
+    } catch (err) {
+      onError(String(err));
+    }
+  }, [onError]);
+
+  React.useEffect(() => {
+    fetchJobs(1);
+  }, [refreshKey, fetchJobs]);
 
   const doImport = React.useCallback(
     async (paths: string[]) => {
       setIsImporting(true);
       try {
-        const imported = await importFiles(paths);
-        onJobsChange(imported);
+        await importFiles(paths);
+        fetchJobs(1);
       } catch (err) {
         onError(String(err));
       } finally {
         setIsImporting(false);
       }
     },
-    [onJobsChange, onError],
+    [fetchJobs, onError],
   );
-
-  const handleImport = async () => {
-    const paths = pathsText
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (paths.length === 0) {
-      onError("请输入至少一个文件路径。");
-      return;
-    }
-    await doImport(paths);
-    setPathsText("");
-  };
 
   const handlePickFiles = async () => {
     const selected = await open({
@@ -82,7 +83,7 @@ export function ImportPage({
     }
     setRecognizingJobId(job.id);
     try {
-      const result = await recognizeRawFile({
+      await recognizeRawFile({
         raw_file_id: job.raw_file_id,
         config: {
           base_url: llmBaseUrl,
@@ -92,7 +93,6 @@ export function ImportPage({
         },
       });
       onInvoicesAdded();
-      // Show recognition result briefly
       setExpandedJobId(job.id);
     } catch (err) {
       onError(String(err));
@@ -101,17 +101,24 @@ export function ImportPage({
     }
   };
 
-  // Separate active jobs (not completed/failed/duplicate) from history
-  const activeJobs = jobs.filter((j) =>
+  const allJobs = result?.jobs ?? [];
+  const activeJobs = allJobs.filter((j) =>
     ["pending", "processing"].includes(j.status),
   );
-  const completedJobs = jobs.filter(
+  const completedJobs = allJobs.filter(
     (j) => !["pending", "processing"].includes(j.status),
   );
 
   return (
     <div className="page">
-      <h2 className="page-title">导入发票</h2>
+      <div className="page-header">
+        <h2 className="page-title" style={{ margin: 0 }}>导入发票</h2>
+        <div className="page-header-actions">
+          <button className="btn-primary" onClick={handlePickFiles} disabled={isImporting}>
+            {isImporting ? "导入中..." : "选择文件"}
+          </button>
+        </div>
+      </div>
 
       <div className="import-zone">
         <div
@@ -119,26 +126,7 @@ export function ImportPage({
         >
           <span className="drop-icon">📎</span>
           <p>{isDraggingFiles ? "松开以导入文件" : "拖入 PDF / PNG / JPG / JPEG 文件"}</p>
-          <span className="drop-hint">或使用下方路径输入或文件选择器</span>
-        </div>
-
-        <div className="import-form-row">
-          <textarea
-            value={pathsText}
-            onChange={(e) => setPathsText(e.target.value)}
-            placeholder="每行输入一个文件路径，支持 PDF / PNG / JPG / JPEG"
-            rows={4}
-            className="import-textarea"
-          />
-        </div>
-
-        <div className="import-buttons">
-          <button className="btn-primary" onClick={handlePickFiles} disabled={isImporting}>
-            选择文件
-          </button>
-          <button className="btn-secondary" onClick={handleImport} disabled={isImporting}>
-            {isImporting ? "导入中..." : "导入路径"}
-          </button>
+          <span className="drop-hint">或点击右上角 "选择文件" 按钮</span>
         </div>
       </div>
 
@@ -163,25 +151,48 @@ export function ImportPage({
       <div className="section">
         <h3>
           导入历史
-          {completedJobs.length > 0 ? (
-            <span className="badge">{completedJobs.length}</span>
+          {result ? (
+            <span className="badge">{result.total_count}</span>
           ) : null}
         </h3>
         {completedJobs.length === 0 ? (
           <p className="muted">暂无导入记录。</p>
         ) : (
-          <div className="job-list">
-            {completedJobs.slice(0, 50).map((job) => (
-              <JobRow
-                key={job.id}
-                job={job}
-                recognizingJobId={recognizingJobId}
-                expandedJobId={expandedJobId}
-                onRecognize={handleRecognize}
-                onToggleExpand={setExpandedJobId}
-              />
-            ))}
-          </div>
+          <>
+            <div className="job-list">
+              {completedJobs.map((job) => (
+                <JobRow
+                  key={job.id}
+                  job={job}
+                  recognizingJobId={recognizingJobId}
+                  expandedJobId={expandedJobId}
+                  onRecognize={handleRecognize}
+                  onToggleExpand={setExpandedJobId}
+                />
+              ))}
+            </div>
+            {result && result.total_pages > 1 ? (
+              <div className="pagination" style={{ marginTop: 12, justifyContent: "center" }}>
+                <button
+                  className="page-btn"
+                  disabled={page <= 1}
+                  onClick={() => fetchJobs(page - 1)}
+                >
+                  上一页
+                </button>
+                <span className="page-info">
+                  {result.page} / {result.total_pages}（共 {result.total_count} 条）
+                </span>
+                <button
+                  className="page-btn"
+                  disabled={page >= result.total_pages}
+                  onClick={() => fetchJobs(page + 1)}
+                >
+                  下一页
+                </button>
+              </div>
+            ) : null}
+          </>
         )}
       </div>
     </div>

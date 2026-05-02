@@ -1,3 +1,4 @@
+mod agent;
 mod app_core;
 mod chroma;
 mod dedupe;
@@ -11,26 +12,31 @@ mod raw_store;
 mod storage;
 mod watcher;
 
+use agent::{AgentMessageRow, AgentResponse, AgentSession, ConfirmRequest};
 use app_core::{AppHealth, AppState};
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
-use embedding::EmbeddingConfig;
+use embedding::{EmbeddingConfig, EmbeddingTestResult};
 use exporter::{ExportInvoicesRequest, ExportResult};
 use extractor::{
-    DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
-    InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest,
-    UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
+    DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult,
+    InvoiceSummary, SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
+    UpdateInvoiceResult,
 };
-use importer::{ImportJobSummary, ImportRequest};
+use importer::{ImportJobListResult, ImportJobSummary, ImportRequest};
 use llm::{
     recognize_invoice_image, test_llm_connection as run_llm_connection_test,
     LlmConnectionTestResult, LlmProviderConfig,
 };
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WindowSizeState {
+    width: f64,
+    height: f64,
+}
 use tauri::{Manager, State};
-use watcher::{
-    AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus,
-};
+use watcher::{AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus};
 
 #[tauri::command]
 fn app_health(state: State<'_, AppState>) -> Result<AppHealth, String> {
@@ -48,8 +54,14 @@ fn import_files(
 }
 
 #[tauri::command]
-fn list_import_jobs(state: State<'_, AppState>) -> Result<Vec<ImportJobSummary>, String> {
-    state.list_import_jobs().map_err(|err| err.to_string())
+fn list_import_jobs(
+    state: State<'_, AppState>,
+    page: Option<i64>,
+    page_size: Option<i64>,
+) -> Result<ImportJobListResult, String> {
+    state
+        .list_import_jobs(page.unwrap_or(1), page_size.unwrap_or(50))
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -72,9 +84,7 @@ fn search_invoices(
     state: State<'_, AppState>,
     params: InvoiceSearchParams,
 ) -> Result<InvoiceSearchResult, String> {
-    state
-        .search_invoices(params)
-        .map_err(|err| err.to_string())
+    state.search_invoices(params).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -92,9 +102,7 @@ fn update_invoice(
     state: State<'_, AppState>,
     request: UpdateInvoiceRequest,
 ) -> Result<UpdateInvoiceResult, String> {
-    state
-        .update_invoice(request)
-        .map_err(|err| err.to_string())
+    state.update_invoice(request).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -252,9 +260,7 @@ struct RecognitionInput {
 
 #[tauri::command]
 fn get_dashboard_stats(state: State<'_, AppState>) -> Result<DashboardStats, String> {
-    state
-        .get_dashboard_stats()
-        .map_err(|err| err.to_string())
+    state.get_dashboard_stats().map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -305,10 +311,7 @@ fn toggle_watch_dir(
 }
 
 #[tauri::command]
-fn set_chroma_config(
-    state: State<'_, AppState>,
-    config: ChromaConfig,
-) -> Result<(), String> {
+fn set_chroma_config(state: State<'_, AppState>, config: ChromaConfig) -> Result<(), String> {
     state
         .set_chroma_config(config)
         .map_err(|err| err.to_string())
@@ -320,10 +323,7 @@ fn get_chroma_config(state: State<'_, AppState>) -> Result<ChromaConfig, String>
 }
 
 #[tauri::command]
-fn set_embedding_config(
-    state: State<'_, AppState>,
-    config: EmbeddingConfig,
-) -> Result<(), String> {
+fn set_embedding_config(state: State<'_, AppState>, config: EmbeddingConfig) -> Result<(), String> {
     state
         .set_embedding_config(config)
         .map_err(|err| err.to_string())
@@ -335,9 +335,18 @@ fn get_embedding_config(state: State<'_, AppState>) -> Result<EmbeddingConfig, S
 }
 
 #[tauri::command]
-async fn test_chroma_connection(state: State<'_, AppState>) -> Result<bool, String> {
+fn test_chroma_connection(state: State<'_, AppState>) -> Result<bool, String> {
     state
         .test_chroma_connection()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn test_embedding_connection(
+    state: State<'_, AppState>,
+) -> Result<EmbeddingTestResult, String> {
+    state
+        .test_embedding_connection()
         .await
         .map_err(|err| err.to_string())
 }
@@ -354,6 +363,58 @@ async fn search_invoices_semantic(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn create_agent_session(state: State<'_, AppState>) -> Result<AgentSession, String> {
+    state.create_agent_session().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_agent_sessions(state: State<'_, AppState>) -> Result<Vec<AgentSession>, String> {
+    state.list_agent_sessions().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn get_agent_session(
+    state: State<'_, AppState>,
+    session_id: i64,
+) -> Result<Vec<AgentMessageRow>, String> {
+    state
+        .get_agent_session(session_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn delete_agent_session(state: State<'_, AppState>, session_id: i64) -> Result<(), String> {
+    state
+        .delete_agent_session(session_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn send_agent_message(
+    state: State<'_, AppState>,
+    session_id: i64,
+    content: String,
+    config: LlmProviderConfig,
+) -> Result<AgentResponse, String> {
+    state
+        .send_agent_message(session_id, &content, &config)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn confirm_agent_action(
+    state: State<'_, AppState>,
+    request: ConfirmRequest,
+    config: LlmProviderConfig,
+) -> Result<AgentResponse, String> {
+    state
+        .confirm_agent_action(request, &config)
+        .await
+        .map_err(|err| err.to_string())
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -364,9 +425,41 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let state = AppState::initialize(app.handle())?;
             app.manage(state);
+
+            // Restore and persist window size
+            let window = app.get_webview_window("main").expect("main window");
+            let state_path = app
+                .path()
+                .app_data_dir()
+                .expect("app data dir")
+                .join("window_state.json");
+
+            if let Ok(json) = std::fs::read_to_string(&state_path) {
+                if let Ok(saved) = serde_json::from_str::<WindowSizeState>(&json) {
+                    use tauri::LogicalSize;
+                    let _ = window.set_size(LogicalSize {
+                        width: saved.width,
+                        height: saved.height,
+                    });
+                }
+            }
+
+            let save_path = state_path.clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::Resized(size) = event {
+                    if let Ok(json) = serde_json::to_string(&WindowSizeState {
+                        width: size.width as f64,
+                        height: size.height as f64,
+                    }) {
+                        let _ = std::fs::write(&save_path, json);
+                    }
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -395,7 +488,14 @@ pub fn run() {
             set_embedding_config,
             get_embedding_config,
             test_chroma_connection,
-            search_invoices_semantic
+            test_embedding_connection,
+            search_invoices_semantic,
+            create_agent_session,
+            list_agent_sessions,
+            get_agent_session,
+            delete_agent_session,
+            send_agent_message,
+            confirm_agent_action
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");

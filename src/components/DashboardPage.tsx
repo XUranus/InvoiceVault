@@ -1,15 +1,14 @@
 import React from "react";
-import type { AppHealth, DashboardStats as DashboardStatsType } from "../types";
+import type { DashboardStats as DashboardStatsType } from "../types";
 import { getDashboardStats } from "../api";
 import { DashboardStats } from "./DashboardStats";
 
 type Props = {
-  health: AppHealth | null;
   error: string | null;
   refreshKey: number;
 };
 
-export function DashboardPage({ health, error, refreshKey }: Props) {
+export function DashboardPage({ error, refreshKey }: Props) {
   const [stats, setStats] = React.useState<DashboardStatsType | null>(null);
   const [statsError, setStatsError] = React.useState<string | null>(null);
 
@@ -49,21 +48,6 @@ export function DashboardPage({ health, error, refreshKey }: Props) {
         </div>
       )}
 
-      {health ? (
-        <div className="section" style={{ marginTop: 24 }}>
-          <h3>系统信息</h3>
-          <dl className="info-grid">
-            <dt>数据目录</dt>
-            <dd>{health.app_data_dir}</dd>
-            <dt>数据库</dt>
-            <dd>{health.database_path}</dd>
-            <dt>迁移版本</dt>
-            <dd>{health.migration_version}</dd>
-          </dl>
-        </div>
-      ) : (
-        <p className="muted">正在连接后端...</p>
-      )}
     </div>
   );
 }

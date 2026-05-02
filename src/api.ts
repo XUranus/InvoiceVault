@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppHealth,
   ImportJob,
+  ImportJobListResult,
   Invoice,
   InvoiceSearchParams,
   InvoiceSearchResult,
@@ -21,7 +22,11 @@ import type {
   DashboardStats,
   ChromaConfig,
   EmbeddingConfig,
+  EmbeddingTestResult,
   SimilarResult,
+  AgentSession,
+  AgentMessage,
+  AgentResponse,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -32,8 +37,11 @@ export async function importFiles(paths: string[]): Promise<ImportJob[]> {
   return invoke<ImportJob[]>("import_files", { request: { paths } });
 }
 
-export async function listImportJobs(): Promise<ImportJob[]> {
-  return invoke<ImportJob[]>("list_import_jobs");
+export async function listImportJobs(
+  page?: number,
+  pageSize?: number,
+): Promise<ImportJobListResult> {
+  return invoke<ImportJobListResult>("list_import_jobs", { page, pageSize });
 }
 
 export async function searchInvoices(
@@ -151,6 +159,10 @@ export async function testChromaConnection(): Promise<boolean> {
   return invoke<boolean>("test_chroma_connection");
 }
 
+export async function testEmbeddingConnection(): Promise<EmbeddingTestResult> {
+  return invoke<EmbeddingTestResult>("test_embedding_connection");
+}
+
 export async function searchInvoicesSemantic(
   query: string,
   limit: number,
@@ -163,4 +175,46 @@ export async function toggleWatchDir(
   enabled: boolean,
 ): Promise<WatchDirStatus> {
   return invoke<WatchDirStatus>("toggle_watch_dir", { id, enabled });
+}
+
+// Agent APIs
+
+export async function createAgentSession(): Promise<AgentSession> {
+  return invoke<AgentSession>("create_agent_session");
+}
+
+export async function listAgentSessions(): Promise<AgentSession[]> {
+  return invoke<AgentSession[]>("list_agent_sessions");
+}
+
+export async function getAgentSession(
+  sessionId: number,
+): Promise<AgentMessage[]> {
+  return invoke<AgentMessage[]>("get_agent_session", { sessionId });
+}
+
+export async function deleteAgentSession(
+  sessionId: number,
+): Promise<void> {
+  return invoke<void>("delete_agent_session", { sessionId });
+}
+
+export async function sendAgentMessage(
+  sessionId: number,
+  content: string,
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+): Promise<AgentResponse> {
+  return invoke<AgentResponse>("send_agent_message", { sessionId, content, config });
+}
+
+export async function confirmAgentAction(
+  sessionId: number,
+  confirmed: boolean,
+  extraParams: Record<string, unknown> | null,
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+): Promise<AgentResponse> {
+  return invoke<AgentResponse>("confirm_agent_action", {
+    request: { session_id: sessionId, confirmed, extra_params: extraParams },
+    config,
+  });
 }

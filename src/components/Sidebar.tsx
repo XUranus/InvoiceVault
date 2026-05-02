@@ -1,4 +1,4 @@
-type Page = "dashboard" | "import" | "invoices" | "settings";
+type Page = "dashboard" | "import" | "invoices" | "agent" | "settings";
 
 type Props = {
   activePage: Page;
@@ -11,6 +11,7 @@ const NAV_ITEMS: { page: Page; label: string; emoji: string }[] = [
   { page: "dashboard", label: "仪表盘", emoji: "📊" },
   { page: "import", label: "导入", emoji: "📥" },
   { page: "invoices", label: "发票库", emoji: "🧾" },
+  { page: "agent", label: "Agent", emoji: "🤖" },
   { page: "settings", label: "设置", emoji: "⚙️" },
 ];
 

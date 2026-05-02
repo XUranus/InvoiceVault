@@ -114,7 +114,13 @@ impl WatcherManager {
         )?;
         let dirs: Vec<(i64, String, String, bool, i64)> = stmt
             .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
@@ -360,7 +366,10 @@ impl WatcherManager {
         let handle = WatchHandle {
             stop_flag: stop_flag.clone(),
         };
-        self.handles.lock().expect("handles lock").insert(id, handle);
+        self.handles
+            .lock()
+            .expect("handles lock")
+            .insert(id, handle);
 
         let db = Arc::clone(&self.db);
         let raw_dir = self.raw_dir.clone();
@@ -395,7 +404,13 @@ impl WatcherManager {
 
 impl Drop for WatcherManager {
     fn drop(&mut self) {
-        let ids: Vec<i64> = self.handles.lock().expect("handles lock").keys().copied().collect();
+        let ids: Vec<i64> = self
+            .handles
+            .lock()
+            .expect("handles lock")
+            .keys()
+            .copied()
+            .collect();
         for id in ids {
             self.stop_watching(id);
         }
@@ -492,10 +507,7 @@ fn watch_loop(
 }
 
 fn is_relevant_event(event: &Event) -> bool {
-    matches!(
-        event.kind,
-        EventKind::Create(_) | EventKind::Modify(_)
-    )
+    matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_))
 }
 
 fn matches_filter(path: &Path, extensions: &[String]) -> bool {
@@ -580,9 +592,11 @@ mod tests {
         conn.execute("DELETE FROM watch_dirs WHERE id = ?1", [id])
             .expect("delete");
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM watch_dirs WHERE id = ?1", [id], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM watch_dirs WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
             .expect("count");
         assert_eq!(count, 0);
     }
@@ -622,8 +636,11 @@ mod tests {
     #[test]
     fn test_default_values() {
         let (conn, _tmp) = setup_db();
-        conn.execute("INSERT INTO watch_dirs (path) VALUES (?1)", params!["/tmp/defaults"])
-            .expect("insert");
+        conn.execute(
+            "INSERT INTO watch_dirs (path) VALUES (?1)",
+            params!["/tmp/defaults"],
+        )
+        .expect("insert");
 
         let (recursive, enabled, stable_wait_ms, extensions): (bool, bool, i64, String) = conn
             .query_row(

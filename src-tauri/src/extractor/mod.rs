@@ -297,7 +297,9 @@ pub fn get_invoice_detail(
                 seller_tax_id: row.get(7)?,
                 buyer_name: row.get(8)?,
                 buyer_tax_id: row.get(9)?,
-                currency: row.get::<_, Option<String>>(10)?.unwrap_or_else(|| "CNY".into()),
+                currency: row
+                    .get::<_, Option<String>>(10)?
+                    .unwrap_or_else(|| "CNY".into()),
                 amount_without_tax: row.get(11)?,
                 tax_amount: row.get(12)?,
                 total_amount: row.get(13)?,
@@ -305,8 +307,12 @@ pub fn get_invoice_detail(
                 remarks: row.get(15)?,
                 source_page_range: row.get(16)?,
                 confidence: row.get(17)?,
-                status: row.get::<_, Option<String>>(18)?.unwrap_or_else(|| "pending_confirmation".into()),
-                duplicate_status: row.get::<_, Option<String>>(19)?.unwrap_or_else(|| "unknown".into()),
+                status: row
+                    .get::<_, Option<String>>(18)?
+                    .unwrap_or_else(|| "pending_confirmation".into()),
+                duplicate_status: row
+                    .get::<_, Option<String>>(19)?
+                    .unwrap_or_else(|| "unknown".into()),
                 created_at: row.get(20)?,
                 updated_at: row.get(21)?,
                 items: Vec::new(),
@@ -357,11 +363,17 @@ pub fn get_invoice_detail(
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(1);
         let label = format!("page-{page}");
-        let path = thumbnails_dir.join("previews").join(invoice.raw_file_id.to_string()).join(format!("{label}.jpg"));
+        let path = thumbnails_dir
+            .join("previews")
+            .join(invoice.raw_file_id.to_string())
+            .join(format!("{label}.jpg"));
         if path.exists() {
             Some(path.to_string_lossy().into_owned())
         } else {
-            let fallback = thumbnails_dir.join("previews").join(invoice.raw_file_id.to_string()).join("image.jpg");
+            let fallback = thumbnails_dir
+                .join("previews")
+                .join(invoice.raw_file_id.to_string())
+                .join("image.jpg");
             if fallback.exists() {
                 Some(fallback.to_string_lossy().into_owned())
             } else {
@@ -428,11 +440,7 @@ pub fn update_invoice(
     conn: &mut Connection,
     request: UpdateInvoiceRequest,
 ) -> Result<UpdateInvoiceResult, ExtractorError> {
-    let errors = validate_invoice_fields(
-        &request.issue_date,
-        &request.status,
-        request.confidence,
-    );
+    let errors = validate_invoice_fields(&request.issue_date, &request.status, request.confidence);
 
     let tx = conn.transaction()?;
 
@@ -1147,12 +1155,11 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
         )
         .unwrap_or_else(|_| "CNY".to_string());
 
-    let average_confidence: f64 = conn
-        .query_row(
-            "SELECT COALESCE(AVG(confidence), 0.0) FROM invoices WHERE confidence IS NOT NULL",
-            [],
-            |row| row.get(0),
-        )?;
+    let average_confidence: f64 = conn.query_row(
+        "SELECT COALESCE(AVG(confidence), 0.0) FROM invoices WHERE confidence IS NOT NULL",
+        [],
+        |row| row.get(0),
+    )?;
 
     let this_month = chrono::Local::now().format("%Y-%m-01").to_string();
     let (this_month_count, this_month_amount): (i64, f64) = conn.query_row(
@@ -1176,17 +1183,15 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
         |row| row.get(0),
     )?;
 
-    let mut trend_stmt = conn.prepare(
-        &format!(
-            "SELECT strftime('%Y-%m', issue_date) as month, COUNT(*), {}
+    let mut trend_stmt = conn.prepare(&format!(
+        "SELECT strftime('%Y-%m', issue_date) as month, COUNT(*), {}
             FROM invoices
             WHERE issue_date IS NOT NULL
             GROUP BY month
             ORDER BY month DESC
             LIMIT 12",
-            sum_amount()
-        ),
-    )?;
+        sum_amount()
+    ))?;
     let trend_rows: Vec<(String, i64, f64)> = trend_stmt
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1200,15 +1205,13 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
         .collect();
     monthly_trend.reverse(); // oldest first
 
-    let mut type_stmt = conn.prepare(
-        &format!(
-            "SELECT COALESCE(invoice_type, '未知') as label, COUNT(*), {}
+    let mut type_stmt = conn.prepare(&format!(
+        "SELECT COALESCE(invoice_type, '未知') as label, COUNT(*), {}
             FROM invoices
             GROUP BY invoice_type
             ORDER BY COUNT(*) DESC",
-            sum_amount()
-        ),
-    )?;
+        sum_amount()
+    ))?;
     let by_type: Vec<BreakdownItem> = type_stmt
         .query_map([], |row| {
             Ok(BreakdownItem {
@@ -1219,15 +1222,13 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mut status_stmt = conn.prepare(
-        &format!(
-            "SELECT status, COUNT(*), {}
+    let mut status_stmt = conn.prepare(&format!(
+        "SELECT status, COUNT(*), {}
             FROM invoices
             GROUP BY status
             ORDER BY COUNT(*) DESC",
-            sum_amount()
-        ),
-    )?;
+        sum_amount()
+    ))?;
     let by_status: Vec<BreakdownItem> = status_stmt
         .query_map([], |row| {
             Ok(BreakdownItem {
@@ -1238,16 +1239,14 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mut seller_stmt = conn.prepare(
-        &format!(
-            "SELECT COALESCE(seller_name, '未知') as name, COUNT(*), {}
+    let mut seller_stmt = conn.prepare(&format!(
+        "SELECT COALESCE(seller_name, '未知') as name, COUNT(*), {}
             FROM invoices
             GROUP BY seller_name
             ORDER BY COUNT(*) DESC
             LIMIT 5",
-            sum_amount()
-        ),
-    )?;
+        sum_amount()
+    ))?;
     let top_sellers: Vec<TopSellerItem> = seller_stmt
         .query_map([], |row| {
             Ok(TopSellerItem {
@@ -1293,11 +1292,7 @@ pub fn invoice_to_embedding_text(invoice: &InvoiceDetail) -> String {
         parts.push(format!("类别:{}", c));
     }
     if !invoice.items.is_empty() {
-        let item_names: Vec<&str> = invoice
-            .items
-            .iter()
-            .map(|i| i.name.as_str())
-            .collect();
+        let item_names: Vec<&str> = invoice.items.iter().map(|i| i.name.as_str()).collect();
         parts.push(format!("项目:{}", item_names.join(",")));
     }
     if let Some(ref r) = invoice.remarks {

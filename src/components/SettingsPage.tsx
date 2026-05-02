@@ -4,6 +4,7 @@ import type {
   LlmConnectionTestResult,
   ChromaConfig,
   EmbeddingConfig,
+  EmbeddingTestResult,
 } from "../types";
 import {
   testLlmConnection,
@@ -11,7 +12,7 @@ import {
   getChromaConfig,
   setEmbeddingConfig,
   getEmbeddingConfig,
-  testChromaConnection,
+  testEmbeddingConnection,
 } from "../api";
 import { WatchDirManager } from "./WatchDirManager";
 
@@ -38,36 +39,61 @@ export function SettingsPage({
 }: Props) {
   const [llmTestResult, setLlmTestResult] =
     React.useState<LlmConnectionTestResult | null>(null);
-  const [isTesting, setIsTesting] = React.useState(false);
-  const [testError, setTestError] = React.useState<string | null>(null);
+  const [isTestingLlm, setIsTestingLlm] = React.useState(false);
+  const [llmTestError, setLlmTestError] = React.useState<string | null>(null);
 
   const [chromaConfig, setChromaConfigState] = React.useState<ChromaConfig>({
-    base_url: "http://localhost:8000",
-    enabled: false,
+    enabled: true,
   });
-  const [chromaTestResult, setChromaTestResult] =
-    React.useState<boolean | null>(null);
 
   const [embConfig, setEmbConfig] = React.useState<EmbeddingConfig>({
     base_url: llmBaseUrl,
     api_key: llmApiKey,
-    model: "text-embedding-3-small",
-    enabled: false,
+    model: "text-embedding-v4",
+    enabled: true,
   });
+
+  const [embTestResult, setEmbTestResult] =
+    React.useState<EmbeddingTestResult | null>(null);
+  const [isTestingEmb, setIsTestingEmb] = React.useState(false);
+  const [embTestError, setEmbTestError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     getChromaConfig()
-      .then(setChromaConfigState)
+      .then((cfg) => setChromaConfigState({ enabled: cfg.enabled !== false }))
       .catch(() => {});
     getEmbeddingConfig()
-      .then(setEmbConfig)
+      .then((cfg) => setEmbConfig({ ...cfg, enabled: cfg.enabled !== false }))
       .catch(() => {});
   }, []);
 
-  const handleTest = async () => {
-    setIsTesting(true);
+  // Auto-save chroma config on change
+  React.useEffect(() => {
+    setChromaConfig(chromaConfig).catch(() => {});
+  }, [chromaConfig]);
+
+  // Auto-save embedding config on change
+  React.useEffect(() => {
+    setEmbeddingConfig(embConfig).catch(() => {});
+  }, [embConfig]);
+
+  // Test embedding on mount and when config changes (debounced)
+  React.useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        await testEmbeddingConnection();
+        setEmbTestError(null);
+      } catch {
+        setEmbTestError("Embedding 服务连接失败，语义搜索和去重功能暂时不可用");
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [embConfig.base_url, embConfig.api_key, embConfig.model]);
+
+  const handleTestLlm = async () => {
+    setIsTestingLlm(true);
     setLlmTestResult(null);
-    setTestError(null);
+    setLlmTestError(null);
     try {
       const result = await testLlmConnection({
         base_url: llmBaseUrl,
@@ -77,35 +103,32 @@ export function SettingsPage({
       });
       setLlmTestResult(result);
     } catch (err) {
-      setTestError(String(err));
+      setLlmTestError(String(err));
     } finally {
-      setIsTesting(false);
+      setIsTestingLlm(false);
     }
   };
 
-  const handleSetChromaConfig = async () => {
+  const handleTestEmbedding = async () => {
+    setIsTestingEmb(true);
+    setEmbTestResult(null);
+    setEmbTestError(null);
     try {
-      await setChromaConfig(chromaConfig);
+      const result = await testEmbeddingConnection();
+      setEmbTestResult(result);
     } catch (err) {
-      setTestError(String(err));
+      setEmbTestError(String(err));
+    } finally {
+      setIsTestingEmb(false);
     }
   };
 
-  const handleSetEmbConfig = async () => {
+  const openFolder = async (path: string) => {
     try {
-      await setEmbeddingConfig(embConfig);
-    } catch (err) {
-      setTestError(String(err));
-    }
-  };
-
-  const handleTestChroma = async () => {
-    try {
-      await setChromaConfig(chromaConfig);
-      const ok = await testChromaConnection();
-      setChromaTestResult(ok);
-    } catch (err) {
-      setTestError(String(err));
+      const { open } = await import("@tauri-apps/plugin-shell");
+      await open(path);
+    } catch {
+      // ignore if shell plugin not available
     }
   };
 
@@ -154,13 +177,13 @@ export function SettingsPage({
           </label>
         </div>
 
-        <button className="btn-primary" onClick={handleTest} disabled={isTesting}>
-          {isTesting ? "测试中..." : "测试连接"}
+        <button className="btn-primary" onClick={handleTestLlm} disabled={isTestingLlm}>
+          {isTestingLlm ? "测试中..." : "测试连接"}
         </button>
 
-        {testError ? (
+        {llmTestError ? (
           <div className="alert alert-error" style={{ marginTop: 12 }}>
-            {testError}
+            {llmTestError}
           </div>
         ) : null}
 
@@ -185,8 +208,14 @@ export function SettingsPage({
       <div className="section">
         <h3>Embedding Provider</h3>
         <p className="section-desc">
-          配置 OpenAI-compatible Embedding 模型用于语义搜索和去重。默认复用 LLM 的 Base URL 和 API Key。
+          配置 OpenAI-compatible Embedding 模型用于语义搜索和去重。修改后自动保存。
         </p>
+
+        {embTestError ? (
+          <div className="alert alert-warn" style={{ marginBottom: 12 }}>
+            {embTestError}
+          </div>
+        ) : null}
 
         <div className="form-grid">
           <label className="form-field">
@@ -208,7 +237,7 @@ export function SettingsPage({
               onChange={(e) =>
                 setEmbConfig({ ...embConfig, model: e.target.value })
               }
-              placeholder="text-embedding-3-small"
+              placeholder="text-embedding-v4"
               spellCheck={false}
             />
           </label>
@@ -225,77 +254,25 @@ export function SettingsPage({
               spellCheck={false}
             />
           </label>
-
-          <label className="form-field">
-            <span>启用</span>
-            <input
-              type="checkbox"
-              checked={embConfig.enabled}
-              onChange={(e) =>
-                setEmbConfig({ ...embConfig, enabled: e.target.checked })
-              }
-            />
-          </label>
         </div>
 
-        <button className="btn-primary" onClick={handleSetEmbConfig}>
-          保存 Embedding 配置
+        <button className="btn-primary" onClick={handleTestEmbedding} disabled={isTestingEmb}>
+          {isTestingEmb ? "测试中..." : "测试 Embedding 连接"}
         </button>
-      </div>
 
-      <div className="section">
-        <h3>ChromaDB 连接</h3>
-        <p className="section-desc">
-          ChromaDB 作为外部向量存储服务运行。使用 Docker 启动：<code>docker run -p 8000:8000 chromadb/chroma</code>
-        </p>
-
-        <div className="form-grid">
-          <label className="form-field">
-            <span>Base URL</span>
-            <input
-              value={chromaConfig.base_url}
-              onChange={(e) =>
-                setChromaConfigState({
-                  ...chromaConfig,
-                  base_url: e.target.value,
-                })
-              }
-              placeholder="http://localhost:8000"
-              spellCheck={false}
-            />
-          </label>
-
-          <label className="form-field">
-            <span>启用</span>
-            <input
-              type="checkbox"
-              checked={chromaConfig.enabled}
-              onChange={(e) =>
-                setChromaConfigState({
-                  ...chromaConfig,
-                  enabled: e.target.checked,
-                })
-              }
-            />
-          </label>
-        </div>
-
-        <div className="form-actions" style={{ gap: 10 }}>
-          <button className="btn-primary" onClick={handleSetChromaConfig}>
-            保存配置
-          </button>
-          <button className="btn-primary" onClick={handleTestChroma}>
-            测试连接
-          </button>
-        </div>
-
-        {chromaTestResult !== null ? (
+        {embTestResult ? (
           <div className="test-result" style={{ marginTop: 12 }}>
             <div className="test-result-row">
-              <span>ChromaDB 状态</span>
-              <strong>
-                {chromaTestResult ? "已连接" : "无法连接"}
-              </strong>
+              <span>模型</span>
+              <strong>{embTestResult.model}</strong>
+            </div>
+            <div className="test-result-row">
+              <span>维度</span>
+              <strong>{embTestResult.dimensions}</strong>
+            </div>
+            <div className="test-result-row">
+              <span>延迟</span>
+              <strong>{embTestResult.duration_ms} ms</strong>
             </div>
           </div>
         ) : null}
@@ -306,9 +283,25 @@ export function SettingsPage({
           <h3>系统信息</h3>
           <dl className="info-grid">
             <dt>数据目录</dt>
-            <dd>{health.app_data_dir}</dd>
+            <dd>
+              <a
+                className="path-link"
+                onClick={() => openFolder(health.app_data_dir)}
+                title="点击打开文件夹"
+              >
+                {health.app_data_dir}
+              </a>
+            </dd>
             <dt>数据库</dt>
-            <dd>{health.database_path}</dd>
+            <dd>
+              <a
+                className="path-link"
+                onClick={() => openFolder(health.database_path)}
+                title="点击打开文件夹"
+              >
+                {health.database_path}
+              </a>
+            </dd>
             <dt>迁移版本</dt>
             <dd>{health.migration_version}</dd>
           </dl>

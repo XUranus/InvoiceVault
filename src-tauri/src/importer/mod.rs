@@ -29,6 +29,15 @@ pub struct ImportJobSummary {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportJobListResult {
+    pub jobs: Vec<ImportJobSummary>,
+    pub total_count: i64,
+    pub page: i64,
+    pub page_size: i64,
+    pub total_pages: i64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
     #[error("no import paths provided")]
@@ -57,7 +66,21 @@ pub fn import_files(
     Ok(summaries)
 }
 
-pub fn list_import_jobs(conn: &Connection) -> Result<Vec<ImportJobSummary>, ImportError> {
+pub fn list_import_jobs(
+    conn: &Connection,
+    page: i64,
+    page_size: i64,
+) -> Result<ImportJobListResult, ImportError> {
+    let page = page.max(1);
+    let page_size = page_size.clamp(1, 200);
+    let offset = (page - 1) * page_size;
+
+    let total_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM import_jobs",
+        [],
+        |row| row.get(0),
+    )?;
+
     let mut stmt = conn.prepare(
         "SELECT
             ij.id,
@@ -75,14 +98,22 @@ pub fn list_import_jobs(conn: &Connection) -> Result<Vec<ImportJobSummary>, Impo
         FROM import_jobs ij
         LEFT JOIN raw_files rf ON rf.id = ij.raw_file_id
         ORDER BY ij.id DESC
-        LIMIT 100",
+        LIMIT ?1 OFFSET ?2",
     )?;
 
     let jobs = stmt
-        .query_map([], row_to_import_job)?
+        .query_map(params![page_size, offset], row_to_import_job)?
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(jobs)
+    let total_pages = (total_count + page_size - 1) / page_size;
+
+    Ok(ImportJobListResult {
+        jobs,
+        total_count,
+        page,
+        page_size,
+        total_pages,
+    })
 }
 
 fn import_one(

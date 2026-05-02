@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default Receiptier desktop permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": ["core:default", "dialog:default", "shell:allow-open"]
 }

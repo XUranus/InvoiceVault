@@ -1,20 +1,20 @@
 import React from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
-import type { ImportJob, Invoice, WatcherImportEvent } from "./types";
-import { getAppHealth, listImportJobs, searchInvoices, importFiles } from "./api";
+import type { Invoice, WatcherImportEvent } from "./types";
+import { getAppHealth, searchInvoices, importFiles } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { DashboardPage } from "./components/DashboardPage";
 import { ImportPage } from "./components/ImportPage";
 import { InvoicesPage } from "./components/InvoicesPage";
 import { SettingsPage } from "./components/SettingsPage";
+import { AgentPage } from "./components/AgentPage";
 
-type Page = "dashboard" | "import" | "invoices" | "settings";
+type Page = "dashboard" | "import" | "invoices" | "agent" | "settings";
 
 export default function App() {
   const [page, setPage] = React.useState<Page>("dashboard");
   const [health, setHealth] = React.useState<import("./types").AppHealth | null>(null);
-  const [jobs, setJobs] = React.useState<ImportJob[]>([]);
   const [invoices, setInvoices] = React.useState<Invoice[]>([]);
   const [llmBaseUrl, setLlmBaseUrl] = React.useState(
     "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -25,15 +25,10 @@ export default function App() {
   );
   const [isDraggingFiles, setIsDraggingFiles] = React.useState(false);
   const [dashboardKey, setDashboardKey] = React.useState(0);
+  const [importKey, setImportKey] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
 
   const clearError = () => setError(null);
-
-  const refreshJobs = React.useCallback(() => {
-    listImportJobs()
-      .then(setJobs)
-      .catch((err) => setError(String(err)));
-  }, []);
 
   const refreshInvoices = React.useCallback(() => {
     searchInvoices({ page: 1, page_size: 100 })
@@ -45,9 +40,8 @@ export default function App() {
     getAppHealth()
       .then(setHealth)
       .catch((err) => setError(String(err)));
-    refreshJobs();
     refreshInvoices();
-  }, [refreshJobs, refreshInvoices]);
+  }, [refreshInvoices]);
 
   // Global drag-drop handler — navigate to import page on drop
   React.useEffect(() => {
@@ -68,8 +62,8 @@ export default function App() {
         setIsDraggingFiles(false);
         const paths: string[] = (event.payload as { paths: string[] }).paths;
         importFiles(paths)
-          .then((imported) => {
-            setJobs((current) => [...imported, ...current]);
+          .then(() => {
+            setImportKey((k) => k + 1);
             setPage("import");
           })
           .catch((err) => setError(String(err)));
@@ -87,18 +81,14 @@ export default function App() {
   // Watcher auto-import notifications
   React.useEffect(() => {
     const unlisten = listen<WatcherImportEvent>("watcher-import", (_event) => {
-      refreshJobs();
+      setImportKey((k) => k + 1);
       refreshInvoices();
       setDashboardKey((k) => k + 1);
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [refreshJobs, refreshInvoices]);
-
-  const handleJobsChange = (imported: ImportJob[]) => {
-    setJobs((current) => [...imported, ...current]);
-  };
+  }, [refreshInvoices]);
 
   return (
     <div className="app-layout">
@@ -109,7 +99,7 @@ export default function App() {
           clearError();
           if (p === "dashboard") setDashboardKey((k) => k + 1);
           if (p === "invoices") refreshInvoices();
-          if (p === "import") refreshJobs();
+          if (p === "import") setImportKey((k) => k + 1);
         }}
         healthReady={health !== null}
         hasError={error !== null}
@@ -118,18 +108,16 @@ export default function App() {
       <main className="app-main">
         {page === "dashboard" ? (
           <DashboardPage
-            health={health}
             error={error}
             refreshKey={dashboardKey}
           />
         ) : page === "import" ? (
           <ImportPage
-            jobs={jobs}
             isDraggingFiles={isDraggingFiles}
             llmApiKey={llmApiKey}
             llmBaseUrl={llmBaseUrl}
             llmModel={llmModel}
-            onJobsChange={handleJobsChange}
+            refreshKey={importKey}
             onInvoicesAdded={refreshInvoices}
             onError={setError}
           />
@@ -137,6 +125,13 @@ export default function App() {
           <InvoicesPage
             invoices={invoices}
             onInvoicesChanged={refreshInvoices}
+            onError={setError}
+          />
+        ) : page === "agent" ? (
+          <AgentPage
+            llmBaseUrl={llmBaseUrl}
+            llmModel={llmModel}
+            llmApiKey={llmApiKey}
             onError={setError}
           />
         ) : (

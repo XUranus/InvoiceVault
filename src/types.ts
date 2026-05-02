@@ -19,6 +19,14 @@ export type ImportJob = {
   updated_at: string;
 };
 
+export type ImportJobListResult = {
+  jobs: ImportJob[];
+  total_count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
 export type LlmConnectionTestResult = {
   model: string;
   duration_ms: number;
@@ -278,7 +286,6 @@ export type DashboardStats = {
 };
 
 export type ChromaConfig = {
-  base_url: string;
   enabled: boolean;
 };
 
@@ -289,8 +296,43 @@ export type EmbeddingConfig = {
   enabled: boolean;
 };
 
+export type EmbeddingTestResult = {
+  model: string;
+  dimensions: number;
+  duration_ms: number;
+};
+
 export type SimilarResult = {
   invoice_id: number;
   similarity: number;
   metadata: Record<string, string>;
+};
+
+// Agent types
+
+export type AgentSession = {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentMessage = {
+  id: number;
+  session_id: number;
+  role: string;
+  content: string;
+  tool_call_json: string | null;
+  created_at: string;
+};
+
+export type PendingConfirmation = {
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  message: string;
+};
+
+export type AgentResponse = {
+  messages: AgentMessage[];
+  pending_confirmation: PendingConfirmation | null;
 };

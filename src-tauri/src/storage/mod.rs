@@ -10,13 +10,12 @@ const MIGRATIONS: &[(i64, &str)] = &[
         3,
         include_str!("../../migrations/0003_dedupe_candidates.sql"),
     ),
+    (4, include_str!("../../migrations/0004_watch_dirs.sql")),
+    (5, include_str!("../../migrations/0005_chroma_support.sql")),
+    (6, include_str!("../../migrations/0006_agent_support.sql")),
     (
-        4,
-        include_str!("../../migrations/0004_watch_dirs.sql"),
-    ),
-    (
-        5,
-        include_str!("../../migrations/0005_chroma_support.sql"),
+        7,
+        include_str!("../../migrations/0007_invoice_embeddings.sql"),
     ),
 ];
 
@@ -74,6 +73,6 @@ mod tests {
             )
             .expect("read migration version");
 
-        assert_eq!(version, 5);
+        assert_eq!(version, 7);
     }
 }

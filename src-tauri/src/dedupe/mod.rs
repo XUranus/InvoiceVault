@@ -109,10 +109,7 @@ pub fn resolve_duplicate(
     Ok(())
 }
 
-fn detect_field_duplicates(
-    conn: &Connection,
-    invoice_id: i64,
-) -> Result<(), DedupeError> {
+fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), DedupeError> {
     let (invoice_code, invoice_number, issue_date, total_amount, seller_name, _buyer_name): (
         Option<String>,
         Option<String>,
@@ -124,7 +121,16 @@ fn detect_field_duplicates(
         "SELECT invoice_code, invoice_number, issue_date, total_amount, seller_name, buyer_name
         FROM invoices WHERE id = ?1",
         [invoice_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        },
     )?;
 
     let mut candidates: Vec<(i64, f64, &str)> = Vec::new();
@@ -151,7 +157,11 @@ fn detect_field_duplicates(
     let amount_match = total_amount.as_deref().filter(|s| !s.is_empty());
     let seller_match = seller_name.as_deref().filter(|s| !s.is_empty());
 
-    if number_match.is_some() || date_match.is_some() || amount_match.is_some() || seller_match.is_some() {
+    if number_match.is_some()
+        || date_match.is_some()
+        || amount_match.is_some()
+        || seller_match.is_some()
+    {
         let mut sql = String::from(
             "SELECT id, invoice_number, issue_date, total_amount, seller_name FROM invoices WHERE id != ?1",
         );
@@ -166,9 +176,21 @@ fn detect_field_duplicates(
 
         let mut stmt = conn.prepare(&sql)?;
         let refs: Vec<&dyn rusqlite::types::ToSql> = vals.iter().map(|v| v.as_ref()).collect();
-        let rows: Vec<(i64, Option<String>, Option<String>, Option<String>, Option<String>)> = stmt
+        let rows: Vec<(
+            i64,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )> = stmt
             .query_map(refs.as_slice(), |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -176,16 +198,24 @@ fn detect_field_duplicates(
             let mut matches = 0u32;
 
             if let (Some(n1), Some(n2)) = (number_match, &row_num) {
-                if n1 == n2 { matches += 1; }
+                if n1 == n2 {
+                    matches += 1;
+                }
             }
             if let (Some(d1), Some(d2)) = (date_match, &row_date) {
-                if d1 == d2 { matches += 1; }
+                if d1 == d2 {
+                    matches += 1;
+                }
             }
             if let (Some(a1), Some(a2)) = (amount_match, &row_amount) {
-                if a1 == a2 { matches += 1; }
+                if a1 == a2 {
+                    matches += 1;
+                }
             }
             if let (Some(s1), Some(s2)) = (seller_match, &row_seller) {
-                if s1 == s2 { matches += 1; }
+                if s1 == s2 {
+                    matches += 1;
+                }
             }
 
             let score = if matches >= 3 {
@@ -288,7 +318,14 @@ mod tests {
         conn
     }
 
-    fn insert_invoice(conn: &Connection, code: &str, number: &str, date: &str, amount: &str, seller: &str) -> i64 {
+    fn insert_invoice(
+        conn: &Connection,
+        code: &str,
+        number: &str,
+        date: &str,
+        amount: &str,
+        seller: &str,
+    ) -> i64 {
         conn.execute(
             "INSERT INTO invoices (raw_file_id, invoice_type, invoice_code, invoice_number, issue_date, seller_name, total_amount, currency, status, duplicate_status)
             VALUES (1, '增值税电子普通发票', ?1, ?2, ?3, ?4, ?5, 'CNY', 'recognized', 'unknown')",
@@ -300,7 +337,9 @@ mod tests {
 
     fn ensure_raw_file(conn: &Connection) -> i64 {
         let exists: Option<i64> = conn
-            .query_row("SELECT id FROM raw_files WHERE id = 1", [], |row| row.get(0))
+            .query_row("SELECT id FROM raw_files WHERE id = 1", [], |row| {
+                row.get(0)
+            })
             .optional()
             .expect("check");
         if exists.is_some() {
@@ -320,8 +359,22 @@ mod tests {
         let conn = setup_db();
         ensure_raw_file(&conn);
 
-        let id1 = insert_invoice(&conn, "CODE001", "NUM001", "2026-04-01", "100.00", "SellerA");
-        let _id2 = insert_invoice(&conn, "CODE001", "NUM001", "2026-04-01", "100.00", "SellerA");
+        let id1 = insert_invoice(
+            &conn,
+            "CODE001",
+            "NUM001",
+            "2026-04-01",
+            "100.00",
+            "SellerA",
+        );
+        let _id2 = insert_invoice(
+            &conn,
+            "CODE001",
+            "NUM001",
+            "2026-04-01",
+            "100.00",
+            "SellerA",
+        );
 
         detect_field_duplicates(&conn, id1).expect("detect");
         let result = check_invoice_duplicates(&conn, id1).expect("check");
@@ -336,8 +389,22 @@ mod tests {
         let conn = setup_db();
         ensure_raw_file(&conn);
 
-        let id1 = insert_invoice(&conn, "CODE002", "NUM002", "2026-05-01", "200.00", "SellerB");
-        let _id2 = insert_invoice(&conn, "CODE002", "NUM002", "2026-05-01", "200.00", "SellerB");
+        let id1 = insert_invoice(
+            &conn,
+            "CODE002",
+            "NUM002",
+            "2026-05-01",
+            "200.00",
+            "SellerB",
+        );
+        let _id2 = insert_invoice(
+            &conn,
+            "CODE002",
+            "NUM002",
+            "2026-05-01",
+            "200.00",
+            "SellerB",
+        );
 
         detect_field_duplicates(&conn, id1).expect("detect");
         let result = check_invoice_duplicates(&conn, id1).expect("check");

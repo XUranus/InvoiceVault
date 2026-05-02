@@ -1,8 +1,7 @@
 import React from "react";
-import type { InvoiceDetail as InvoiceDetailType } from "../types";
-import { getInvoiceDetail } from "../api";
+import type { InvoiceDetail as InvoiceDetailType, InvoiceItemRow, InvoiceItemChange } from "../types";
+import { getInvoiceDetail, updateInvoiceItems } from "../api";
 import { InvoiceEditForm } from "./InvoiceEditForm";
-import { LineItemsEditor } from "./LineItemsEditor";
 import { DuplicateWarning } from "./DuplicateWarning";
 
 type Props = {
@@ -15,12 +14,17 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
   const [detail, setDetail] = React.useState<InvoiceDetailType | null>(null);
   const [isEditing, setIsEditing] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
+  const [editingItems, setEditingItems] = React.useState<InvoiceItemRow[]>([]);
+  const [itemsDirty, setItemsDirty] = React.useState(false);
+  const [savingItems, setSavingItems] = React.useState(false);
 
   const loadDetail = React.useCallback(async () => {
     setLoading(true);
     try {
       const result = await getInvoiceDetail(invoiceId);
       setDetail(result);
+      setEditingItems(result.items.map((i) => ({ ...i })));
+      setItemsDirty(false);
     } catch (err) {
       onError(String(err));
     } finally {
@@ -35,6 +39,41 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
   const handleSaved = () => {
     setIsEditing(false);
     loadDetail();
+  };
+
+  const handleItemChange = (index: number, field: string, value: string) => {
+    setEditingItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+    setItemsDirty(true);
+  };
+
+  const handleSaveItems = async () => {
+    if (!itemsDirty) return;
+    setSavingItems(true);
+    try {
+      const changes: InvoiceItemChange[] = editingItems.map((item) => ({
+        action: "update" as const,
+        id: item.id,
+        name: item.name,
+        specification: item.specification,
+        unit: item.unit,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        amount: item.amount,
+        tax_rate: item.tax_rate,
+        tax_amount: item.tax_amount,
+      }));
+      await updateInvoiceItems({ invoice_id: invoiceId, items: changes });
+      setItemsDirty(false);
+      loadDetail();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setSavingItems(false);
+    }
   };
 
   if (loading) {
@@ -65,17 +104,39 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
         <button className="back-btn" onClick={onBack}>
           ← 返回列表
         </button>
-        <button
-          className="edit-btn"
-          onClick={() => setIsEditing((prev) => !prev)}
-        >
-          {isEditing ? "取消编辑" : "编辑"}
-        </button>
+        <div className="detail-header-actions">
+          <button
+            className="edit-btn"
+            onClick={() => setIsEditing((prev) => !prev)}
+          >
+            {isEditing ? "取消编辑" : "编辑"}
+          </button>
+        </div>
       </div>
 
-      <h2>
-        {detail.seller_name ?? detail.invoice_type ?? "发票详情"}
-      </h2>
+      <div className="detail-title-row">
+        <h2>
+          {detail.seller_name ?? detail.invoice_type ?? "发票详情"}
+        </h2>
+        <div className="detail-badges">
+          <span className={`badge badge-status-${detail.status}`}>
+            {statusLabel(detail.status)}
+          </span>
+          <span className={`badge badge-dup-${detail.duplicate_status}`}>
+            {duplicateLabel(detail.duplicate_status)}
+          </span>
+          {detail.confidence != null && (
+            <span className="badge badge-confidence">
+              置信度 {(detail.confidence * 100).toFixed(0)}%
+            </span>
+          )}
+          {detail.source_page_range && (
+            <span className="badge badge-page">
+              {detail.source_page_range}
+            </span>
+          )}
+        </div>
+      </div>
 
       {detail.thumbnail_path ? (
         <div className="thumbnail-preview">
@@ -114,24 +175,24 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
           <Field label="价税合计" value={detail.total_amount} />
           <Field label="类别" value={detail.category} />
           <Field label="备注" value={detail.remarks} />
-          <Field label="页码范围" value={detail.source_page_range} />
-          <Field
-            label="置信度"
-            value={
-              detail.confidence != null
-                ? `${(detail.confidence * 100).toFixed(0)}%`
-                : null
-            }
-          />
-          <Field label="状态" value={detail.status} />
-          <Field label="重复状态" value={detail.duplicate_status} />
         </div>
       )}
 
-      {!isEditing && detail.items.length > 0 ? (
+      {detail.items.length > 0 || editingItems.length > 0 ? (
         <div className="items-section">
-          <h3>明细行</h3>
-          <table className="items-table">
+          <div className="items-section-header">
+            <h3>明细行</h3>
+            {itemsDirty && (
+              <button
+                className="btn-primary btn-small"
+                onClick={handleSaveItems}
+                disabled={savingItems}
+              >
+                {savingItems ? "保存中..." : "保存明细"}
+              </button>
+            )}
+          </div>
+          <table className="items-table items-table-editable">
             <thead>
               <tr>
                 <th>名称</th>
@@ -145,16 +206,56 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               </tr>
             </thead>
             <tbody>
-              {detail.items.map((item) => (
+              {editingItems.map((item, idx) => (
                 <tr key={item.id}>
-                  <td>{item.name}</td>
-                  <td>{item.specification ?? ""}</td>
-                  <td>{item.unit ?? ""}</td>
-                  <td>{item.quantity ?? ""}</td>
-                  <td>{item.unit_price ?? ""}</td>
-                  <td>{item.amount ?? ""}</td>
-                  <td>{item.tax_rate ?? ""}</td>
-                  <td>{item.tax_amount ?? ""}</td>
+                  <td>
+                    <input
+                      value={item.name}
+                      onChange={(e) => handleItemChange(idx, "name", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={item.specification ?? ""}
+                      onChange={(e) => handleItemChange(idx, "specification", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={item.unit ?? ""}
+                      onChange={(e) => handleItemChange(idx, "unit", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={item.quantity ?? ""}
+                      onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={item.unit_price ?? ""}
+                      onChange={(e) => handleItemChange(idx, "unit_price", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={item.amount ?? ""}
+                      onChange={(e) => handleItemChange(idx, "amount", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={item.tax_rate ?? ""}
+                      onChange={(e) => handleItemChange(idx, "tax_rate", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={item.tax_amount ?? ""}
+                      onChange={(e) => handleItemChange(idx, "tax_amount", e.target.value)}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -173,4 +274,24 @@ function Field({ label, value }: { label: string; value: string | null }) {
       <dd>{value}</dd>
     </div>
   );
+}
+
+function statusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    recognized: "已识别",
+    reviewed: "已审核",
+    exported: "已导出",
+    pending: "待处理",
+  };
+  return labels[status] ?? status;
+}
+
+function duplicateLabel(status: string): string {
+  const labels: Record<string, string> = {
+    unique: "唯一",
+    possible_duplicate: "疑似重复",
+    probable_duplicate: "高度疑似重复",
+    unknown: "未检测",
+  };
+  return labels[status] ?? status;
 }

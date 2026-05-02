@@ -13,8 +13,8 @@ impl Default for EmbeddingConfig {
         Self {
             base_url: String::new(),
             api_key: String::new(),
-            model: "text-embedding-3-small".into(),
-            enabled: false,
+            model: "text-embedding-v4".into(),
+            enabled: true,
         }
     }
 }
@@ -109,14 +109,35 @@ pub async fn generate_embedding(
     Ok(embedding)
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct EmbeddingTestResult {
+    pub model: String,
+    pub dimensions: usize,
+    pub duration_ms: u64,
+}
+
+pub async fn test_embedding_connection(
+    config: &EmbeddingConfig,
+) -> Result<EmbeddingTestResult, EmbeddingError> {
+    let start = std::time::Instant::now();
+    let embedding = generate_embedding(config, "test connection").await?;
+    let dimensions = embedding.len();
+    let duration_ms = start.elapsed().as_millis() as u64;
+    Ok(EmbeddingTestResult {
+        model: config.model.clone(),
+        dimensions,
+        duration_ms,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn default_config_is_disabled() {
+    fn default_config_is_enabled() {
         let config = EmbeddingConfig::default();
-        assert!(!config.enabled);
-        assert_eq!(config.model, "text-embedding-3-small");
+        assert!(config.enabled);
+        assert_eq!(config.model, "text-embedding-v4");
     }
 }
