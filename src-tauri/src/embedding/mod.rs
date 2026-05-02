@@ -74,13 +74,10 @@ pub async fn generate_embedding(
         req = req.header("Authorization", format!("Bearer {}", config.api_key));
     }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| {
-            error!("Embedding API connection error: {e}");
-            EmbeddingError::Connection(e.to_string())
-        })?;
+    let resp = req.send().await.map_err(|e| {
+        error!("Embedding API connection error: {e}");
+        EmbeddingError::Connection(e.to_string())
+    })?;
 
     if !resp.status().is_success() {
         let status = resp.status().as_u16();

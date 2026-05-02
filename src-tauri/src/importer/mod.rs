@@ -4,8 +4,8 @@ use std::{
 };
 
 use rusqlite::{params, Connection, OptionalExtension};
-use tracing::error;
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 use crate::raw_store::{inspect_file, store_original_file, RawFileInput, RawStoreError};
 
@@ -76,11 +76,8 @@ pub fn list_import_jobs(
     let page_size = page_size.clamp(1, 200);
     let offset = (page - 1) * page_size;
 
-    let total_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM import_jobs",
-        [],
-        |row| row.get(0),
-    )?;
+    let total_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM import_jobs", [], |row| row.get(0))?;
 
     let mut stmt = conn.prepare(
         "SELECT

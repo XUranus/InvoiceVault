@@ -194,10 +194,11 @@ pub fn list_notifications(conn: &Connection) -> Result<Vec<NotificationRow>, Eve
 }
 
 pub fn get_unread_notification_count(conn: &Connection) -> Result<i64, EventError> {
-    let count: i64 =
-        conn.query_row("SELECT COUNT(*) FROM notifications WHERE is_read = 0", [], |row| {
-            row.get(0)
-        })?;
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM notifications WHERE is_read = 0",
+        [],
+        |row| row.get(0),
+    )?;
     Ok(count)
 }
 
@@ -239,7 +240,11 @@ pub fn record_import_event(
     failure_count: usize,
     source_paths: &[String],
 ) -> Result<(), EventError> {
-    let status = if failure_count == 0 { "completed" } else { "completed" };
+    let status = if failure_count == 0 {
+        "completed"
+    } else {
+        "completed"
+    };
     let metadata = serde_json::json!({ "source_paths": source_paths });
     create_event(
         conn,
@@ -312,34 +317,8 @@ pub fn record_agent_event(
     Ok(())
 }
 
-/// Create a notification for completed async tasks.
-pub fn notify_task_completed(
-    conn: &Connection,
-    title: &str,
-    message: &str,
-    reference_type: Option<&str>,
-    reference_id: Option<i64>,
-) -> Result<(), EventError> {
-    create_notification(conn, "info", title, message, reference_type, reference_id)?;
-    Ok(())
-}
-
-/// Create a warning notification.
-pub fn notify_warning(
-    conn: &Connection,
-    title: &str,
-    message: &str,
-) -> Result<(), EventError> {
-    create_notification(conn, "warning", title, message, None, None)?;
-    Ok(())
-}
-
 /// Create an error notification.
-pub fn notify_error(
-    conn: &Connection,
-    title: &str,
-    message: &str,
-) -> Result<(), EventError> {
+pub fn notify_error(conn: &Connection, title: &str, message: &str) -> Result<(), EventError> {
     create_notification(conn, "error", title, message, None, None)?;
     Ok(())
 }
@@ -358,8 +337,17 @@ mod tests {
     #[test]
     fn create_and_list_events() {
         let conn = setup();
-        create_event(&conn, "import", "导入 3 个文件", "成功 3 个", "completed", None, None, Some(r#"{"source_paths":["a.pdf","b.jpg"]}"#))
-            .expect("create");
+        create_event(
+            &conn,
+            "import",
+            "导入 3 个文件",
+            "成功 3 个",
+            "completed",
+            None,
+            None,
+            Some(r#"{"source_paths":["a.pdf","b.jpg"]}"#),
+        )
+        .expect("create");
         create_event(
             &conn,
             "recognition",
@@ -416,8 +404,17 @@ mod tests {
     fn list_events_pagination() {
         let conn = setup();
         for i in 0..5 {
-            create_event(&conn, "import", &format!("t{i}"), "d", "completed", None, None, None)
-                .expect("create");
+            create_event(
+                &conn,
+                "import",
+                &format!("t{i}"),
+                "d",
+                "completed",
+                None,
+                None,
+                None,
+            )
+            .expect("create");
         }
         let page1 = list_events(&conn, 1, 2, None).expect("page1");
         assert_eq!(page1.events.len(), 2);

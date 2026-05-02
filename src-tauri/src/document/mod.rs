@@ -66,7 +66,10 @@ pub fn render_pdf_pages(
         })?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).chars().take(800).collect::<String>();
+        let stderr = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(800)
+            .collect::<String>();
         error!("PDF renderer failed: {stderr}");
         return Err(DocumentError::PdfRendererFailed {
             status: output.status.to_string(),
@@ -172,7 +175,10 @@ fn run_magick_resize(
     if output.status.success() {
         Ok(())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).chars().take(800).collect::<String>();
+        let stderr = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(800)
+            .collect::<String>();
         error!("Image processor (magick) failed: {stderr}");
         Err(DocumentError::ImageProcessorFailed {
             status: output.status.to_string(),

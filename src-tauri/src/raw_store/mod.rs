@@ -5,10 +5,10 @@ use std::{
 };
 
 use chrono::{Datelike, Local};
-use tracing::error;
 use md5::Md5;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use tracing::error;
 
 const ALLOWED_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg"];
 

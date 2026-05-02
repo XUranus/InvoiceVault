@@ -692,10 +692,7 @@ async fn recognize_raw_file_async(
         };
 
         if let Some(invoice) = invoice {
-            let title = invoice
-                .seller_name
-                .clone()
-                .unwrap_or_else(|| "未知".into());
+            let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
             if let Ok(db) = db.lock() {
                 let _ = event::record_recognition_event(
                     &db,

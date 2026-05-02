@@ -355,12 +355,12 @@ pub fn get_invoice_detail(
         Option<String>,
         Option<String>,
     ) = conn.query_row(
-            "SELECT rf.original_name, rf.mime_type, rf.storage_path, inv.source_page_range
+        "SELECT rf.original_name, rf.mime_type, rf.storage_path, inv.source_page_range
             FROM invoices inv JOIN raw_files rf ON rf.id = inv.raw_file_id
             WHERE inv.id = ?1",
-            [invoice_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )?;
+        [invoice_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )?;
 
     let preview_dir = thumbnails_dir
         .join("previews")
@@ -1405,10 +1405,7 @@ pub fn batch_update_invoices(
     Ok(rows)
 }
 
-pub fn batch_delete_invoices(
-    conn: &Connection,
-    ids: &[i64],
-) -> Result<usize, ExtractorError> {
+pub fn batch_delete_invoices(conn: &Connection, ids: &[i64]) -> Result<usize, ExtractorError> {
     if ids.is_empty() {
         return Ok(0);
     }
@@ -1418,24 +1415,29 @@ pub fn batch_delete_invoices(
         .collect::<Vec<_>>()
         .join(",");
     // Collect raw_file_ids before deleting invoices (so we can clean up orphaned raw files)
-    let mut raw_file_ids: Vec<i64> = Vec::new();
-    {
+    let raw_file_ids: Vec<i64> = {
         let mut stmt = conn.prepare(&format!(
             "SELECT DISTINCT raw_file_id FROM invoices WHERE id IN ({})",
             ids_str
         ))?;
-        let rows: Vec<i64> = stmt
+        let rows = stmt
             .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        raw_file_ids = rows;
-    }
+        rows
+    };
     // Delete referencing rows first (extraction_runs has no ON DELETE CASCADE)
     conn.execute(
-        &format!("DELETE FROM extraction_runs WHERE invoice_id IN ({})", ids_str),
+        &format!(
+            "DELETE FROM extraction_runs WHERE invoice_id IN ({})",
+            ids_str
+        ),
         [],
     )?;
     conn.execute(
-        &format!("DELETE FROM events WHERE reference_type = 'invoice' AND reference_id IN ({})", ids_str),
+        &format!(
+            "DELETE FROM events WHERE reference_type = 'invoice' AND reference_id IN ({})",
+            ids_str
+        ),
         [],
     )?;
     conn.execute(

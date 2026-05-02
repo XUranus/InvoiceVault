@@ -477,7 +477,10 @@ async fn send_chat_request(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        error!("Agent: LLM HTTP {status}: {}", crate::llm::truncate(&body, 200));
+        error!(
+            "Agent: LLM HTTP {status}: {}",
+            crate::llm::truncate(&body, 200)
+        );
         return Err(LlmError::ProviderStatus {
             status: status.as_u16(),
             body: crate::llm::truncate(&body, 500),

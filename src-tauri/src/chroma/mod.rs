@@ -62,9 +62,7 @@ pub fn query_similar(
     query_embedding: &[f32],
     limit: usize,
 ) -> Result<Vec<SimilarResult>, ChromaError> {
-    let mut stmt = conn.prepare(
-        "SELECT invoice_id, embedding FROM invoice_embeddings",
-    )?;
+    let mut stmt = conn.prepare("SELECT invoice_id, embedding FROM invoice_embeddings")?;
 
     let rows: Vec<(i64, Vec<u8>)> = stmt
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -97,12 +95,8 @@ pub fn query_similar(
 }
 
 fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
-    let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            embedding.as_ptr() as *const u8,
-            embedding.len() * 4,
-        )
-    };
+    let bytes: &[u8] =
+        unsafe { std::slice::from_raw_parts(embedding.as_ptr() as *const u8, embedding.len() * 4) };
     bytes.to_vec()
 }
 
@@ -154,7 +148,8 @@ mod tests {
             "INSERT INTO invoices (id, raw_file_id, invoice_type, status, duplicate_status)
             VALUES (1, 1, 'test', 'recognized', 'unique')",
             [],
-        ).expect("invoice");
+        )
+        .expect("invoice");
         conn
     }
 

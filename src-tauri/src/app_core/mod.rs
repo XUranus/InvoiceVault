@@ -41,7 +41,9 @@ use crate::{
         SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
         UpdateInvoiceResult,
     },
-    importer::{import_files, list_import_jobs, ImportError, ImportJobListResult, ImportJobSummary},
+    importer::{
+        import_files, list_import_jobs, ImportError, ImportJobListResult, ImportJobSummary,
+    },
     llm::LlmProviderConfig,
     storage::{run_migrations, StorageError},
     watcher::{
@@ -149,27 +151,21 @@ impl AppState {
         let chroma_config = ChromaConfig::default();
 
         // Load persisted configs
-        let embedding_config = Self::load_config_raw::<EmbeddingConfig>(
-            &app_data_dir,
-            "embedding_config.json",
-        )
-        .unwrap_or_default();
+        let embedding_config =
+            Self::load_config_raw::<EmbeddingConfig>(&app_data_dir, "embedding_config.json")
+                .unwrap_or_default();
 
         let llm_config: Arc<Mutex<Option<LlmProviderConfig>>> = {
-            let saved = Self::load_config_raw::<LlmProviderConfig>(
-                &app_data_dir,
-                "llm_config.json",
-            );
+            let saved =
+                Self::load_config_raw::<LlmProviderConfig>(&app_data_dir, "llm_config.json");
             Arc::new(Mutex::new(saved))
         };
 
-        let recognition_max_concurrent: usize = Self::load_config_raw::<serde_json::Value>(
-            &app_data_dir,
-            "recognition_config.json",
-        )
-        .and_then(|v| v.get("max_concurrent").and_then(|v| v.as_u64()))
-        .map(|v| v as usize)
-        .unwrap_or(3);
+        let recognition_max_concurrent: usize =
+            Self::load_config_raw::<serde_json::Value>(&app_data_dir, "recognition_config.json")
+                .and_then(|v| v.get("max_concurrent").and_then(|v| v.as_u64()))
+                .map(|v| v as usize)
+                .unwrap_or(3);
 
         let watcher_manager = WatcherManager::new(
             Arc::clone(&db),
@@ -191,7 +187,10 @@ impl AppState {
             recognition_max_concurrent: Arc::new(Mutex::new(recognition_max_concurrent)),
         };
 
-        info!("AppState initialized, concurrency={}", recognition_max_concurrent);
+        info!(
+            "AppState initialized, concurrency={}",
+            recognition_max_concurrent
+        );
         Ok(state)
     }
 
@@ -240,11 +239,7 @@ impl AppState {
             if !cfg.api_key.is_empty() {
                 for job in &jobs {
                     if job.status == "completed" && job.raw_file_id.is_some() {
-                        self.spawn_recognition_task(
-                            job.id,
-                            job.raw_file_id.unwrap(),
-                            cfg.clone(),
-                        );
+                        self.spawn_recognition_task(job.id, job.raw_file_id.unwrap(), cfg.clone());
                     }
                 }
             }
@@ -299,7 +294,8 @@ impl AppState {
                                 storage_path: PathBuf::from(row.get::<_, String>(3)?),
                             })
                         },
-                    ).map_err(|e| e.to_string())?
+                    )
+                    .map_err(|e| e.to_string())?
                 };
 
                 let recognition_inputs = if raw_file.mime_type == "application/pdf" {
@@ -307,34 +303,49 @@ impl AppState {
                         &raw_file.storage_path,
                         &thumbnails_dir,
                         raw_file.id,
-                    ).map_err(|e| e.to_string())?;
-                    pages.into_iter().map(|page| {
-                        let prepared = crate::document::prepare_image_for_recognition(
-                            &page.image_path,
-                            &thumbnails_dir,
-                            raw_file.id,
-                            Some(page.page_number),
-                        ).map_err(|e| e.to_string())?;
-                        Ok((Some(page.page_number.to_string()), prepared.image_path, prepared.thumbnail_path, prepared.mime_type))
-                    }).collect::<Result<Vec<_>, String>>()?
+                    )
+                    .map_err(|e| e.to_string())?;
+                    pages
+                        .into_iter()
+                        .map(|page| {
+                            let prepared = crate::document::prepare_image_for_recognition(
+                                &page.image_path,
+                                &thumbnails_dir,
+                                raw_file.id,
+                                Some(page.page_number),
+                            )
+                            .map_err(|e| e.to_string())?;
+                            Ok((
+                                Some(page.page_number.to_string()),
+                                prepared.image_path,
+                                prepared.thumbnail_path,
+                                prepared.mime_type,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, String>>()?
                 } else {
                     let prepared = crate::document::prepare_image_for_recognition(
                         &raw_file.storage_path,
                         &thumbnails_dir,
                         raw_file.id,
                         None,
-                    ).map_err(|e| e.to_string())?;
-                    vec![(None, prepared.image_path, prepared.thumbnail_path, prepared.mime_type)]
+                    )
+                    .map_err(|e| e.to_string())?;
+                    vec![(
+                        None,
+                        prepared.image_path,
+                        prepared.thumbnail_path,
+                        prepared.mime_type,
+                    )]
                 };
 
-                let mut model = String::new();
-                for (source_page_range, image_path, _thumbnail_path, mime_type) in &recognition_inputs {
-                    let recognition = crate::llm::recognize_invoice_image(
-                        config.clone(),
-                        image_path,
-                        mime_type,
-                    ).await.map_err(|e| e.to_string())?;
-                    model = recognition.model.clone();
+                for (source_page_range, image_path, _thumbnail_path, mime_type) in
+                    &recognition_inputs
+                {
+                    let recognition =
+                        crate::llm::recognize_invoice_image(config.clone(), image_path, mime_type)
+                            .await
+                            .map_err(|e| e.to_string())?;
                     let mut conn = db.lock().map_err(|e| e.to_string())?;
                     let invoice = crate::extractor::save_invoice_extraction(
                         &mut conn,
@@ -345,22 +356,33 @@ impl AppState {
                             model: Some(recognition.model.clone()),
                             response_json: recognition.response_json,
                         },
-                    ).map_err(|e| e.to_string())?;
+                    )
+                    .map_err(|e| e.to_string())?;
                     let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
                     let _ = event::record_recognition_event(
-                        &conn, invoice.id, &title, true, recognition.duration_ms, &recognition.model, 1,
+                        &conn,
+                        invoice.id,
+                        &title,
+                        true,
+                        recognition.duration_ms,
+                        &recognition.model,
+                        1,
                     );
                     let _ = event::create_notification(
                         &conn,
                         "info",
                         &format!("自动识别完成: {title}"),
-                        &format!("模型 {model}，耗时 {}ms", recognition.duration_ms),
+                        &format!(
+                            "模型 {}，耗时 {}ms",
+                            recognition.model, recognition.duration_ms
+                        ),
                         Some("invoice"),
                         Some(invoice.id),
                     );
                 }
                 Ok(())
-            }.await;
+            }
+            .await;
 
             // Decrement running
             if let Ok(mut r) = running.lock() {
@@ -409,16 +431,12 @@ impl AppState {
                     let text = invoice_to_embedding_text(&detail);
                     if let Ok(embedding) = generate_embedding(&emb_config, &text).await {
                         if let Ok(db) = db_arc.lock() {
-                            let _ = chroma::upsert_embedding(
-                                &db, invoice_id, &embedding, &text,
-                            );
+                            let _ = chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
                             let _ = db.execute(
                                 "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
                                 [invoice_id],
                             );
-                            if let Ok(similar) =
-                                chroma::query_similar(&db, &embedding, 5)
-                            {
+                            if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
                                 let _ = crate::dedupe::detect_semantic_duplicates(
                                     &db, invoice_id, &similar,
                                 );
@@ -491,16 +509,12 @@ impl AppState {
                     let text = invoice_to_embedding_text(&detail);
                     if let Ok(embedding) = generate_embedding(&emb_config, &text).await {
                         if let Ok(db) = db_arc.lock() {
-                            let _ = chroma::upsert_embedding(
-                                &db, invoice_id, &embedding, &text,
-                            );
+                            let _ = chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
                             let _ = db.execute(
                                 "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
                                 [invoice_id],
                             );
-                            if let Ok(similar) =
-                                chroma::query_similar(&db, &embedding, 5)
-                            {
+                            if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
                                 let _ = crate::dedupe::detect_semantic_duplicates(
                                     &db, invoice_id, &similar,
                                 );
@@ -793,7 +807,13 @@ impl AppState {
     ) -> Result<(), AppError> {
         let db = self.db.lock().expect("db lock");
         Ok(event::record_recognition_event(
-            &db, invoice_id, invoice_title, success, duration_ms, model, page_count,
+            &db,
+            invoice_id,
+            invoice_title,
+            success,
+            duration_ms,
+            model,
+            page_count,
         )?)
     }
 
@@ -806,9 +826,7 @@ impl AppState {
         reference_id: Option<i64>,
     ) -> Result<(), AppError> {
         let db = self.db.lock().expect("db lock");
-        event::create_notification(
-            &db, level, title, message, reference_type, reference_id,
-        )?;
+        event::create_notification(&db, level, title, message, reference_type, reference_id)?;
         Ok(())
     }
 
@@ -844,7 +862,9 @@ impl AppState {
             *curr = max;
         }
         let path = self.paths.app_data_dir.join("recognition_config.json");
-        if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({ "max_concurrent": max })) {
+        if let Ok(json) =
+            serde_json::to_string_pretty(&serde_json::json!({ "max_concurrent": max }))
+        {
             if let Err(e) = std::fs::write(&path, json) {
                 error!("Failed to persist recognition config: {e}");
             }
@@ -943,7 +963,11 @@ impl AppState {
             &db,
             "export",
             "导出日志",
-            &format!("日志已导出至 {}，大小 {} 字节", output_path.display(), file_size),
+            &format!(
+                "日志已导出至 {}，大小 {} 字节",
+                output_path.display(),
+                file_size
+            ),
             "completed",
             None,
             None,
@@ -964,7 +988,10 @@ impl AppState {
         let mut stmt = db.prepare("SELECT id, storage_path FROM raw_files")?;
         let db_records: Vec<(i64, PathBuf)> = stmt
             .query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, PathBuf::from(row.get::<_, String>(1)?)))
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    PathBuf::from(row.get::<_, String>(1)?),
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
@@ -1002,7 +1029,10 @@ impl AppState {
         for raw_id in &orphan_ids {
             // Delete dependent records and the raw_file itself in order
             let _ = db.execute("DELETE FROM import_jobs WHERE raw_file_id = ?1", [*raw_id]);
-            let _ = db.execute("DELETE FROM extraction_runs WHERE raw_file_id = ?1", [*raw_id]);
+            let _ = db.execute(
+                "DELETE FROM extraction_runs WHERE raw_file_id = ?1",
+                [*raw_id],
+            );
             let _ = db.execute("DELETE FROM invoices WHERE raw_file_id = ?1", [*raw_id]);
             let _ = db.execute("DELETE FROM raw_files WHERE id = ?1", [*raw_id]);
             db_records_removed += 1;
