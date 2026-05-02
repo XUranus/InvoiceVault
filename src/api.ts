@@ -19,6 +19,9 @@ import type {
   AddWatchDirRequest,
   UpdateWatchDirRequest,
   DashboardStats,
+  ChromaConfig,
+  EmbeddingConfig,
+  SimilarResult,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -122,6 +125,37 @@ export async function updateWatchDir(
 
 export async function getDashboardStats(): Promise<DashboardStats> {
   return invoke<DashboardStats>("get_dashboard_stats");
+}
+
+export async function setChromaConfig(
+  config: ChromaConfig,
+): Promise<void> {
+  return invoke<void>("set_chroma_config", { config });
+}
+
+export async function getChromaConfig(): Promise<ChromaConfig> {
+  return invoke<ChromaConfig>("get_chroma_config");
+}
+
+export async function setEmbeddingConfig(
+  config: EmbeddingConfig,
+): Promise<void> {
+  return invoke<void>("set_embedding_config", { config });
+}
+
+export async function getEmbeddingConfig(): Promise<EmbeddingConfig> {
+  return invoke<EmbeddingConfig>("get_embedding_config");
+}
+
+export async function testChromaConnection(): Promise<boolean> {
+  return invoke<boolean>("test_chroma_connection");
+}
+
+export async function searchInvoicesSemantic(
+  query: string,
+  limit: number,
+): Promise<SimilarResult[]> {
+  return invoke<SimilarResult[]>("search_invoices_semantic", { query, limit });
 }
 
 export async function toggleWatchDir(

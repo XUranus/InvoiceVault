@@ -1,6 +1,8 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
+use crate::chroma::SimilarResult;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DedupeCheckResult {
     pub invoice_id: i64,
@@ -213,6 +215,39 @@ fn detect_field_duplicates(
 
     recalc_duplicate_status(conn, invoice_id)?;
 
+    Ok(())
+}
+
+pub fn detect_semantic_duplicates(
+    conn: &Connection,
+    invoice_id: i64,
+    similar: &[SimilarResult],
+) -> Result<(), DedupeError> {
+    for result in similar {
+        if result.invoice_id == invoice_id {
+            continue;
+        }
+
+        let score = if result.similarity >= 0.92 {
+            80.0
+        } else if result.similarity >= 0.85 {
+            60.0
+        } else {
+            continue;
+        };
+
+        conn.execute(
+            "INSERT INTO dedupe_candidates (invoice_id, candidate_invoice_id, score, reason, status)
+            VALUES (?1, ?2, ?3, 'semantic', 'open')
+            ON CONFLICT(invoice_id, candidate_invoice_id) DO UPDATE SET
+                score = MAX(dedupe_candidates.score, excluded.score),
+                reason = CASE WHEN dedupe_candidates.score >= excluded.score THEN dedupe_candidates.reason ELSE 'semantic' END,
+                status = CASE WHEN dedupe_candidates.status IN ('confirmed', 'ignored') THEN dedupe_candidates.status ELSE 'open' END",
+            params![invoice_id, result.invoice_id, score],
+        )?;
+    }
+
+    recalc_duplicate_status(conn, invoice_id)?;
     Ok(())
 }
 

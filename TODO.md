@@ -34,10 +34,10 @@
 
 - [x] 实现监听目录配置。
 - [x] 实现后台目录监听和自动导入。
-- [ ] 实现 ChromaDB VectorStore adapter。
-- [ ] 实现发票 embedding 写入和更新。
-- [ ] 实现语义搜索。
-- [ ] 实现语义相似度去重。
+- [x] 实现 ChromaDB VectorStore adapter。
+- [x] 实现发票 embedding 写入和更新。
+- [x] 实现语义搜索。
+- [x] 实现语义相似度去重。
 - [x] 实现 Dashboard 统计面板。
 - [x] 实现金额趋势和类型分布图表。
 - [ ] 实现批量 PDF/图片导出。

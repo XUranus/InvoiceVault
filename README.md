@@ -28,10 +28,10 @@ Receiptier 是一个本地优先的跨平台桌面端发票处理 Agent。目标
 - CSV 和 Excel 导出。
 - 目录监听和自动导入（配置监听目录后，文件变化时自动导入，支持防抖和扩展名过滤）。
 - Dashboard 统计面板（发票总数/金额汇总/月度趋势/类型分布/状态分布/供应商排名图表）。
+- ChromaDB 向量索引 + 语义搜索 + 语义去重（可配置 ChromaDB sidecar 和 embedding provider）。
 
 尚未完成：
 
-- ChromaDB 向量索引和语义搜索。
 - Agent 聊天窗口。
 
 详细需求和计划见：

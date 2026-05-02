@@ -1,6 +1,8 @@
 mod app_core;
+mod chroma;
 mod dedupe;
 mod document;
+mod embedding;
 mod exporter;
 mod extractor;
 mod importer;
@@ -10,7 +12,9 @@ mod storage;
 mod watcher;
 
 use app_core::{AppHealth, AppState};
+use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
+use embedding::EmbeddingConfig;
 use exporter::{ExportInvoicesRequest, ExportResult};
 use extractor::{
     DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
@@ -300,6 +304,56 @@ fn toggle_watch_dir(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn set_chroma_config(
+    state: State<'_, AppState>,
+    config: ChromaConfig,
+) -> Result<(), String> {
+    state
+        .set_chroma_config(config)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn get_chroma_config(state: State<'_, AppState>) -> Result<ChromaConfig, String> {
+    Ok(state.get_chroma_config())
+}
+
+#[tauri::command]
+fn set_embedding_config(
+    state: State<'_, AppState>,
+    config: EmbeddingConfig,
+) -> Result<(), String> {
+    state
+        .set_embedding_config(config)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn get_embedding_config(state: State<'_, AppState>) -> Result<EmbeddingConfig, String> {
+    Ok(state.get_embedding_config())
+}
+
+#[tauri::command]
+async fn test_chroma_connection(state: State<'_, AppState>) -> Result<bool, String> {
+    state
+        .test_chroma_connection()
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn search_invoices_semantic(
+    state: State<'_, AppState>,
+    query: String,
+    limit: usize,
+) -> Result<Vec<SimilarResult>, String> {
+    state
+        .search_invoices_semantic(query, limit)
+        .await
+        .map_err(|err| err.to_string())
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -335,7 +389,13 @@ pub fn run() {
             remove_watch_dir,
             list_watch_dirs,
             update_watch_dir,
-            toggle_watch_dir
+            toggle_watch_dir,
+            set_chroma_config,
+            get_chroma_config,
+            set_embedding_config,
+            get_embedding_config,
+            test_chroma_connection,
+            search_invoices_semantic
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");

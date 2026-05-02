@@ -276,3 +276,21 @@ export type DashboardStats = {
   by_status: BreakdownItem[];
   top_sellers: TopSellerItem[];
 };
+
+export type ChromaConfig = {
+  base_url: string;
+  enabled: boolean;
+};
+
+export type EmbeddingConfig = {
+  base_url: string;
+  api_key: string;
+  model: string;
+  enabled: boolean;
+};
+
+export type SimilarResult = {
+  invoice_id: number;
+  similarity: number;
+  metadata: Record<string, string>;
+};

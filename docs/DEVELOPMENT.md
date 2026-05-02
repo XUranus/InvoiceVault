@@ -5,9 +5,9 @@
 M5 已完成，目录监听已实现：
 
 - 前端使用 Vite + React + TypeScript，侧边栏导航多页面布局。
-- 桌面端使用 Tauri 2 + Rust，10 个后端模块（含 watcher）。
+- 桌面端使用 Tauri 2 + Rust，12 个后端模块（含 chroma + embedding）。
 - 后端启动时创建应用数据目录、RAW 目录、缩略图目录和 SQLite 数据库。
-- SQLite 使用内置迁移，当前迁移版本为 `4`。
+- SQLite 使用内置迁移，当前迁移版本为 `5`。
 - 前端通过 Tauri command `app_health` 读取基础设施状态。
 - 后端支持 PDF/PNG/JPG/JPEG 路径导入，导入时会计算 SHA256/MD5、按 `raw/YYYY/MM/文件名` 保留原始格式归档 PDF/图片，并记录导入任务。
 - 前端导入页面支持原生文件选择器、拖拽和路径输入，展示导入历史和任务详情。
@@ -23,6 +23,7 @@ M5 已完成，目录监听已实现：
 - CSV 和 Excel 导出（通过 `rust_xlsxwriter` + `csv` crate）。
 - 目录监听和自动导入：在设置页面配置监听目录，后台线程检测文件变化，防抖后自动触发导入。前端通过 `watcher-import` 事件实时感知。
 - Dashboard 统计面板：发票总数、金额合计、月度趋势折线图、类型分布饼图、状态分布柱状图、Top5 供应商排名。后端聚合查询，前端使用 recharts 渲染。
+- ChromaDB 向量索引：外部 ChromaDB HTTP sidecar，VectorStore 抽象接口。支持发票文本 embedding 写入、语义相似度去重（0.85/0.92 两档阈值）、自然语言语义搜索。Embedding 通过 OpenAI-compatible `/embeddings` 端点生成。
 
 ## 常用命令
 

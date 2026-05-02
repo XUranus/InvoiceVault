@@ -24,7 +24,10 @@ use crate::{
         InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest,
         UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
     },
+    chroma::{ChromaClient, ChromaConfig, ChromaError},
+    embedding::{generate_embedding, EmbeddingConfig, EmbeddingError},
     exporter::{export_invoices, ExportError, ExportInvoicesRequest, ExportResult},
+    extractor::invoice_to_embedding_text,
     importer::{import_files, list_import_jobs, ImportError, ImportJobSummary},
     storage::{run_migrations, StorageError},
     watcher::{
@@ -52,6 +55,10 @@ pub enum AppError {
     Document(#[from] DocumentError),
     #[error("watcher error: {0}")]
     Watcher(#[from] WatcherError),
+    #[error("chromadb error: {0}")]
+    Chroma(#[from] ChromaError),
+    #[error("embedding error: {0}")]
+    Embedding(#[from] EmbeddingError),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -81,6 +88,9 @@ pub struct AppState {
     paths: AppPaths,
     db: Arc<Mutex<Connection>>,
     watcher_manager: WatcherManager,
+    chroma_config: Mutex<ChromaConfig>,
+    embedding_config: Mutex<EmbeddingConfig>,
+    vector_store: Option<ChromaClient>,
 }
 
 impl AppState {
@@ -100,10 +110,21 @@ impl AppState {
             app.clone(),
         )?;
 
+        let chroma_config = ChromaConfig::default();
+        let embedding_config = EmbeddingConfig::default();
+        let vector_store = if chroma_config.enabled {
+            Some(ChromaClient::new(chroma_config.base_url.clone()))
+        } else {
+            None
+        };
+
         Ok(Self {
             paths,
             db,
             watcher_manager,
+            chroma_config: Mutex::new(chroma_config),
+            embedding_config: Mutex::new(embedding_config),
+            vector_store,
         })
     }
 
@@ -138,8 +159,45 @@ impl AppState {
     ) -> Result<InvoiceSummary, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let invoice = save_invoice_extraction(&mut db, request)?;
-        // Trigger dedupe check (best-effort, don't fail on error)
         let _ = run_dedupe_check(&db, invoice.id);
+
+        // Best-effort embedding generation
+        if let Some(ref vs) = self.vector_store {
+            let vs_url = vs.base_url.clone();
+            let emb_config = self.embedding_config.lock().expect("lock").clone();
+            let db_arc = Arc::clone(&self.db);
+            let thumb_dir = self.paths.thumbnails_dir.clone();
+            let invoice_id = invoice.id;
+
+            tauri::async_runtime::spawn(async move {
+                let detail = match db_arc.lock() {
+                    Ok(db) => get_invoice_detail(&db, &thumb_dir, invoice_id).ok(),
+                    Err(_) => None,
+                };
+                if let Some(detail) = detail {
+                    let text = invoice_to_embedding_text(&detail);
+                    if let Ok(embedding) = generate_embedding(&emb_config, &text).await {
+                        let vs_client = ChromaClient::new(vs_url);
+                        let _ = vs_client.upsert_embedding(invoice_id, embedding.clone(), &text).await;
+                        if let Ok(db) = db_arc.lock() {
+                            let _ = db.execute(
+                                "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
+                                [invoice_id],
+                            );
+                        }
+                        // Semantic dedup
+                        if let Ok(similar) = vs_client.query_similar(&embedding, 5).await {
+                            if let Ok(db) = db_arc.lock() {
+                                let _ = crate::dedupe::detect_semantic_duplicates(
+                                    &db, invoice_id, &similar,
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         Ok(invoice)
     }
 
@@ -167,8 +225,44 @@ impl AppState {
     ) -> Result<UpdateInvoiceResult, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let result = update_invoice(&mut db, request)?;
-        // Trigger dedupe check (best-effort)
         let _ = run_dedupe_check(&db, result.invoice.id);
+
+        // Best-effort embedding regeneration
+        if let Some(ref vs) = self.vector_store {
+            let vs_url = vs.base_url.clone();
+            let emb_config = self.embedding_config.lock().expect("lock").clone();
+            let db_arc = Arc::clone(&self.db);
+            let thumb_dir = self.paths.thumbnails_dir.clone();
+            let invoice_id = result.invoice.id;
+
+            tauri::async_runtime::spawn(async move {
+                let detail = match db_arc.lock() {
+                    Ok(db) => get_invoice_detail(&db, &thumb_dir, invoice_id).ok(),
+                    Err(_) => None,
+                };
+                if let Some(detail) = detail {
+                    let text = invoice_to_embedding_text(&detail);
+                    if let Ok(embedding) = generate_embedding(&emb_config, &text).await {
+                        let vs_client = ChromaClient::new(vs_url);
+                        let _ = vs_client.upsert_embedding(invoice_id, embedding.clone(), &text).await;
+                        if let Ok(db) = db_arc.lock() {
+                            let _ = db.execute(
+                                "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
+                                [invoice_id],
+                            );
+                        }
+                        if let Ok(similar) = vs_client.query_similar(&embedding, 5).await {
+                            if let Ok(db) = db_arc.lock() {
+                                let _ = crate::dedupe::detect_semantic_duplicates(
+                                    &db, invoice_id, &similar,
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         Ok(result)
     }
 
@@ -234,6 +328,50 @@ impl AppState {
     pub fn get_dashboard_stats(&self) -> Result<DashboardStats, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(get_dashboard_stats(&db)?)
+    }
+
+    pub fn set_chroma_config(&self, config: ChromaConfig) -> Result<(), AppError> {
+        let mut cfg = self.chroma_config.lock().expect("lock");
+        *cfg = config.clone();
+        // Reinitialize vector_store
+        // Note: can't reassign self.vector_store directly since it's behind &self
+        // The config change takes effect on next restart
+        Ok(())
+    }
+
+    pub fn get_chroma_config(&self) -> ChromaConfig {
+        self.chroma_config.lock().expect("lock").clone()
+    }
+
+    pub fn set_embedding_config(&self, config: EmbeddingConfig) -> Result<(), AppError> {
+        let mut cfg = self.embedding_config.lock().expect("lock");
+        *cfg = config;
+        Ok(())
+    }
+
+    pub fn get_embedding_config(&self) -> EmbeddingConfig {
+        self.embedding_config.lock().expect("lock").clone()
+    }
+
+    pub async fn test_chroma_connection(&self) -> Result<bool, AppError> {
+        match &self.vector_store {
+            Some(vs) => Ok(vs.health().await?),
+            None => Ok(false),
+        }
+    }
+
+    pub async fn search_invoices_semantic(
+        &self,
+        query: String,
+        limit: usize,
+    ) -> Result<Vec<crate::chroma::SimilarResult>, AppError> {
+        let vs = self
+            .vector_store
+            .as_ref()
+            .ok_or(ChromaError::NotConfigured)?;
+        let emb_config = self.embedding_config.lock().expect("lock").clone();
+        let embedding = generate_embedding(&emb_config, &query).await?;
+        Ok(vs.query_similar(&embedding, limit).await?)
     }
 
     pub fn raw_file_for_recognition(

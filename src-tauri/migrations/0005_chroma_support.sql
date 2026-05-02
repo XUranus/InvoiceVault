@@ -1,0 +1,1 @@
+ALTER TABLE invoices ADD COLUMN has_embedding INTEGER NOT NULL DEFAULT 0;

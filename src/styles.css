@@ -1053,6 +1053,63 @@ body {
   color: var(--color-error);
 }
 
+/* ---- Semantic Search ---- */
+.search-mode-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  width: fit-content;
+}
+
+.search-mode-tab {
+  border: 0;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.search-mode-tab.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.search-mode-tab:not(.active):hover {
+  background: var(--color-surface);
+}
+
+.semantic-search-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.semantic-search-bar input {
+  flex: 1;
+  min-height: 38px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.similarity-badge {
+  color: var(--color-primary);
+  font-weight: 600;
+  font-size: 12px;
+}
+
 /* ---- Watch Dir Manager ---- */
 .section-header {
   display: flex;

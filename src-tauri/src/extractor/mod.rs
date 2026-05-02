@@ -1274,6 +1274,46 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
     })
 }
 
+pub fn invoice_to_embedding_text(invoice: &InvoiceDetail) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(ref t) = invoice.invoice_type {
+        parts.push(format!("类型:{}", t));
+    }
+    if let Some(ref s) = invoice.seller_name {
+        parts.push(format!("卖方:{}", s));
+    }
+    if let Some(ref b) = invoice.buyer_name {
+        parts.push(format!("买方:{}", b));
+    }
+    if let Some(ref a) = invoice.total_amount {
+        parts.push(format!("金额:{}", a));
+    }
+    if let Some(ref c) = invoice.category {
+        parts.push(format!("类别:{}", c));
+    }
+    if !invoice.items.is_empty() {
+        let item_names: Vec<&str> = invoice
+            .items
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect();
+        parts.push(format!("项目:{}", item_names.join(",")));
+    }
+    if let Some(ref r) = invoice.remarks {
+        if !r.is_empty() {
+            parts.push(format!("备注:{}", r));
+        }
+    }
+
+    let text = parts.join(" ");
+    if text.len() > 8192 {
+        text[..8192].to_string()
+    } else {
+        text
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
