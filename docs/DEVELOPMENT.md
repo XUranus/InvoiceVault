@@ -1,4 +1,4 @@
-# Receiptier 开发说明
+# InvoiceVault 开发说明
 
 ## 当前状态
 

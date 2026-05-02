@@ -1639,6 +1639,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "invoicevault"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "csv",
+ "hex",
+ "md-5",
+ "mime_guess",
+ "notify",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "rust_xlsxwriter",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-shell",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "zip",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2820,36 +2850,6 @@ name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
-
-[[package]]
-name = "receiptier"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "csv",
- "hex",
- "md-5",
- "mime_guess",
- "notify",
- "reqwest 0.12.28",
- "rusqlite",
- "rust_xlsxwriter",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-shell",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "zip",
-]
 
 [[package]]
 name = "redox_syscall"

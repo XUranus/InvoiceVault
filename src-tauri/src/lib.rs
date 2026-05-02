@@ -609,11 +609,11 @@ pub fn run() {
             let log_dir = app_data_dir.join("logs");
             std::fs::create_dir_all(&log_dir).expect("create log dir");
 
-            let file_appender = tracing_appender::rolling::daily(&log_dir, "receiptier");
+            let file_appender = tracing_appender::rolling::daily(&log_dir, "invoicevault");
             let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
             let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "receiptier=info".into());
+                .unwrap_or_else(|_| "invoicevault=info".into());
 
             tracing_subscriber::fmt()
                 .with_env_filter(env_filter)
@@ -724,7 +724,7 @@ pub fn run() {
             cleanup_storage
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run Receiptier");
+        .expect("failed to run InvoiceVault");
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {

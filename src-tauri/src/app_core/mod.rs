@@ -851,7 +851,7 @@ impl AppState {
         // Add database file
         if self.paths.database_path.exists() {
             zip_writer
-                .start_file("receiptier.sqlite3", options)
+                .start_file("invoicevault.sqlite3", options)
                 .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
             let db_bytes = std::fs::read(&self.paths.database_path)?;
             zip_writer
@@ -902,7 +902,7 @@ impl AppState {
         // Add system info
         let health = self.health()?;
         let sys_info = format!(
-            "Receiptier System Info\n\
+            "InvoiceVault System Info\n\
              ======================\n\
              App Data Dir: {}\n\
              Database Path: {}\n\
@@ -1294,7 +1294,7 @@ fn create_app_paths(app_data_dir: &Path) -> Result<AppPaths, AppError> {
 
     Ok(AppPaths {
         app_data_dir: app_data_dir.to_path_buf(),
-        database_path: app_data_dir.join("receiptier.sqlite3"),
+        database_path: app_data_dir.join("invoicevault.sqlite3"),
         raw_dir,
         thumbnails_dir,
         logs_dir,

@@ -1,6 +1,10 @@
-# Receiptier
+# InvoiceVault
 
-Receiptier 是一个本地优先的跨平台桌面端发票处理 Agent。目标是把 PDF/图片发票导入本地归档，通过 OpenAI-compatible 多模态模型识别成结构化数据，并为后续去重、检索、统计、导出和 Agent 对话打基础。
+<p align="center">
+  <img src="icons/app.png" alt="InvoiceVault Logo" width="160" height="160">
+</p>
+
+InvoiceVault 是一个本地优先的跨平台桌面端发票处理 Agent。目标是把 PDF/图片发票导入本地归档，通过 OpenAI-compatible 多模态模型识别成结构化数据，并为后续去重、检索、统计、导出和 Agent 对话打基础。
 
 ## 当前状态
 
@@ -113,7 +117,7 @@ PDF 文件会先通过 `pdftoppm` 渲染为 JPEG 页面缓存，再逐页调用�
 
 应用数据保存在系统分配的应用数据目录中。后端启动时会创建：
 
-- `receiptier.sqlite3`：SQLite 数据库。
+- `invoicevault.sqlite3`：SQLite 数据库。
 - `raw/`：原始 PDF/图片归档目录。
 - `thumbnails/`：标准化识别图、PDF 页面缓存和预览缩略图目录。
 
@@ -160,6 +164,8 @@ cd src-tauri
 RECEIPTIER_LLM_BASE_URL=... RECEIPTIER_LLM_MODEL=... RECEIPTIER_LLM_API_KEY=... \
   cargo test live_llm_connection_from_env -- --ignored
 ```
+
+![screenshot](./screenshots/Screenshot_20260502_212518)
 
 ## 文档
 

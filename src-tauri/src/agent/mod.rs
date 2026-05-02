@@ -279,7 +279,7 @@ struct ToolChatMessage {
 // System prompt
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT: &str = r#"你是 Receiptier 发票处理助手，只能使用内置工具完成用户的请求。
+const SYSTEM_PROMPT: &str = r#"你是 InvoiceVault 发票处理助手，只能使用内置工具完成用户的请求。
 
 规则：
 - 查询发票时使用 search_invoices 工具，根据用户意图设置筛选条件

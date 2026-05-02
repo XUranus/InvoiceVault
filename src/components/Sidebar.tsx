@@ -24,7 +24,7 @@ export function Sidebar({ activePage, onNavigate, healthReady, hasError, unreadN
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <h1 className="sidebar-logo">Receiptier</h1>
+        <h1 className="sidebar-logo">InvoiceVault</h1>
         <p className="sidebar-subtitle">发票处理工作台</p>
       </div>
 

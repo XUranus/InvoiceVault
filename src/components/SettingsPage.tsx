@@ -200,7 +200,7 @@ export function SettingsPage({
       const { save } = await import("@tauri-apps/plugin-dialog");
       const filePath = await save({
         title: "选择导出位置",
-        defaultPath: "receiptier-logs.zip",
+        defaultPath: "invoicevault-logs.zip",
         filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }],
       });
       if (!filePath) return;

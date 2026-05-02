@@ -1,8 +1,8 @@
-# Receiptier PRD
+# InvoiceVault PRD
 
 ## 1. 项目概述
 
-Receiptier 是一个跨平台桌面端发票处理 Agent，用于导入、识别、去重、检索、统计和导出个人或小团队的发票数据。软件以本地优先为原则：原始文件和结构化数据保存在本机，用户可配置 OpenAI-compatible 多模态大语言模型完成发票解析和 Agent 任务执行。
+InvoiceVault 是一个跨平台桌面端发票处理 Agent，用于导入、识别、去重、检索、统计和导出个人或小团队的发票数据。软件以本地优先为原则：原始文件和结构化数据保存在本机，用户可配置 OpenAI-compatible 多模态大语言模型完成发票解析和 Agent 任务执行。
 
 目标平台：
 

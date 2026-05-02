@@ -1,4 +1,4 @@
-# Receiptier 开发计划
+# InvoiceVault 开发计划
 
 ## 1. 开发原则
 
@@ -11,7 +11,7 @@
 ## 2. 推荐目录结构
 
 ```text
-Receiptier/
+InvoiceVault/
   docs/
     PRD.md
     PLAN.md

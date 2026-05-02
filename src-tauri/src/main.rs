@@ -1,3 +1,3 @@
 fn main() {
-    receiptier_lib::run();
+    invoicevault_lib::run();
 }
