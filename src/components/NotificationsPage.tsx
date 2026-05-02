@@ -5,7 +5,9 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   dismissNotification,
+  deleteAllNotifications,
 } from "../api";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
   onNavigateToInvoice?: (id: number) => void;
@@ -20,6 +22,8 @@ const LEVEL_LABELS: Record<string, string> = {
 
 export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: Props) {
   const [notifications, setNotifications] = React.useState<NotificationRow[]>([]);
+  const [clearDialogOpen, setClearDialogOpen] = React.useState(false);
+  const [clearing, setClearing] = React.useState(false);
 
   const fetch = React.useCallback(() => {
     listNotifications().then((list) => {
@@ -48,6 +52,19 @@ export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: 
     fetch();
   };
 
+  const handleClearAll = async () => {
+    setClearing(true);
+    try {
+      await deleteAllNotifications();
+      setClearDialogOpen(false);
+      fetch();
+    } catch {
+      // ignore
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const handleReferenceClick = (n: NotificationRow) => {
     if (!n.is_read) handleMarkRead(n.id);
     if (n.reference_type === "invoice" && n.reference_id && onNavigateToInvoice) {
@@ -68,6 +85,11 @@ export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: 
           {unreadCount > 0 ? (
             <button className="btn-small" onClick={handleMarkAllRead}>
               全部已读
+            </button>
+          ) : null}
+          {notifications.length > 0 ? (
+            <button className="btn-danger" onClick={() => setClearDialogOpen(true)}>
+              清空全部通知
             </button>
           ) : null}
         </div>
@@ -126,6 +148,17 @@ export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: 
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={clearDialogOpen}
+        title="清空全部通知"
+        message="确定要删除所有通知吗？此操作不可撤销。"
+        confirmLabel="清空"
+        danger
+        loading={clearing}
+        onConfirm={handleClearAll}
+        onCancel={() => setClearDialogOpen(false)}
+      />
     </div>
   );
 }

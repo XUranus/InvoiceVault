@@ -1,7 +1,7 @@
 import React from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ImportJob, ImportJobListResult } from "../types";
-import { importFiles, listImportJobs, recognizeRawFile } from "../api";
+import { importFiles, listImportJobs, recognizeRawFile, rawFileHasInvoices } from "../api";
 
 type Props = {
   isDraggingFiles: boolean;
@@ -27,6 +27,7 @@ export function ImportPage({
   const [expandedJobId, setExpandedJobId] = React.useState<number | null>(null);
   const [result, setResult] = React.useState<ImportJobListResult | null>(null);
   const [page, setPage] = React.useState(1);
+  const [recognizedFileIds, setRecognizedFileIds] = React.useState<Set<number>>(new Set());
   const pageSize = 5;
 
   const fetchJobs = React.useCallback(async (p: number) => {
@@ -34,6 +35,17 @@ export function ImportPage({
       const r = await listImportJobs(p, pageSize);
       setResult(r);
       setPage(r.page);
+      // Check which files already have invoices
+      const recognized = new Set<number>();
+      for (const job of r.jobs) {
+        if (job.raw_file_id) {
+          try {
+            const hasInvoices = await rawFileHasInvoices(job.raw_file_id);
+            if (hasInvoices) recognized.add(job.id);
+          } catch { /* ignore */ }
+        }
+      }
+      setRecognizedFileIds(recognized);
     } catch (err) {
       onError(String(err));
     }
@@ -48,7 +60,9 @@ export function ImportPage({
       setIsImporting(true);
       try {
         await importFiles(paths);
-        fetchJobs(1);
+        // Auto-recognition is triggered by backend after import
+        // Poll for updated job list after a short delay
+        setTimeout(() => fetchJobs(1), 1500);
       } catch (err) {
         onError(String(err));
       } finally {
@@ -142,6 +156,7 @@ export function ImportPage({
                 expandedJobId={expandedJobId}
                 onRecognize={handleRecognize}
                 onToggleExpand={setExpandedJobId}
+                isRecognized={recognizedFileIds.has(job.id)}
               />
             ))}
           </div>
@@ -168,6 +183,7 @@ export function ImportPage({
                   expandedJobId={expandedJobId}
                   onRecognize={handleRecognize}
                   onToggleExpand={setExpandedJobId}
+                  isRecognized={recognizedFileIds.has(job.id)}
                 />
               ))}
             </div>
@@ -205,12 +221,14 @@ function JobRow({
   expandedJobId,
   onRecognize,
   onToggleExpand,
+  isRecognized,
 }: {
   job: ImportJob;
   recognizingJobId: number | null;
   expandedJobId: number | null;
   onRecognize: (job: ImportJob) => void;
   onToggleExpand: (id: number | null) => void;
+  isRecognized: boolean;
 }) {
   return (
     <article
@@ -237,7 +255,7 @@ function JobRow({
               disabled={recognizingJobId !== null}
               onClick={() => onRecognize(job)}
             >
-              {recognizingJobId === job.id ? "识别中..." : "识别"}
+              {recognizingJobId === job.id ? "识别中..." : isRecognized ? "重新识别" : "识别"}
             </button>
           ) : null}
         </div>

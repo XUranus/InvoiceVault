@@ -2,6 +2,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use rusqlite::Connection;
@@ -98,6 +99,13 @@ pub struct RawFileForRecognition {
     pub storage_path: PathBuf,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RecognitionQueueStatus {
+    pub pending: i64,
+    pub running: i64,
+    pub max_concurrent: usize,
+}
+
 pub struct AppState {
     paths: AppPaths,
     db: Arc<Mutex<Connection>>,
@@ -105,6 +113,9 @@ pub struct AppState {
     chroma_config: Mutex<ChromaConfig>,
     embedding_config: Mutex<EmbeddingConfig>,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
+    recognition_pending: Arc<Mutex<i64>>,
+    recognition_running: Arc<Mutex<i64>>,
+    recognition_max_concurrent: Arc<Mutex<usize>>,
 }
 
 impl AppState {
@@ -135,6 +146,14 @@ impl AppState {
             Arc::new(Mutex::new(saved))
         };
 
+        let recognition_max_concurrent: usize = Self::load_config_raw::<serde_json::Value>(
+            &app_data_dir,
+            "recognition_config.json",
+        )
+        .and_then(|v| v.get("max_concurrent").and_then(|v| v.as_u64()))
+        .map(|v| v as usize)
+        .unwrap_or(3);
+
         let watcher_manager = WatcherManager::new(
             Arc::clone(&db),
             paths.raw_dir.clone(),
@@ -150,6 +169,9 @@ impl AppState {
             chroma_config: Mutex::new(chroma_config),
             embedding_config: Mutex::new(embedding_config),
             llm_config,
+            recognition_pending: Arc::new(Mutex::new(0)),
+            recognition_running: Arc::new(Mutex::new(0)),
+            recognition_max_concurrent: Arc::new(Mutex::new(recognition_max_concurrent)),
         })
     }
 
@@ -170,12 +192,13 @@ impl AppState {
 
     pub fn import_files(&self, paths: Vec<String>) -> Result<Vec<ImportJobSummary>, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
+        let source_paths: Vec<String> = paths.iter().map(|p| p.clone()).collect();
         let jobs = import_files(&mut db, &self.paths.raw_dir, paths)?;
         let total = jobs.len();
         let success = jobs.iter().filter(|j| j.status == "completed").count();
         let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
         let failed = jobs.iter().filter(|j| j.status == "failed").count();
-        let _ = event::record_import_event(&db, total, success, dups, failed);
+        let _ = event::record_import_event(&db, total, success, dups, failed, &source_paths);
         let _ = event::create_notification(
             &db,
             "info",
@@ -184,7 +207,146 @@ impl AppState {
             None,
             None,
         );
+
+        // Auto-trigger recognition for successfully imported files
+        let config = self.llm_config.lock().expect("lock").clone();
+        if let Some(cfg) = config {
+            if !cfg.api_key.is_empty() {
+                for job in &jobs {
+                    if job.status == "completed" && job.raw_file_id.is_some() {
+                        self.spawn_recognition_task(
+                            job.id,
+                            job.raw_file_id.unwrap(),
+                            cfg.clone(),
+                        );
+                    }
+                }
+            }
+        }
+
         Ok(jobs)
+    }
+
+    fn spawn_recognition_task(&self, _job_id: i64, raw_file_id: i64, config: LlmProviderConfig) {
+        let db = Arc::clone(&self.db);
+        let thumbnails_dir = self.paths.thumbnails_dir.clone();
+        let pending = Arc::clone(&self.recognition_pending);
+        let running = Arc::clone(&self.recognition_running);
+        let max_concurrent = Arc::clone(&self.recognition_max_concurrent);
+
+        // Increment pending
+        if let Ok(mut p) = pending.lock() {
+            *p += 1;
+        }
+
+        tauri::async_runtime::spawn(async move {
+            // Wait until a slot is available
+            loop {
+                let max = *max_concurrent.lock().expect("lock") as i64;
+                let current = *running.lock().expect("lock");
+                if current < max {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+
+            // Move from pending to running
+            if let Ok(mut p) = pending.lock() {
+                *p = (*p - 1).max(0);
+            }
+            if let Ok(mut r) = running.lock() {
+                *r += 1;
+            }
+
+            let result: Result<(), String> = async {
+                let raw_file = {
+                    let conn = db.lock().map_err(|e| e.to_string())?;
+                    conn.query_row(
+                        "SELECT id, original_name, COALESCE(mime_type, ''), storage_path
+                        FROM raw_files WHERE id = ?1",
+                        [raw_file_id],
+                        |row| {
+                            Ok(RawFileForRecognition {
+                                id: row.get(0)?,
+                                original_name: row.get(1)?,
+                                mime_type: row.get(2)?,
+                                storage_path: PathBuf::from(row.get::<_, String>(3)?),
+                            })
+                        },
+                    ).map_err(|e| e.to_string())?
+                };
+
+                let recognition_inputs = if raw_file.mime_type == "application/pdf" {
+                    let pages = crate::document::render_pdf_pages(
+                        &raw_file.storage_path,
+                        &thumbnails_dir,
+                        raw_file.id,
+                    ).map_err(|e| e.to_string())?;
+                    pages.into_iter().map(|page| {
+                        let prepared = crate::document::prepare_image_for_recognition(
+                            &page.image_path,
+                            &thumbnails_dir,
+                            raw_file.id,
+                            Some(page.page_number),
+                        ).map_err(|e| e.to_string())?;
+                        Ok((Some(page.page_number.to_string()), prepared.image_path, prepared.thumbnail_path, prepared.mime_type))
+                    }).collect::<Result<Vec<_>, String>>()?
+                } else {
+                    let prepared = crate::document::prepare_image_for_recognition(
+                        &raw_file.storage_path,
+                        &thumbnails_dir,
+                        raw_file.id,
+                        None,
+                    ).map_err(|e| e.to_string())?;
+                    vec![(None, prepared.image_path, prepared.thumbnail_path, prepared.mime_type)]
+                };
+
+                let mut model = String::new();
+                for (source_page_range, image_path, _thumbnail_path, mime_type) in &recognition_inputs {
+                    let recognition = crate::llm::recognize_invoice_image(
+                        config.clone(),
+                        image_path,
+                        mime_type,
+                    ).await.map_err(|e| e.to_string())?;
+                    model = recognition.model.clone();
+                    let mut conn = db.lock().map_err(|e| e.to_string())?;
+                    let invoice = crate::extractor::save_invoice_extraction(
+                        &mut conn,
+                        crate::extractor::SaveInvoiceExtractionRequest {
+                            raw_file_id,
+                            source_page_range: source_page_range.clone(),
+                            provider_name: Some(config.base_url.clone()),
+                            model: Some(recognition.model.clone()),
+                            response_json: recognition.response_json,
+                        },
+                    ).map_err(|e| e.to_string())?;
+                    let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
+                    let _ = event::record_recognition_event(
+                        &conn, invoice.id, &title, true, recognition.duration_ms, &recognition.model, 1,
+                    );
+                    let _ = event::create_notification(
+                        &conn,
+                        "info",
+                        &format!("自动识别完成: {title}"),
+                        &format!("模型 {model}，耗时 {}ms", recognition.duration_ms),
+                        Some("invoice"),
+                        Some(invoice.id),
+                    );
+                }
+                Ok(())
+            }.await;
+
+            // Decrement running
+            if let Ok(mut r) = running.lock() {
+                *r = (*r - 1).max(0);
+            }
+
+            if let Err(e) = result {
+                if let Ok(db) = db.lock() {
+                    let _ = event::notify_error(&db, "自动识别失败", &e);
+                }
+            }
+        });
     }
 
     pub fn list_import_jobs(
@@ -568,6 +730,16 @@ impl AppState {
         Ok(event::dismiss_notification(&db, id)?)
     }
 
+    pub fn delete_all_events(&self) -> Result<usize, AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::delete_all_events(&db)?)
+    }
+
+    pub fn delete_all_notifications(&self) -> Result<usize, AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::delete_all_notifications(&db)?)
+    }
+
     pub fn record_recognition_event(
         &self,
         invoice_id: i64,
@@ -613,6 +785,38 @@ impl AppState {
     pub fn get_agent_session(&self, session_id: i64) -> Result<Vec<AgentMessageRow>, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(agent::get_session_messages(&db, session_id)?)
+    }
+
+    pub fn get_recognition_queue_status(&self) -> RecognitionQueueStatus {
+        RecognitionQueueStatus {
+            pending: *self.recognition_pending.lock().expect("lock"),
+            running: *self.recognition_running.lock().expect("lock"),
+            max_concurrent: *self.recognition_max_concurrent.lock().expect("lock"),
+        }
+    }
+
+    pub fn set_recognition_concurrency(&self, max_concurrent: usize) -> Result<(), AppError> {
+        let max = max_concurrent.clamp(1, 10);
+        {
+            let mut curr = self.recognition_max_concurrent.lock().expect("lock");
+            *curr = max;
+        }
+        // Persist
+        let path = self.paths.app_data_dir.join("recognition_config.json");
+        if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({ "max_concurrent": max })) {
+            let _ = std::fs::write(&path, json);
+        }
+        Ok(())
+    }
+
+    pub fn raw_file_has_invoices(&self, raw_file_id: i64) -> Result<bool, AppError> {
+        let db = self.db.lock().expect("db lock");
+        let count: i64 = db.query_row(
+            "SELECT COUNT(*) FROM invoices WHERE raw_file_id = ?1",
+            [raw_file_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     pub fn delete_agent_session(&self, session_id: i64) -> Result<(), AppError> {

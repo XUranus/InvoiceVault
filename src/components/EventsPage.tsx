@@ -1,6 +1,7 @@
 import React from "react";
 import type { EventListResult, EventRow } from "../types";
-import { listEvents } from "../api";
+import { listEvents, deleteAllEvents } from "../api";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
   onNavigateToInvoice?: (id: number) => void;
@@ -25,6 +26,8 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
   const [result, setResult] = React.useState<EventListResult | null>(null);
   const [typeFilter, setTypeFilter] = React.useState<string | null>(null);
   const [page, setPage] = React.useState(1);
+  const [clearDialogOpen, setClearDialogOpen] = React.useState(false);
+  const [clearing, setClearing] = React.useState(false);
   const pageSize = 20;
 
   const fetchEvents = React.useCallback(() => {
@@ -42,9 +45,33 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
     setPage(1);
   };
 
+  const handleClearAll = async () => {
+    setClearing(true);
+    try {
+      await deleteAllEvents();
+      setClearDialogOpen(false);
+      fetchEvents();
+    } catch {
+      // ignore
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const handleReferenceClick = (ev: EventRow) => {
     if (ev.reference_type === "invoice" && ev.reference_id && onNavigateToInvoice) {
       onNavigateToInvoice(ev.reference_id);
+    }
+  };
+
+  const openFolder = async (filePath: string) => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-shell");
+      // Open the parent directory of the file
+      const parentDir = filePath.replace(/[/\\][^/\\]*$/, "") || filePath;
+      await open(parentDir);
+    } catch {
+      // ignore
     }
   };
 
@@ -52,9 +79,28 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
   const statusLabel = (s: string) => STATUS_LABELS[s] ?? s;
   const statusClass = (s: string) => `event-badge-status event-status-${s}`;
 
+  const parseSourcePaths = (metadataJson: string | null): string[] => {
+    if (!metadataJson) return [];
+    try {
+      const meta = JSON.parse(metadataJson);
+      return meta.source_paths ?? [];
+    } catch {
+      return [];
+    }
+  };
+
   return (
     <div className="page">
-      <h2 className="page-title">事件</h2>
+      <div className="page-header">
+        <h2 className="page-title">事件</h2>
+        <div className="page-header-actions">
+          {result && result.total_count > 0 ? (
+            <button className="btn-danger" onClick={() => setClearDialogOpen(true)}>
+              清空全部事件
+            </button>
+          ) : null}
+        </div>
+      </div>
 
       <div className="event-filters">
         <button
@@ -110,6 +156,9 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
                     </span>
                   </div>
                 ) : null}
+                {ev.event_type === "import" && ev.metadata_json ? (
+                  <SourcePaths paths={parseSourcePaths(ev.metadata_json)} onOpen={openFolder} />
+                ) : null}
               </div>
             ))}
           </div>
@@ -137,6 +186,40 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
           ) : null}
         </>
       )}
+
+      <ConfirmDialog
+        open={clearDialogOpen}
+        title="清空全部事件"
+        message="确定要删除所有事件记录吗？此操作不可撤销。"
+        confirmLabel="清空"
+        danger
+        loading={clearing}
+        onConfirm={handleClearAll}
+        onCancel={() => setClearDialogOpen(false)}
+      />
+    </div>
+  );
+}
+
+function SourcePaths({ paths, onOpen }: { paths: string[]; onOpen: (path: string) => void }) {
+  if (paths.length === 0) return null;
+  return (
+    <div className="event-card-footer">
+      <div className="event-source-paths">
+        {paths.map((p, i) => (
+          <span
+            key={i}
+            className="event-source-path"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen(p);
+            }}
+            title={p}
+          >
+            {p}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

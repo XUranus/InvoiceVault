@@ -29,6 +29,7 @@ import type {
   AgentResponse,
   EventListResult,
   NotificationRow,
+  RecognitionQueueStatus,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -288,4 +289,24 @@ export type LlmConfigResponse = {
 
 export async function getLlmConfig(): Promise<LlmConfigResponse> {
   return invoke<LlmConfigResponse>("get_llm_config");
+}
+
+export async function getRecognitionQueueStatus(): Promise<RecognitionQueueStatus> {
+  return invoke<RecognitionQueueStatus>("get_recognition_queue_status");
+}
+
+export async function setRecognitionConcurrency(maxConcurrent: number): Promise<void> {
+  return invoke<void>("set_recognition_concurrency", { maxConcurrent });
+}
+
+export async function rawFileHasInvoices(rawFileId: number): Promise<boolean> {
+  return invoke<boolean>("raw_file_has_invoices", { rawFileId });
+}
+
+export async function deleteAllEvents(): Promise<number> {
+  return invoke<number>("delete_all_events");
+}
+
+export async function deleteAllNotifications(): Promise<number> {
+  return invoke<number>("delete_all_notifications");
 }

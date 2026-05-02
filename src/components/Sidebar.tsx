@@ -6,6 +6,8 @@ type Props = {
   healthReady: boolean;
   hasError: boolean;
   unreadNotificationCount?: number;
+  importBadgeCount?: number;
+  invoiceBadgeCount?: number;
 };
 
 const NAV_ITEMS: { page: Page; label: string; emoji: string }[] = [
@@ -18,7 +20,7 @@ const NAV_ITEMS: { page: Page; label: string; emoji: string }[] = [
   { page: "settings", label: "设置", emoji: "⚙️" },
 ];
 
-export function Sidebar({ activePage, onNavigate, healthReady, hasError, unreadNotificationCount }: Props) {
+export function Sidebar({ activePage, onNavigate, healthReady, hasError, unreadNotificationCount, importBadgeCount, invoiceBadgeCount }: Props) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -35,6 +37,15 @@ export function Sidebar({ activePage, onNavigate, healthReady, hasError, unreadN
           >
             <span className="nav-emoji">{item.emoji}</span>
             <span className="nav-label">{item.label}</span>
+            {item.page === "import" && importBadgeCount ? (
+              <span className="nav-badge nav-badge-import">
+                <span className="nav-spinner" />
+                {importBadgeCount}
+              </span>
+            ) : null}
+            {item.page === "invoices" && invoiceBadgeCount ? (
+              <span className="nav-badge nav-badge-invoice">{invoiceBadgeCount}</span>
+            ) : null}
             {item.page === "notifications" && unreadNotificationCount ? (
               <span className="nav-badge">{unreadNotificationCount}</span>
             ) : null}

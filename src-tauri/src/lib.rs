@@ -14,7 +14,7 @@ mod storage;
 mod watcher;
 
 use agent::{AgentMessageRow, AgentResponse, AgentSession, ConfirmRequest};
-use app_core::{AppHealth, AppState};
+use app_core::{AppHealth, AppState, RecognitionQueueStatus};
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
 use embedding::{EmbeddingConfig, EmbeddingTestResult};
@@ -535,6 +535,39 @@ fn get_llm_config(
     Ok(state.get_llm_config())
 }
 
+#[tauri::command]
+fn get_recognition_queue_status(
+    state: State<'_, AppState>,
+) -> Result<RecognitionQueueStatus, String> {
+    Ok(state.get_recognition_queue_status())
+}
+
+#[tauri::command]
+fn set_recognition_concurrency(
+    state: State<'_, AppState>,
+    max_concurrent: usize,
+) -> Result<(), String> {
+    state.set_recognition_concurrency(max_concurrent).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn raw_file_has_invoices(
+    state: State<'_, AppState>,
+    raw_file_id: i64,
+) -> Result<bool, String> {
+    state.raw_file_has_invoices(raw_file_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_all_events(state: State<'_, AppState>) -> Result<usize, String> {
+    state.delete_all_events().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_all_notifications(state: State<'_, AppState>) -> Result<usize, String> {
+    state.delete_all_notifications().map_err(|e| e.to_string())
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -625,7 +658,12 @@ pub fn run() {
             mark_all_notifications_read,
             dismiss_notification,
             set_llm_config,
-            get_llm_config
+            get_llm_config,
+            get_recognition_queue_status,
+            set_recognition_concurrency,
+            raw_file_has_invoices,
+            delete_all_events,
+            delete_all_notifications
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");

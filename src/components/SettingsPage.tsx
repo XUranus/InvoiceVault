@@ -14,6 +14,8 @@ import {
   getEmbeddingConfig,
   testEmbeddingConnection,
   setLlmConfig,
+  getRecognitionQueueStatus,
+  setRecognitionConcurrency,
 } from "../api";
 import { WatchDirManager } from "./WatchDirManager";
 
@@ -63,17 +65,48 @@ export function SettingsPage({
   const [isTestingEmb, setIsTestingEmb] = React.useState(false);
   const [embTestError, setEmbTestError] = React.useState<string | null>(null);
 
+  const [recognitionConcurrency, setRecognitionConcurrencyState] = React.useState(3);
+
+  // Gate all auto-save effects until async config load completes.
+  // Without this, the initial render fires auto-save with default state
+  // before the backend values are fetched, creating spurious config_change events.
+  const configLoaded = React.useRef(false);
+  const lastSavedChroma = React.useRef<string>("");
+  const lastSavedEmb = React.useRef<string>("");
+
   React.useEffect(() => {
-    getChromaConfig()
-      .then((cfg) => setChromaConfigState({ enabled: cfg.enabled !== false }))
-      .catch(() => {});
-    getEmbeddingConfig()
-      .then((cfg) => setEmbConfig({ ...cfg, enabled: cfg.enabled !== false }))
-      .catch(() => {});
+    let cancelled = false;
+    Promise.all([
+      getChromaConfig()
+        .then((cfg) => {
+          if (cancelled) return;
+          const val = { enabled: cfg.enabled !== false };
+          setChromaConfigState(val);
+          lastSavedChroma.current = JSON.stringify(val);
+        })
+        .catch(() => {}),
+      getEmbeddingConfig()
+        .then((cfg) => {
+          if (cancelled) return;
+          const val = { ...cfg, enabled: cfg.enabled !== false };
+          setEmbConfig(val);
+          lastSavedEmb.current = JSON.stringify(val);
+        })
+        .catch(() => {}),
+      getRecognitionQueueStatus()
+        .then((status) => {
+          if (!cancelled) setRecognitionConcurrencyState(status.max_concurrent);
+        })
+        .catch(() => {}),
+    ]).finally(() => {
+      if (!cancelled) configLoaded.current = true;
+    });
+    return () => { cancelled = true; };
   }, []);
 
   // Auto-save LLM config on change
   React.useEffect(() => {
+    if (!configLoaded.current) return;
     const timer = setTimeout(() => {
       setLlmConfig({
         base_url: llmBaseUrl,
@@ -86,16 +119,25 @@ export function SettingsPage({
 
   // Auto-save chroma config on change
   React.useEffect(() => {
+    if (!configLoaded.current) return;
+    const current = JSON.stringify(chromaConfig);
+    if (current === lastSavedChroma.current) return;
+    lastSavedChroma.current = current;
     setChromaConfig(chromaConfig).catch(() => {});
   }, [chromaConfig]);
 
   // Auto-save embedding config on change
   React.useEffect(() => {
+    if (!configLoaded.current) return;
+    const current = JSON.stringify(embConfig);
+    if (current === lastSavedEmb.current) return;
+    lastSavedEmb.current = current;
     setEmbeddingConfig(embConfig).catch(() => {});
   }, [embConfig]);
 
-  // Test embedding on mount and when config changes (debounced)
+  // Test embedding when config changes (debounced)
   React.useEffect(() => {
+    if (!configLoaded.current) return;
     const timer = setTimeout(async () => {
       try {
         await testEmbeddingConnection();
@@ -293,6 +335,27 @@ export function SettingsPage({
             </div>
           </div>
         ) : null}
+      </div>
+
+      <div className="section">
+        <h3>识别任务</h3>
+        <p className="section-desc">
+          设置同时进行的发票识别任务数量。导入文件后会自动开始识别。
+        </p>
+        <div className="form-field">
+          <span>最大并发数 (1-10)</span>
+          <input
+            type="number"
+            min={1}
+            max={10}
+            value={recognitionConcurrency}
+            onChange={(e) => {
+              const v = Math.max(1, Math.min(10, Number(e.target.value) || 1));
+              setRecognitionConcurrencyState(v);
+              setRecognitionConcurrency(v).catch(() => {});
+            }}
+          />
+        </div>
       </div>
 
       <div className="section">

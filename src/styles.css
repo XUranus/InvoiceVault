@@ -2068,6 +2068,33 @@ body {
   line-height: 1.5;
 }
 
+.nav-badge-import {
+  background: var(--color-tag-blue-bg);
+  color: var(--color-tag-blue-text);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.nav-badge-invoice {
+  background: var(--color-error);
+  color: #fff;
+}
+
+.nav-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: var(--color-tag-blue-text);
+  border-radius: 50%;
+  animation: nav-spin 0.8s linear infinite;
+}
+
+@keyframes nav-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ---- Event page ---- */
 .event-filters {
   display: flex;
@@ -2192,6 +2219,26 @@ body {
   font-size: 12px;
   color: var(--accent);
   font-weight: 500;
+}
+
+/* ---- Event source paths ---- */
+.event-source-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.event-source-path {
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+
+.event-source-path:hover {
+  color: var(--color-primary-hover);
 }
 
 /* ---- Notification page ---- */

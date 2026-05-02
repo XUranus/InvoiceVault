@@ -2,7 +2,7 @@ import React from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import type { Invoice, WatcherImportEvent } from "./types";
-import { getAppHealth, searchInvoices, importFiles, getLlmConfig } from "./api";
+import { getAppHealth, searchInvoices, importFiles, getLlmConfig, getRecognitionQueueStatus } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { DashboardPage } from "./components/DashboardPage";
 import { ImportPage } from "./components/ImportPage";
@@ -33,6 +33,9 @@ export default function App() {
     return stored === "dark" ? "dark" : "light";
   });
   const [unreadNotificationCount, setUnreadNotificationCount] = React.useState(0);
+  const [invoicesKey, setInvoicesKey] = React.useState(0);
+  const [importBadgeCount, setImportBadgeCount] = React.useState(0);
+  const [invoiceBadgeCount, setInvoiceBadgeCount] = React.useState(0);
 
   const navigateToInvoice = (id: number) => {
     setPage("invoices");
@@ -114,15 +117,37 @@ export default function App() {
 
   // Watcher auto-import notifications
   React.useEffect(() => {
-    const unlisten = listen<WatcherImportEvent>("watcher-import", (_event) => {
+    const unlisten = listen<WatcherImportEvent>("watcher-import", (event) => {
       setImportKey((k) => k + 1);
       refreshInvoices();
       setDashboardKey((k) => k + 1);
+      // Increment invoice badge by number of imported files
+      const count = event.payload.imported_count ?? event.payload.jobs?.length ?? 0;
+      setInvoiceBadgeCount((c) => c + count);
     });
     return () => {
       unlisten.then((fn) => fn());
     };
   }, [refreshInvoices]);
+
+  // Poll recognition queue status for import tab badge
+  React.useEffect(() => {
+    const poll = () => {
+      getRecognitionQueueStatus()
+        .then((status) => {
+          const total = status.pending + status.running;
+          setImportBadgeCount(total);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleInvoiceDetailOpened = () => {
+    setInvoiceBadgeCount((c) => Math.max(0, c - 1));
+  };
 
   return (
     <div className="app-layout">
@@ -132,12 +157,14 @@ export default function App() {
           setPage(p);
           clearError();
           if (p === "dashboard") setDashboardKey((k) => k + 1);
-          if (p === "invoices") refreshInvoices();
+          if (p === "invoices") { refreshInvoices(); setInvoicesKey((k) => k + 1); }
           if (p === "import") setImportKey((k) => k + 1);
         }}
         healthReady={health !== null}
         hasError={error !== null}
         unreadNotificationCount={unreadNotificationCount}
+        importBadgeCount={importBadgeCount}
+        invoiceBadgeCount={invoiceBadgeCount}
       />
 
       <main className="app-main">
@@ -162,6 +189,8 @@ export default function App() {
             invoices={invoices}
             onInvoicesChanged={refreshInvoices}
             onError={setError}
+            refreshKey={invoicesKey}
+            onInvoiceDetailOpened={handleInvoiceDetailOpened}
           />
         ) : page === "agent" ? (
           <AgentPage

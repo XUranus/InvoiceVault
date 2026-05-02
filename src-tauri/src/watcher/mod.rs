@@ -573,7 +573,7 @@ fn process_pending(
             let success = jobs.iter().filter(|j| j.status == "completed").count();
             let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
             let failed = jobs.iter().filter(|j| j.status == "failed").count();
-            let _ = event::record_import_event(&conn, total, success, dups, failed);
+            let _ = event::record_import_event(&conn, total, success, dups, failed, &[]);
             let _ = event::create_notification(
                 &conn,
                 "info",

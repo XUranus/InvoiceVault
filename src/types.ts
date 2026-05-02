@@ -375,3 +375,9 @@ export type NotificationRow = {
   reference_id: number | null;
   created_at: string;
 };
+
+export type RecognitionQueueStatus = {
+  pending: number;
+  running: number;
+  max_concurrent: number;
+};

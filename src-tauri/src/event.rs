@@ -216,6 +216,16 @@ pub fn dismiss_notification(conn: &Connection, id: i64) -> Result<(), EventError
     Ok(())
 }
 
+pub fn delete_all_events(conn: &Connection) -> Result<usize, EventError> {
+    let count = conn.execute("DELETE FROM events", [])?;
+    Ok(count)
+}
+
+pub fn delete_all_notifications(conn: &Connection) -> Result<usize, EventError> {
+    let count = conn.execute("DELETE FROM notifications", [])?;
+    Ok(count)
+}
+
 // ---------------------------------------------------------------------------
 // Integration helpers
 // ---------------------------------------------------------------------------
@@ -227,8 +237,10 @@ pub fn record_import_event(
     success_count: usize,
     duplicate_count: usize,
     failure_count: usize,
+    source_paths: &[String],
 ) -> Result<(), EventError> {
     let status = if failure_count == 0 { "completed" } else { "completed" };
+    let metadata = serde_json::json!({ "source_paths": source_paths });
     create_event(
         conn,
         "import",
@@ -237,7 +249,7 @@ pub fn record_import_event(
         status,
         None,
         None,
-        None,
+        Some(&metadata.to_string()),
     )?;
     Ok(())
 }
@@ -346,7 +358,7 @@ mod tests {
     #[test]
     fn create_and_list_events() {
         let conn = setup();
-        create_event(&conn, "import", "导入 3 个文件", "成功 3 个", "completed", None, None, None)
+        create_event(&conn, "import", "导入 3 个文件", "成功 3 个", "completed", None, None, Some(r#"{"source_paths":["a.pdf","b.jpg"]}"#))
             .expect("create");
         create_event(
             &conn,

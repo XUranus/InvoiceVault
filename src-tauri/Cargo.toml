@@ -32,6 +32,7 @@ sha2 = "0.10.9"
 tauri = { version = "2.11.0", features = [] }
 tauri-plugin-dialog = "2.7.0"
 tauri-plugin-shell = "2.3.5"
+tokio = { version = "1", features = ["sync", "time"] }
 notify = { version = "8", features = ["macos_kqueue"] }
 thiserror = "2.0.17"
 tracing = "0.1.41"

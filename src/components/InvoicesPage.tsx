@@ -16,6 +16,8 @@ type Props = {
   invoices: Invoice[];
   onInvoicesChanged: () => void;
   onError: (error: string) => void;
+  refreshKey?: number;
+  onInvoiceDetailOpened?: () => void;
 };
 
 const BATCH_STATUS_OPTIONS = [
@@ -40,7 +42,7 @@ const BATCH_CATEGORY_OPTIONS = [
   { value: "其他", label: "其他" },
 ];
 
-export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
+export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey, onInvoiceDetailOpened }: Props) {
   const [view, setView] = React.useState<"list" | "detail">("list");
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
   const [searchResult, setSearchResult] = React.useState<{
@@ -94,7 +96,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
 
   React.useEffect(() => {
     doSearch(params);
-  }, [params, doSearch]);
+  }, [params, doSearch, refreshKey]);
 
   const handleSemanticSearch = async () => {
     if (!semanticQuery.trim()) {
@@ -212,6 +214,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
   const handleSelectInvoice = (id: number) => {
     setSelectedId(id);
     setView("detail");
+    onInvoiceDetailOpened?.();
   };
 
   const handleBack = () => {
