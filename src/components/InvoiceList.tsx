@@ -3,6 +3,7 @@ import type { Invoice, InvoiceSearchParams } from "../types";
 import { searchInvoices } from "../api";
 import { InvoiceListControls } from "./InvoiceListControls";
 import { ExportButton } from "./ExportButton";
+import { duplicateStatusMeta, invoiceStatusMeta, toneClass } from "../status";
 
 type Props = {
   invoices: Invoice[];
@@ -100,11 +101,11 @@ export function InvoiceList({ invoices, onSelectInvoice, onRefresh }: Props) {
                 <strong>
                   {invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}
                 </strong>
-                <span className={`dup-badge dup-${invoice.duplicate_status}`}>
-                  {dupLabel(invoice.duplicate_status)}
+                <span className={`mini-tag ${toneClass(duplicateStatusMeta(invoice.duplicate_status).tone)}`}>
+                  {duplicateStatusMeta(invoice.duplicate_status).label}
                 </span>
-                <span className={`status-badge status-${invoice.status}`}>
-                  {statusLabel(invoice.status)}
+                <span className={`mini-tag ${toneClass(invoiceStatusMeta(invoice.status).tone)}`}>
+                  {invoiceStatusMeta(invoice.status).label}
                 </span>
               </div>
               <span>
@@ -125,26 +126,4 @@ export function InvoiceList({ invoices, onSelectInvoice, onRefresh }: Props) {
       )}
     </div>
   );
-}
-
-function statusLabel(status: string) {
-  const labels: Record<string, string> = {
-    pending_confirmation: "待确认",
-    recognized: "已识别",
-    reviewed: "已复核",
-    flagged: "已标记",
-  };
-  return labels[status] ?? status;
-}
-
-function dupLabel(status: string) {
-  const labels: Record<string, string> = {
-    unique: "",
-    exact_duplicate: "完全重复",
-    probable_duplicate: "高度疑似重复",
-    possible_duplicate: "可能重复",
-    not_duplicate: "已排除",
-    unknown: "",
-  };
-  return labels[status] ?? "";
 }

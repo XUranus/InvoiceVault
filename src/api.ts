@@ -62,6 +62,10 @@ export async function getInvoiceDetail(
   return invoke<InvoiceDetail>("get_invoice_detail", { invoiceId });
 }
 
+export async function openInvoiceRawFileInBrowser(invoiceId: number): Promise<void> {
+  return invoke<void>("open_invoice_raw_file_in_browser", { invoiceId });
+}
+
 export async function updateInvoice(
   request: UpdateInvoiceRequest,
 ): Promise<UpdateInvoiceResult> {

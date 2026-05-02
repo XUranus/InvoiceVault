@@ -454,6 +454,19 @@ impl AppState {
         )?)
     }
 
+    pub fn raw_file_path_for_invoice(&self, invoice_id: i64) -> Result<PathBuf, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        let path = db.query_row(
+            "SELECT rf.storage_path
+             FROM invoices inv
+             JOIN raw_files rf ON rf.id = inv.raw_file_id
+             WHERE inv.id = ?1",
+            [invoice_id],
+            |row| row.get::<_, String>(0),
+        )?;
+        Ok(PathBuf::from(path))
+    }
+
     pub fn update_invoice(
         &self,
         request: UpdateInvoiceRequest,

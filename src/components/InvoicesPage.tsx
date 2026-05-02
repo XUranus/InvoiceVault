@@ -11,6 +11,12 @@ import { InvoiceListControls } from "./InvoiceListControls";
 import { ExportButton } from "./ExportButton";
 import { InvoiceDetail } from "./InvoiceDetail";
 import { ConfirmDialog } from "./ConfirmDialog";
+import {
+  duplicateStatusMeta,
+  invoiceStatusMeta,
+  shouldShowDuplicateStatus,
+  toneClass,
+} from "../status";
 
 type Props = {
   invoices: Invoice[];
@@ -450,16 +456,6 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
   );
 }
 
-function statusLabel(status: string) {
-  const labels: Record<string, string> = {
-    pending_confirmation: "待确认",
-    recognized: "已识别",
-    reviewed: "已复核",
-    flagged: "已标记",
-  };
-  return labels[status] ?? status;
-}
-
 function InvoiceCardView({
   invoices,
   similarities,
@@ -479,6 +475,7 @@ function InvoiceCardView({
         <article
           className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""}`}
           key={invoice.id}
+          onClick={() => onSelectInvoice(invoice.id)}
         >
           <label className="invoice-card-check" onClick={(e) => e.stopPropagation()}>
             <input
@@ -487,10 +484,7 @@ function InvoiceCardView({
               onChange={() => onToggleSelect(invoice.id)}
             />
           </label>
-          <div
-            className="invoice-card-body"
-            onClick={() => onSelectInvoice(invoice.id)}
-          >
+          <div className="invoice-card-body">
             <div className="invoice-card-main">
               <strong>
                 {invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}
@@ -517,12 +511,13 @@ function InvoiceCardView({
             </div>
           </div>
           <div className="invoice-card-tags">
-            <span className={`mini-tag tag-${invoice.status}`}>
-              {statusLabel(invoice.status)}
+            <span className={`mini-tag ${toneClass(invoiceStatusMeta(invoice.status).tone)}`}>
+              {invoiceStatusMeta(invoice.status).label}
             </span>
-            {invoice.duplicate_status !== "unique" &&
-            invoice.duplicate_status !== "unknown" ? (
-              <span className="mini-tag tag-warn">{dupLabel(invoice.duplicate_status)}</span>
+            {shouldShowDuplicateStatus(invoice.duplicate_status) ? (
+              <span className={`mini-tag ${toneClass(duplicateStatusMeta(invoice.duplicate_status).tone)}`}>
+                {duplicateStatusMeta(invoice.duplicate_status).label}
+              </span>
             ) : null}
           </div>
         </article>
@@ -596,14 +591,15 @@ function InvoiceTableView({
               <td className="invoice-table-amount">{formatInvoiceAmount(invoice)}</td>
               <td>{invoice.category ?? "未分类"}</td>
               <td>
-                <span className={`mini-tag tag-${invoice.status}`}>
-                  {statusLabel(invoice.status)}
+                <span className={`mini-tag ${toneClass(invoiceStatusMeta(invoice.status).tone)}`}>
+                  {invoiceStatusMeta(invoice.status).label}
                 </span>
               </td>
               <td>
-                {invoice.duplicate_status !== "unique" &&
-                invoice.duplicate_status !== "unknown" ? (
-                  <span className="mini-tag tag-warn">{dupLabel(invoice.duplicate_status)}</span>
+                {shouldShowDuplicateStatus(invoice.duplicate_status) ? (
+                  <span className={`mini-tag ${toneClass(duplicateStatusMeta(invoice.duplicate_status).tone)}`}>
+                    {duplicateStatusMeta(invoice.duplicate_status).label}
+                  </span>
                 ) : (
                   <span className="muted">-</span>
                 )}
@@ -629,15 +625,6 @@ function formatInvoiceAmount(invoice: Invoice): string {
 function formatSimilarity(value: number | undefined): string {
   if (typeof value !== "number" || Number.isNaN(value)) return "-";
   return `${(value * 100).toFixed(0)}%`;
-}
-
-function dupLabel(status: string) {
-  const labels: Record<string, string> = {
-    exact_duplicate: "完全重复",
-    probable_duplicate: "疑似重复",
-    possible_duplicate: "可能重复",
-  };
-  return labels[status] ?? status;
 }
 
 function getSelectedSummary(

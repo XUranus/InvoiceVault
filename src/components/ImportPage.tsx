@@ -2,6 +2,7 @@ import React from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ImportJob, ImportJobListResult } from "../types";
 import { importFiles, listImportJobs, recognizeRawFile, rawFileHasInvoices } from "../api";
+import { importStatusMeta, toneClass } from "../status";
 
 type Props = {
   isDraggingFiles: boolean;
@@ -242,12 +243,12 @@ function JobRow({
           <strong>{job.original_name ?? job.source_path}</strong>
           <span className="job-meta">
             {job.mime_type ? `${job.mime_type} · ` : ""}
-            {job.status === "duplicate" ? "SHA256 重复" : statusLabel(job.status)}
+            {job.status === "duplicate" ? "SHA256 重复" : importStatusMeta(job.status).label}
           </span>
         </div>
         <div className="job-card-actions" onClick={(e) => e.stopPropagation()}>
-          <span className={`status-tag tag-${job.status}`}>
-            {statusLabel(job.status)}
+          <span className={`status-tag ${toneClass(importStatusMeta(job.status).tone)}`}>
+            {importStatusMeta(job.status).label}
           </span>
           {canRecognizeJob(job) ? (
             <button
@@ -291,17 +292,6 @@ function JobRow({
       ) : null}
     </article>
   );
-}
-
-function statusLabel(status: string) {
-  const labels: Record<string, string> = {
-    pending: "等待中",
-    processing: "处理中",
-    completed: "已完成",
-    duplicate: "重复",
-    failed: "失败",
-  };
-  return labels[status] ?? status;
 }
 
 function canRecognizeJob(job: ImportJob) {

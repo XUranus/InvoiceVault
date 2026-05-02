@@ -253,6 +253,7 @@ pub struct InvoiceDetail {
     pub items: Vec<InvoiceItemRow>,
     pub raw_file_name: Option<String>,
     pub raw_file_mime: Option<String>,
+    pub raw_file_path: Option<String>,
     pub thumbnail_path: Option<String>,
     pub extraction_model: Option<String>,
     pub extraction_provider: Option<String>,
@@ -318,6 +319,7 @@ pub fn get_invoice_detail(
                 items: Vec::new(),
                 raw_file_name: None,
                 raw_file_mime: None,
+                raw_file_path: None,
                 thumbnail_path: None,
                 extraction_model: None,
                 extraction_provider: None,
@@ -347,39 +349,36 @@ pub fn get_invoice_detail(
         .collect::<Result<Vec<_>, _>>()?;
 
     // Load raw_file info and thumbnail path
-    let (raw_name, raw_mime, source_page_range): (Option<String>, Option<String>, Option<String>) =
-        conn.query_row(
-            "SELECT rf.original_name, rf.mime_type, inv.source_page_range
+    let (raw_name, raw_mime, raw_path, source_page_range): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn.query_row(
+            "SELECT rf.original_name, rf.mime_type, rf.storage_path, inv.source_page_range
             FROM invoices inv JOIN raw_files rf ON rf.id = inv.raw_file_id
             WHERE inv.id = ?1",
             [invoice_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )?;
 
-    let thumbnail_path = source_page_range.as_ref().and_then(|page_range| {
+    let preview_dir = thumbnails_dir
+        .join("previews")
+        .join(invoice.raw_file_id.to_string());
+    let page_thumbnail = source_page_range.as_ref().and_then(|page_range| {
         let page = page_range
             .split('-')
             .next()
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(1);
-        let label = format!("page-{page}");
-        let path = thumbnails_dir
-            .join("previews")
-            .join(invoice.raw_file_id.to_string())
-            .join(format!("{label}.jpg"));
-        if path.exists() {
-            Some(path.to_string_lossy().into_owned())
-        } else {
-            let fallback = thumbnails_dir
-                .join("previews")
-                .join(invoice.raw_file_id.to_string())
-                .join("image.jpg");
-            if fallback.exists() {
-                Some(fallback.to_string_lossy().into_owned())
-            } else {
-                None
-            }
-        }
+        let path = preview_dir.join(format!("page-{page}.jpg"));
+        path.exists().then(|| path.to_string_lossy().into_owned())
+    });
+    let image_thumbnail = preview_dir.join("image.jpg");
+    let thumbnail_path = page_thumbnail.or_else(|| {
+        image_thumbnail
+            .exists()
+            .then(|| image_thumbnail.to_string_lossy().into_owned())
     });
 
     // Load extraction info
@@ -396,6 +395,7 @@ pub fn get_invoice_detail(
         items,
         raw_file_name: raw_name,
         raw_file_mime: raw_mime,
+        raw_file_path: raw_path,
         thumbnail_path,
         extraction_model: model,
         extraction_provider: provider,

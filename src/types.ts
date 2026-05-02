@@ -127,6 +127,7 @@ export type InvoiceDetail = {
   items: InvoiceItemRow[];
   raw_file_name: string | null;
   raw_file_mime: string | null;
+  raw_file_path: string | null;
   thumbnail_path: string | null;
   extraction_model: string | null;
   extraction_provider: string | null;

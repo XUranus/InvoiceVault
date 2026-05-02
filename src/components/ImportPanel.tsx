@@ -2,6 +2,7 @@ import React from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ImportJob } from "../types";
 import { importFiles } from "../api";
+import { importStatusMeta, toneClass } from "../status";
 
 type Props = {
   jobs: ImportJob[];
@@ -110,8 +111,8 @@ export function ImportPanel({
                 {job.error_message ? <em>{job.error_message}</em> : null}
               </div>
               <div className="job-actions">
-                <span className={`job-status job-status-${job.status}`}>
-                  {statusLabel(job.status)}
+                <span className={`job-status ${toneClass(importStatusMeta(job.status).tone)}`}>
+                  {importStatusMeta(job.status).label}
                 </span>
                 {canRecognizeJob(job) ? (
                   <button
@@ -130,16 +131,6 @@ export function ImportPanel({
       </div>
     </div>
   );
-}
-
-function statusLabel(status: string) {
-  const labels: Record<string, string> = {
-    completed: "已完成",
-    duplicate: "重复",
-    failed: "失败",
-    recognized: "已识别",
-  };
-  return labels[status] ?? status;
 }
 
 function canRecognizeJob(job: ImportJob) {
