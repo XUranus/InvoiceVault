@@ -10,6 +10,7 @@ import {
 import { InvoiceListControls } from "./InvoiceListControls";
 import { ExportButton } from "./ExportButton";
 import { InvoiceDetail } from "./InvoiceDetail";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
   invoices: Invoice[];
@@ -67,7 +68,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
   const [batchStatus, setBatchStatus] = React.useState("");
   const [batchCategory, setBatchCategory] = React.useState("");
   const [batchApplying, setBatchApplying] = React.useState(false);
-  const [deleteConfirm, setDeleteConfirm] = React.useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [batchDeleting, setBatchDeleting] = React.useState(false);
 
   const doSearch = React.useCallback(
@@ -192,7 +193,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
     try {
       await batchDeleteInvoices(Array.from(selected));
       setSelected(new Set());
-      setDeleteConfirm(false);
+      setDeleteDialogOpen(false);
       doSearch(params);
       onInvoicesChanged();
     } catch (err) {
@@ -285,36 +286,17 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
           >
             {batchApplying ? "应用中..." : "批量应用"}
           </button>
-          {deleteConfirm ? (
-            <>
-              <button
-                className="btn-danger"
-                onClick={handleBatchDelete}
-                disabled={batchDeleting}
-              >
-                {batchDeleting ? "删除中..." : "确认删除"}
-              </button>
-              <button
-                className="btn-small"
-                onClick={() => setDeleteConfirm(false)}
-                disabled={batchDeleting}
-              >
-                取消
-              </button>
-            </>
-          ) : (
-            <button
-              className="btn-danger"
-              onClick={() => setDeleteConfirm(true)}
-            >
-              批量删除
-            </button>
-          )}
+          <button
+            className="btn-danger"
+            onClick={() => setDeleteDialogOpen(true)}
+          >
+            批量删除
+          </button>
           <button
             className="btn-small"
             onClick={() => {
               setSelected(new Set());
-              setDeleteConfirm(false);
+              setDeleteDialogOpen(false);
             }}
           >
             取消选择
@@ -487,6 +469,19 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
           ))}
         </div>
       )}
+
+      {/* Delete confirmation dialog */}
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="确认删除"
+        message={`确定要删除选中的 ${selected.size} 张发票吗？此操作不可撤销。`}
+        detail={getSelectedSummary(displayInvoices, selected)}
+        confirmLabel="删除"
+        danger
+        loading={batchDeleting}
+        onConfirm={handleBatchDelete}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
     </div>
   );
 }
@@ -508,4 +503,17 @@ function dupLabel(status: string) {
     possible_duplicate: "可能重复",
   };
   return labels[status] ?? status;
+}
+
+function getSelectedSummary(
+  invoices: Invoice[],
+  selected: Set<number>,
+): string {
+  const selectedInvoices = invoices.filter((inv) => selected.has(inv.id));
+  const preview = selectedInvoices
+    .slice(0, 5)
+    .map((inv) => inv.seller_name ?? inv.invoice_type ?? "未命名")
+    .join("、");
+  if (selectedInvoices.length <= 5) return preview;
+  return preview + ` 等 ${selectedInvoices.length} 张`;
 }
