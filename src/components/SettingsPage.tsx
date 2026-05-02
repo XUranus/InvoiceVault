@@ -1,6 +1,7 @@
 import React from "react";
 import type { AppHealth, LlmConnectionTestResult } from "../types";
 import { testLlmConnection } from "../api";
+import { WatchDirManager } from "./WatchDirManager";
 
 type Props = {
   health: AppHealth | null;
@@ -133,6 +134,8 @@ export function SettingsPage({
           </dl>
         </div>
       ) : null}
+
+      <WatchDirManager />
     </div>
   );
 }

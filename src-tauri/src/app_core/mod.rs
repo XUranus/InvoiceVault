@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use rusqlite::Connection;
@@ -27,6 +27,9 @@ use crate::{
     exporter::{export_invoices, ExportError, ExportInvoicesRequest, ExportResult},
     importer::{import_files, list_import_jobs, ImportError, ImportJobSummary},
     storage::{run_migrations, StorageError},
+    watcher::{
+        AddWatchDirRequest, UpdateWatchDirRequest, WatcherError, WatcherManager, WatchDirStatus,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -47,6 +50,8 @@ pub enum AppError {
     Export(#[from] ExportError),
     #[error("document error: {0}")]
     Document(#[from] DocumentError),
+    #[error("watcher error: {0}")]
+    Watcher(#[from] WatcherError),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,7 +79,8 @@ pub struct RawFileForRecognition {
 
 pub struct AppState {
     paths: AppPaths,
-    db: Mutex<Connection>,
+    db: Arc<Mutex<Connection>>,
+    watcher_manager: WatcherManager,
 }
 
 impl AppState {
@@ -86,10 +92,18 @@ impl AppState {
         let paths = create_app_paths(&app_data_dir)?;
         let mut db = Connection::open(&paths.database_path)?;
         run_migrations(&mut db)?;
+        let db = Arc::new(Mutex::new(db));
+
+        let watcher_manager = WatcherManager::new(
+            Arc::clone(&db),
+            paths.raw_dir.clone(),
+            app.clone(),
+        )?;
 
         Ok(Self {
             paths,
-            db: Mutex::new(db),
+            db,
+            watcher_manager,
         })
     }
 
@@ -188,6 +202,33 @@ impl AppState {
     ) -> Result<ExportResult, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(export_invoices(&db, request)?)
+    }
+
+    pub fn add_watch_dir(
+        &self,
+        request: AddWatchDirRequest,
+    ) -> Result<WatchDirStatus, AppError> {
+        Ok(self.watcher_manager.add_watch_dir(request)?)
+    }
+
+    pub fn remove_watch_dir(&self, id: i64) -> Result<(), AppError> {
+        Ok(self.watcher_manager.remove_watch_dir(id)?)
+    }
+
+    pub fn list_watch_dirs(&self) -> Result<Vec<WatchDirStatus>, AppError> {
+        Ok(self.watcher_manager.list_watch_dirs()?)
+    }
+
+    pub fn update_watch_dir(
+        &self,
+        id: i64,
+        request: UpdateWatchDirRequest,
+    ) -> Result<WatchDirStatus, AppError> {
+        Ok(self.watcher_manager.update_watch_dir(id, request)?)
+    }
+
+    pub fn toggle_watch_dir(&self, id: i64, enabled: bool) -> Result<WatchDirStatus, AppError> {
+        Ok(self.watcher_manager.toggle_watch_dir(id, enabled)?)
     }
 
     pub fn raw_file_for_recognition(

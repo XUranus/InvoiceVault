@@ -202,3 +202,44 @@ export type ExportResult = {
   format: string;
   byte_size: number;
 };
+
+export type WatchDirConfig = {
+  id: number;
+  path: string;
+  extensions: string;
+  recursive: boolean;
+  enabled: boolean;
+  stable_wait_ms: number;
+  archive_after_import: boolean;
+  archive_path: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WatchDirStatus = WatchDirConfig & {
+  running: boolean;
+  error: string | null;
+};
+
+export type AddWatchDirRequest = {
+  path: string;
+  extensions?: string;
+  recursive?: boolean;
+  stable_wait_ms?: number;
+};
+
+export type UpdateWatchDirRequest = {
+  path?: string;
+  extensions?: string;
+  recursive?: boolean;
+  stable_wait_ms?: number;
+  archive_after_import?: boolean;
+  archive_path?: string | null;
+};
+
+export type WatcherImportEvent = {
+  watch_dir_id: number;
+  watch_dir_path: string;
+  imported_count: number;
+  jobs: ImportJob[];
+};

@@ -1,6 +1,7 @@
 import React from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { ImportJob, Invoice } from "./types";
+import { listen } from "@tauri-apps/api/event";
+import type { ImportJob, Invoice, WatcherImportEvent } from "./types";
 import { getAppHealth, listImportJobs, searchInvoices, importFiles } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { DashboardPage } from "./components/DashboardPage";
@@ -81,6 +82,17 @@ export default function App() {
       unlisten?.();
     };
   }, []);
+
+  // Watcher auto-import notifications
+  React.useEffect(() => {
+    const unlisten = listen<WatcherImportEvent>("watcher-import", (_event) => {
+      refreshJobs();
+      refreshInvoices();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [refreshJobs, refreshInvoices]);
 
   const handleJobsChange = (imported: ImportJob[]) => {
     setJobs((current) => [...imported, ...current]);

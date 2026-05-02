@@ -15,6 +15,9 @@ import type {
   DedupeCheckResult,
   ExportInvoicesRequest,
   ExportResult,
+  WatchDirStatus,
+  AddWatchDirRequest,
+  UpdateWatchDirRequest,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -93,4 +96,32 @@ export async function exportInvoices(
   request: ExportInvoicesRequest,
 ): Promise<ExportResult> {
   return invoke<ExportResult>("export_invoices", { request });
+}
+
+export async function addWatchDir(
+  request: AddWatchDirRequest,
+): Promise<WatchDirStatus> {
+  return invoke<WatchDirStatus>("add_watch_dir", { request });
+}
+
+export async function removeWatchDir(id: number): Promise<void> {
+  return invoke<void>("remove_watch_dir", { id });
+}
+
+export async function listWatchDirs(): Promise<WatchDirStatus[]> {
+  return invoke<WatchDirStatus[]>("list_watch_dirs");
+}
+
+export async function updateWatchDir(
+  id: number,
+  request: UpdateWatchDirRequest,
+): Promise<WatchDirStatus> {
+  return invoke<WatchDirStatus>("update_watch_dir", { id, request });
+}
+
+export async function toggleWatchDir(
+  id: number,
+  enabled: boolean,
+): Promise<WatchDirStatus> {
+  return invoke<WatchDirStatus>("toggle_watch_dir", { id, enabled });
 }

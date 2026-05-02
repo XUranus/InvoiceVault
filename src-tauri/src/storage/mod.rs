@@ -10,6 +10,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         3,
         include_str!("../../migrations/0003_dedupe_candidates.sql"),
     ),
+    (
+        4,
+        include_str!("../../migrations/0004_watch_dirs.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -66,6 +70,6 @@ mod tests {
             )
             .expect("read migration version");
 
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 }

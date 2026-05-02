@@ -7,6 +7,7 @@ mod importer;
 mod llm;
 mod raw_store;
 mod storage;
+mod watcher;
 
 use app_core::{AppHealth, AppState};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
@@ -23,6 +24,9 @@ use llm::{
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
+use watcher::{
+    AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus,
+};
 
 #[tauri::command]
 fn app_health(state: State<'_, AppState>) -> Result<AppHealth, String> {
@@ -249,6 +253,46 @@ async fn test_llm_connection(config: LlmProviderConfig) -> Result<LlmConnectionT
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn add_watch_dir(
+    state: State<'_, AppState>,
+    request: AddWatchDirRequest,
+) -> Result<WatchDirStatus, String> {
+    state.add_watch_dir(request).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn remove_watch_dir(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state.remove_watch_dir(id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_watch_dirs(state: State<'_, AppState>) -> Result<Vec<WatchDirStatus>, String> {
+    state.list_watch_dirs().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn update_watch_dir(
+    state: State<'_, AppState>,
+    id: i64,
+    request: UpdateWatchDirRequest,
+) -> Result<WatchDirStatus, String> {
+    state
+        .update_watch_dir(id, request)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn toggle_watch_dir(
+    state: State<'_, AppState>,
+    id: i64,
+    enabled: bool,
+) -> Result<WatchDirStatus, String> {
+    state
+        .toggle_watch_dir(id, enabled)
+        .map_err(|err| err.to_string())
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -278,7 +322,12 @@ pub fn run() {
             resolve_duplicate,
             export_invoices,
             recognize_raw_file,
-            test_llm_connection
+            test_llm_connection,
+            add_watch_dir,
+            remove_watch_dir,
+            list_watch_dirs,
+            update_watch_dir,
+            toggle_watch_dir
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");
