@@ -70,6 +70,12 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
   const [batchApplying, setBatchApplying] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [batchDeleting, setBatchDeleting] = React.useState(false);
+  const [localError, setLocalError] = React.useState<string | null>(null);
+
+  const showError = (err: string) => {
+    setLocalError(err);
+    onError(err);
+  };
 
   const doSearch = React.useCallback(
     async (p: InvoiceSearchParams) => {
@@ -131,7 +137,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
     } catch (err) {
       setSemanticResults(null);
       setSemanticInvoices(null);
-      onError(String(err));
+      showError(String(err));
     } finally {
       setSemanticLoading(false);
     }
@@ -182,7 +188,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
       doSearch(params);
       onInvoicesChanged();
     } catch (err) {
-      onError(String(err));
+      showError(String(err));
     } finally {
       setBatchApplying(false);
     }
@@ -197,7 +203,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
       doSearch(params);
       onInvoicesChanged();
     } catch (err) {
-      onError(String(err));
+      showError(String(err));
     } finally {
       setBatchDeleting(false);
     }
@@ -243,12 +249,19 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError }: Props) {
 
   return (
     <div className="page">
+      {localError ? (
+        <div className="alert alert-error" style={{ marginBottom: 12 }}>
+          {localError}
+          <button className="alert-dismiss" onClick={() => setLocalError(null)}>×</button>
+        </div>
+      ) : null}
+
       <div className="page-header">
         <h2 className="page-title">发票库</h2>
         <div className="page-header-actions">
           <span className="count-badge">{totalCount} 张</span>
           <ExportButton
-            onError={onError}
+            onError={showError}
             onRefresh={onInvoicesChanged}
             invoiceIds={selected.size > 0 ? Array.from(selected) : undefined}
           />

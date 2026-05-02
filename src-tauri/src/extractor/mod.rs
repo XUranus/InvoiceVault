@@ -1417,16 +1417,25 @@ pub fn batch_delete_invoices(
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    let count = conn.execute(
-        &format!("DELETE FROM invoices WHERE id IN ({})", ids_str),
+    // Delete referencing rows first (extraction_runs has no ON DELETE CASCADE)
+    conn.execute(
+        &format!("DELETE FROM extraction_runs WHERE invoice_id IN ({})", ids_str),
         [],
     )?;
-    // Also clean up dedupe entries
+    conn.execute(
+        &format!("DELETE FROM events WHERE reference_type = 'invoice' AND reference_id IN ({})", ids_str),
+        [],
+    )?;
+    // These have ON DELETE CASCADE but be explicit for safety
     conn.execute(
         &format!(
             "DELETE FROM dedupe_candidates WHERE invoice_id_1 IN ({0}) OR invoice_id_2 IN ({0})",
             ids_str
         ),
+        [],
+    )?;
+    let count = conn.execute(
+        &format!("DELETE FROM invoices WHERE id IN ({})", ids_str),
         [],
     )?;
     Ok(count)
