@@ -22,9 +22,7 @@ export default function App() {
     "https://dashscope.aliyuncs.com/compatible-mode/v1",
   );
   const [llmModel, setLlmModel] = React.useState("qwen3.6-plus");
-  const [llmApiKey, setLlmApiKey] = React.useState(
-    "sk-0bfe76db71b74da59ef1fa085586e6ba",
-  );
+  const [llmApiKey, setLlmApiKey] = React.useState("");
   const [isDraggingFiles, setIsDraggingFiles] = React.useState(false);
   const [dashboardKey, setDashboardKey] = React.useState(0);
   const [importKey, setImportKey] = React.useState(0);

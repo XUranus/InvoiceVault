@@ -282,9 +282,21 @@ struct RecognitionInput {
     mime_type: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct DashboardStatsParams {
+    date_from: Option<String>,
+    date_to: Option<String>,
+}
+
 #[tauri::command]
-fn get_dashboard_stats(state: State<'_, AppState>) -> Result<DashboardStats, String> {
-    state.get_dashboard_stats().map_err(|err| err.to_string())
+fn get_dashboard_stats(
+    state: State<'_, AppState>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+) -> Result<DashboardStats, String> {
+    state
+        .get_dashboard_stats(date_from, date_to)
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]

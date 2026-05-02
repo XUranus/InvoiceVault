@@ -133,8 +133,14 @@ export async function updateWatchDir(
   return invoke<WatchDirStatus>("update_watch_dir", { id, request });
 }
 
-export async function getDashboardStats(): Promise<DashboardStats> {
-  return invoke<DashboardStats>("get_dashboard_stats");
+export async function getDashboardStats(
+  dateFrom?: string,
+  dateTo?: string,
+): Promise<DashboardStats> {
+  return invoke<DashboardStats>("get_dashboard_stats", {
+    dateFrom: dateFrom ?? null,
+    dateTo: dateTo ?? null,
+  });
 }
 
 export async function setChromaConfig(

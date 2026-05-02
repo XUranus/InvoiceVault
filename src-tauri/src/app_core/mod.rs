@@ -350,9 +350,17 @@ impl AppState {
         Ok(self.watcher_manager.toggle_watch_dir(id, enabled)?)
     }
 
-    pub fn get_dashboard_stats(&self) -> Result<DashboardStats, AppError> {
+    pub fn get_dashboard_stats(
+        &self,
+        date_from: Option<String>,
+        date_to: Option<String>,
+    ) -> Result<DashboardStats, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
-        Ok(get_dashboard_stats(&db)?)
+        Ok(get_dashboard_stats(
+            &db,
+            date_from.as_deref(),
+            date_to.as_deref(),
+        )?)
     }
 
     pub fn set_chroma_config(&self, config: ChromaConfig) -> Result<(), AppError> {
@@ -674,8 +682,16 @@ fn make_tool_executor(
             }
         }
         "get_dashboard_stats" => {
+            let date_from = args
+                .get("date_from")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let date_to = args
+                .get("date_to")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             let conn = db.lock().expect("db lock");
-            match get_dashboard_stats(&conn) {
+            match get_dashboard_stats(&conn, date_from.as_deref(), date_to.as_deref()) {
                 Ok(stats) => {
                     let content = serde_json::to_string(&stats).unwrap_or_default();
                     ToolExecResult::Success { content }

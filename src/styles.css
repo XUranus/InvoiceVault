@@ -284,6 +284,59 @@ body {
   gap: 10px;
 }
 
+.page-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.page-header-row .page-title {
+  margin-bottom: 0;
+}
+
+.date-range-bar {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.date-range-bar .btn-sm {
+  border: none;
+  border-radius: 0;
+  border-right: 1px solid var(--color-border);
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  transition: background 120ms;
+}
+
+.date-range-bar .btn-sm:last-child {
+  border-right: none;
+}
+
+.date-range-bar .btn-sm:hover {
+  background: var(--color-bg);
+}
+
+.date-range-bar .btn-primary {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.date-range-custom {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .count-badge {
   background: var(--color-primary-bg);
   color: var(--color-primary);

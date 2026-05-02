@@ -57,10 +57,13 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "get_dashboard_stats",
-            description: "获取仪表盘统计数据：发票总数、金额合计、月度趋势、类型分布、状态分布、Top 供应商排名。",
+            description: "获取仪表盘统计数据：发票总数、金额合计、月度趋势、类型分布、状态分布、Top 供应商排名。支持按日期范围筛选。",
             parameters: serde_json::json!({
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "date_from": {"type": "string", "description": "开始日期 YYYY-MM-DD，可选"},
+                    "date_to": {"type": "string", "description": "结束日期 YYYY-MM-DD，可选"}
+                }
             }),
             is_read_only: true,
             requires_confirmation: false,

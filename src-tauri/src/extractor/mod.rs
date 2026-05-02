@@ -1140,9 +1140,33 @@ fn sum_amount() -> &'static str {
     "COALESCE(SUM(CAST(total_amount AS REAL)), 0.0)"
 }
 
-pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, ExtractorError> {
+pub fn get_dashboard_stats(
+    conn: &Connection,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+) -> Result<DashboardStats, ExtractorError> {
+    // Build date filter fragments: no filtering when both are None
+    let where_clause: String = {
+        let mut clauses: Vec<String> = Vec::new();
+        if let Some(from) = date_from {
+            clauses.push(format!("issue_date >= '{}'", from));
+        }
+        if let Some(to) = date_to {
+            clauses.push(format!("issue_date <= '{}'", to));
+        }
+        if clauses.is_empty() {
+            String::new()
+        } else {
+            format!(" AND {}", clauses.join(" AND "))
+        }
+    };
+
     let (total_invoices, total_amount): (i64, f64) = conn.query_row(
-        &format!("SELECT COUNT(*), {} FROM invoices", sum_amount()),
+        &format!(
+            "SELECT COUNT(*), {} FROM invoices WHERE 1=1{}",
+            sum_amount(),
+            where_clause
+        ),
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
@@ -1156,7 +1180,10 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
         .unwrap_or_else(|_| "CNY".to_string());
 
     let average_confidence: f64 = conn.query_row(
-        "SELECT COALESCE(AVG(confidence), 0.0) FROM invoices WHERE confidence IS NOT NULL",
+        &format!(
+            "SELECT COALESCE(AVG(confidence), 0.0) FROM invoices WHERE confidence IS NOT NULL{}",
+            where_clause
+        ),
         [],
         |row| row.get(0),
     )?;
@@ -1172,13 +1199,19 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
     )?;
 
     let pending_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM invoices WHERE status = 'pending_confirmation'",
+        &format!(
+            "SELECT COUNT(*) FROM invoices WHERE status = 'pending_confirmation'{}",
+            where_clause
+        ),
         [],
         |row| row.get(0),
     )?;
 
     let duplicate_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM invoices WHERE duplicate_status IN ('possible_duplicate', 'probable_duplicate')",
+        &format!(
+            "SELECT COUNT(*) FROM invoices WHERE duplicate_status IN ('possible_duplicate', 'probable_duplicate'){}",
+            where_clause
+        ),
         [],
         |row| row.get(0),
     )?;
@@ -1186,11 +1219,12 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
     let mut trend_stmt = conn.prepare(&format!(
         "SELECT strftime('%Y-%m', issue_date) as month, COUNT(*), {}
             FROM invoices
-            WHERE issue_date IS NOT NULL
+            WHERE issue_date IS NOT NULL{}
             GROUP BY month
             ORDER BY month DESC
             LIMIT 12",
-        sum_amount()
+        sum_amount(),
+        where_clause
     ))?;
     let trend_rows: Vec<(String, i64, f64)> = trend_stmt
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
@@ -1203,14 +1237,16 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
             amount,
         })
         .collect();
-    monthly_trend.reverse(); // oldest first
+    monthly_trend.reverse();
 
     let mut type_stmt = conn.prepare(&format!(
         "SELECT COALESCE(invoice_type, '未知') as label, COUNT(*), {}
             FROM invoices
+            WHERE 1=1{}
             GROUP BY invoice_type
             ORDER BY COUNT(*) DESC",
-        sum_amount()
+        sum_amount(),
+        where_clause
     ))?;
     let by_type: Vec<BreakdownItem> = type_stmt
         .query_map([], |row| {
@@ -1225,9 +1261,11 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
     let mut status_stmt = conn.prepare(&format!(
         "SELECT status, COUNT(*), {}
             FROM invoices
+            WHERE 1=1{}
             GROUP BY status
             ORDER BY COUNT(*) DESC",
-        sum_amount()
+        sum_amount(),
+        where_clause
     ))?;
     let by_status: Vec<BreakdownItem> = status_stmt
         .query_map([], |row| {
@@ -1242,10 +1280,12 @@ pub fn get_dashboard_stats(conn: &Connection) -> Result<DashboardStats, Extracto
     let mut seller_stmt = conn.prepare(&format!(
         "SELECT COALESCE(seller_name, '未知') as name, COUNT(*), {}
             FROM invoices
+            WHERE 1=1{}
             GROUP BY seller_name
             ORDER BY COUNT(*) DESC
             LIMIT 5",
-        sum_amount()
+        sum_amount(),
+        where_clause
     ))?;
     let top_sellers: Vec<TopSellerItem> = seller_stmt
         .query_map([], |row| {
@@ -1390,7 +1430,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("open sqlite");
         run_migrations(&mut conn).expect("migrate");
 
-        let stats = get_dashboard_stats(&conn).expect("get stats");
+        let stats = get_dashboard_stats(&conn, None, None).expect("get stats");
         assert_eq!(stats.total_invoices, 0);
         assert_eq!(stats.total_amount, 0.0);
         assert_eq!(stats.this_month_count, 0);
@@ -1464,7 +1504,7 @@ mod tests {
         )
         .expect("update status");
 
-        let stats = get_dashboard_stats(&conn).expect("get stats");
+        let stats = get_dashboard_stats(&conn, None, None).expect("get stats");
         assert_eq!(stats.total_invoices, 2);
         assert_eq!(stats.total_amount, 300.0);
         assert_eq!(stats.pending_count, 1);
