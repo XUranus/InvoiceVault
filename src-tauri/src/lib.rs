@@ -13,34 +13,46 @@ mod raw_store;
 mod storage;
 mod watcher;
 
-use tracing::{error, info};
 use agent::{AgentMessageRow, AgentResponse, AgentSession, ConfirmRequest};
-use app_core::{AppHealth, AppState, CleanupStorageResult, ExportLogsResult, RecognitionQueueStatus};
+use app_core::{
+    AppHealth, AppState, CleanupStorageResult, ExportLogsResult, RecognitionQueueStatus,
+};
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
 use embedding::{EmbeddingConfig, EmbeddingTestResult};
 use event::{EventListResult, NotificationRow};
 use exporter::{ExportInvoicesRequest, ExportResult};
-use llm::LlmProviderConfig;
 use extractor::{
-    BatchUpdateRequest, DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
-    InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest,
-    UpdateInvoiceRequest, UpdateInvoiceResult,
+    DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult,
+    InvoiceSummary, SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
+    UpdateInvoiceResult,
 };
 use importer::{ImportJobListResult, ImportJobSummary, ImportRequest};
+use llm::LlmProviderConfig;
 use llm::{
     recognize_invoice_image, test_llm_connection as run_llm_connection_test,
     LlmConnectionTestResult,
 };
 use serde::{Deserialize, Serialize};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager, State, WindowEvent,
+};
+use tracing::{error, info};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WindowSizeState {
     width: f64,
     height: f64,
 }
-use tauri::{Manager, State};
 use watcher::{AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus};
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_ID: &str = "main-tray";
+const TRAY_WORKBENCH_ID: &str = "tray-workbench";
+const TRAY_VERSION_ID: &str = "tray-version";
+const TRAY_QUIT_ID: &str = "tray-quit";
 
 #[tauri::command]
 fn app_health(state: State<'_, AppState>) -> Result<AppHealth, String> {
@@ -130,10 +142,7 @@ fn batch_update_invoices(
 }
 
 #[tauri::command]
-fn batch_delete_invoices(
-    state: State<'_, AppState>,
-    ids: Vec<i64>,
-) -> Result<usize, String> {
+fn batch_delete_invoices(state: State<'_, AppState>, ids: Vec<i64>) -> Result<usize, String> {
     state
         .batch_delete_invoices(ids)
         .map_err(|err| err.to_string())
@@ -199,7 +208,8 @@ async fn recognize_raw_file(
             .render_pdf_pages_for_recognition(raw_file.id, &raw_file.storage_path)
             .inspect_err(|e| error!("PDF render failed: {e}"))
             .map_err(|err| err.to_string())?;
-        pages.into_iter()
+        pages
+            .into_iter()
             .map(|page| {
                 let prepared = state
                     .prepare_image_for_recognition(
@@ -207,7 +217,12 @@ async fn recognize_raw_file(
                         &page.image_path,
                         Some(page.page_number),
                     )
-                    .inspect_err(|e| error!("Image preparation failed for page {}: {e}", page.page_number))
+                    .inspect_err(|e| {
+                        error!(
+                            "Image preparation failed for page {}: {e}",
+                            page.page_number
+                        )
+                    })
                     .map_err(|err| err.to_string())?;
                 Ok(RecognitionInput {
                     source_page_range: Some(page.page_number.to_string()),
@@ -230,7 +245,10 @@ async fn recognize_raw_file(
         }]
     };
 
-    info!("Starting recognition for {} pages", recognition_inputs.len());
+    info!(
+        "Starting recognition for {} pages",
+        recognition_inputs.len()
+    );
     let page_count = recognition_inputs.len();
     let mut invoices = Vec::new();
     let mut total_duration_ms = 0_u128;
@@ -310,12 +328,6 @@ struct RecognitionInput {
     image_path: std::path::PathBuf,
     thumbnail_path: std::path::PathBuf,
     mime_type: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct DashboardStatsParams {
-    date_from: Option<String>,
-    date_to: Option<String>,
 }
 
 #[tauri::command]
@@ -531,17 +543,12 @@ fn dismiss_notification(state: State<'_, AppState>, id: i64) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn set_llm_config(
-    state: State<'_, AppState>,
-    config: LlmProviderConfig,
-) -> Result<(), String> {
+fn set_llm_config(state: State<'_, AppState>, config: LlmProviderConfig) -> Result<(), String> {
     state.set_llm_config(config).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-fn get_llm_config(
-    state: State<'_, AppState>,
-) -> Result<Option<LlmProviderConfig>, String> {
+fn get_llm_config(state: State<'_, AppState>) -> Result<Option<LlmProviderConfig>, String> {
     Ok(state.get_llm_config())
 }
 
@@ -557,15 +564,16 @@ fn set_recognition_concurrency(
     state: State<'_, AppState>,
     max_concurrent: usize,
 ) -> Result<(), String> {
-    state.set_recognition_concurrency(max_concurrent).map_err(|e| e.to_string())
+    state
+        .set_recognition_concurrency(max_concurrent)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn raw_file_has_invoices(
-    state: State<'_, AppState>,
-    raw_file_id: i64,
-) -> Result<bool, String> {
-    state.raw_file_has_invoices(raw_file_id).map_err(|e| e.to_string())
+fn raw_file_has_invoices(state: State<'_, AppState>, raw_file_id: i64) -> Result<bool, String> {
+    state
+        .raw_file_has_invoices(raw_file_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -577,9 +585,7 @@ fn export_logs(
 }
 
 #[tauri::command]
-fn cleanup_storage(
-    state: State<'_, AppState>,
-) -> Result<CleanupStorageResult, String> {
+fn cleanup_storage(state: State<'_, AppState>) -> Result<CleanupStorageResult, String> {
     state.cleanup_storage().map_err(|e| e.to_string())
 }
 
@@ -621,9 +627,12 @@ pub fn run() {
 
             let state = AppState::initialize(app.handle())?;
             app.manage(state);
+            setup_tray(app.handle())?;
 
             // Restore and persist window size
-            let window = app.get_webview_window("main").expect("main window");
+            let window = app
+                .get_webview_window(MAIN_WINDOW_LABEL)
+                .expect("main window");
             let state_path = app
                 .path()
                 .app_data_dir()
@@ -641,8 +650,15 @@ pub fn run() {
             }
 
             let save_path = state_path.clone();
-            window.on_window_event(move |event| {
-                if let tauri::WindowEvent::Resized(size) = event {
+            let window_app = window.app_handle().clone();
+            window.on_window_event(move |event| match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    if let Some(window) = window_app.get_webview_window(MAIN_WINDOW_LABEL) {
+                        let _ = window.hide();
+                    }
+                }
+                WindowEvent::Resized(size) => {
                     if let Ok(json) = serde_json::to_string(&WindowSizeState {
                         width: size.width as f64,
                         height: size.height as f64,
@@ -650,6 +666,7 @@ pub fn run() {
                         let _ = std::fs::write(&save_path, json);
                     }
                 }
+                _ => {}
             });
 
             Ok(())
@@ -708,4 +725,56 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Receiptier");
+}
+
+fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let workbench = MenuItem::with_id(app, TRAY_WORKBENCH_ID, "工作台", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let version = MenuItem::with_id(
+        app,
+        TRAY_VERSION_ID,
+        format!("版本 {}", app.package_info().version),
+        false,
+        None::<&str>,
+    )?;
+    let quit_separator = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, TRAY_QUIT_ID, "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&workbench, &separator, &version, &quit_separator, &quit])?;
+
+    TrayIconBuilder::with_id(TRAY_ID)
+        .icon(tauri::include_image!("../icons/tray.png"))
+        .tooltip(format!(
+            "{} {}",
+            app.package_info().name,
+            app.package_info().version
+        ))
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| {
+            if event.id() == TRAY_WORKBENCH_ID {
+                restore_main_window(app);
+            } else if event.id() == TRAY_QUIT_ID {
+                app.exit(0);
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                restore_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+
+    Ok(())
+}
+
+fn restore_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }
