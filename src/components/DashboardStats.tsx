@@ -23,6 +23,17 @@ const STATUS_COLORS: Record<string, string> = {
   needs_review: "#ef4444",
 };
 
+const chartGrid = "var(--color-chart-grid)";
+const chartAxis = "var(--color-chart-axis)";
+const chartText = "var(--color-chart-tooltip-text)";
+const chartTooltip = {
+  background: "var(--color-chart-tooltip-bg)",
+  border: "1px solid var(--color-chart-tooltip-border)",
+  borderRadius: 8,
+  color: chartText,
+  fontSize: 13,
+};
+
 function formatAmount(value: number): string {
   if (value >= 10000) {
     return (value / 10000).toFixed(1) + " 万";
@@ -71,17 +82,14 @@ export function DashboardStats({ stats }: Props) {
             {stats.monthly_trend.length > 0 ? (
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={stats.monthly_trend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                  <XAxis dataKey="month" stroke="#999" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                  <XAxis dataKey="month" stroke={chartAxis} fontSize={12} />
                   <YAxis yAxisId="left" stroke="#3b82f6" fontSize={12} />
                   <YAxis yAxisId="right" orientation="right" stroke="#22c55e" fontSize={12} />
                   <Tooltip
-                    contentStyle={{
-                      background: "#1e1e2e",
-                      border: "1px solid #444",
-                      borderRadius: 8,
-                      fontSize: 13,
-                    }}
+                    contentStyle={chartTooltip}
+                    labelStyle={{ color: chartText }}
+                    itemStyle={{ color: chartText }}
                   />
                   <Legend />
                   <Line
@@ -123,19 +131,16 @@ export function DashboardStats({ stats }: Props) {
                     cy="50%"
                     outerRadius={80}
                     label={({ name, value }) => `${name}: ${value}`}
-                    labelLine={{ stroke: "#666" }}
+                    labelLine={{ stroke: chartAxis }}
                   >
                     {stats.by_type.map((_, i) => (
                       <Cell key={i} fill={COLORS[i % COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{
-                      background: "#1e1e2e",
-                      border: "1px solid #444",
-                      borderRadius: 8,
-                      fontSize: 13,
-                    }}
+                    contentStyle={chartTooltip}
+                    labelStyle={{ color: chartText }}
+                    itemStyle={{ color: chartText }}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -145,16 +150,13 @@ export function DashboardStats({ stats }: Props) {
               <h3 className="chart-title">状态分布</h3>
               <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={stats.by_status}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                  <XAxis dataKey="label" stroke="#999" fontSize={12} />
-                  <YAxis stroke="#999" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                  <XAxis dataKey="label" stroke={chartAxis} fontSize={12} />
+                  <YAxis stroke={chartAxis} fontSize={12} />
                   <Tooltip
-                    contentStyle={{
-                      background: "#1e1e2e",
-                      border: "1px solid #444",
-                      borderRadius: 8,
-                      fontSize: 13,
-                    }}
+                    contentStyle={chartTooltip}
+                    labelStyle={{ color: chartText }}
+                    itemStyle={{ color: chartText }}
                   />
                   <Bar dataKey="count" name="数量" radius={[4, 4, 0, 0]}>
                     {stats.by_status.map((entry, i) => (
@@ -174,22 +176,19 @@ export function DashboardStats({ stats }: Props) {
             <h3 className="chart-title">Top 供应商（按发票数）</h3>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={stats.top_sellers} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <XAxis type="number" stroke="#999" fontSize={12} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis type="number" stroke={chartAxis} fontSize={12} />
                 <YAxis
                   type="category"
                   dataKey="seller_name"
-                  stroke="#999"
+                  stroke={chartAxis}
                   fontSize={12}
                   width={120}
                 />
                 <Tooltip
-                  contentStyle={{
-                    background: "#1e1e2e",
-                    border: "1px solid #444",
-                    borderRadius: 8,
-                    fontSize: 13,
-                  }}
+                  contentStyle={chartTooltip}
+                  labelStyle={{ color: chartText }}
+                  itemStyle={{ color: chartText }}
                 />
                 <Bar dataKey="count" name="发票数" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
               </BarChart>

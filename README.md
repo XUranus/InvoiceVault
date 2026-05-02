@@ -165,7 +165,7 @@ RECEIPTIER_LLM_BASE_URL=... RECEIPTIER_LLM_MODEL=... RECEIPTIER_LLM_API_KEY=... 
   cargo test live_llm_connection_from_env -- --ignored
 ```
 
-![screenshot](./screenshots/Screenshot_20260502_212518)
+![screenshot](./screenshots/Screenshot_20260502_212518.png)
 
 ## 文档
 
