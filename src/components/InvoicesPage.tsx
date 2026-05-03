@@ -138,6 +138,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
             duplicate_status: detail.duplicate_status,
             created_at: detail.created_at,
             updated_at: detail.updated_at,
+            badges: detail.badges,
           });
         } catch {
           // Skip invoices we can't load
@@ -563,7 +564,16 @@ function InvoiceTableView({
 
   return (
     <div className="invoice-table-wrap">
-      <table className="invoice-table">
+      <table className={`invoice-table ${similarities ? "invoice-table-with-similarity" : ""}`}>
+        <colgroup>
+          <col className="invoice-table-col-check" />
+          <col className="invoice-table-col-company" />
+          <col className="invoice-table-col-date" />
+          <col className="invoice-table-col-code" />
+          <col className="invoice-table-col-amount" />
+          <col className="invoice-table-col-tags" />
+          {similarities ? <col className="invoice-table-col-similarity" /> : null}
+        </colgroup>
         <thead>
           <tr>
             <th className="invoice-table-check-col" aria-label="选择" />
@@ -589,15 +599,15 @@ function InvoiceTableView({
                   onChange={() => onToggleSelect(invoice.id)}
                 />
               </td>
-              <td>
+              <td className="invoice-table-company">
                 <strong>{invoice.seller_name ?? invoice.buyer_name ?? "未命名发票"}</strong>
                 {invoice.buyer_name ? (
                   <span className="invoice-table-subtext">购买方：{invoice.buyer_name}</span>
                 ) : null}
               </td>
-              <td>{invoice.issue_date ?? "未识别"}</td>
-              <td>
-                {formatInvoiceCode(invoice)}
+              <td className="invoice-table-date">{invoice.issue_date ?? "未识别"}</td>
+              <td className="invoice-table-code">
+                <InvoiceCodeCell invoice={invoice} />
               </td>
               <td className="invoice-table-amount">{formatInvoiceAmount(invoice)}</td>
               <td>
@@ -612,6 +622,29 @@ function InvoiceTableView({
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function InvoiceCodeCell({ invoice }: { invoice: Invoice }) {
+  if (!invoice.invoice_code && !invoice.invoice_number) {
+    return <span className="invoice-code-empty">待确认</span>;
+  }
+
+  return (
+    <div className="invoice-code-cell" title={formatInvoiceCode(invoice)}>
+      {invoice.invoice_code ? (
+        <div className="invoice-code-line">
+          <span className="invoice-code-label">代码</span>
+          <span className="invoice-code-value">{invoice.invoice_code}</span>
+        </div>
+      ) : null}
+      {invoice.invoice_number ? (
+        <div className="invoice-code-line">
+          <span className="invoice-code-label">号码</span>
+          <span className="invoice-code-value">{invoice.invoice_number}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -660,6 +693,10 @@ function buildInvoiceTags(invoice: Invoice): Array<{ label: string; tone: "succe
 
   if (invoice.category) {
     tags.push({ label: invoice.category, tone: "neutral" });
+  }
+
+  for (const badge of invoice.badges ?? []) {
+    tags.push({ label: `${badge.group_name}: ${badge.value}`, tone: "neutral" });
   }
 
   return tags;

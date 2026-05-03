@@ -53,6 +53,7 @@ export type Invoice = {
   duplicate_status: string;
   created_at: string;
   updated_at: string;
+  badges: InvoiceBadgeSelection[];
 };
 
 export type RecognizeRawFileResult = {

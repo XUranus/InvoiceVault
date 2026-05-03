@@ -1122,19 +1122,53 @@ textarea:focus {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
+  width: 100%;
 }
 
 .invoice-table {
-  width: max(100%, 760px);
+  width: 100%;
+  min-width: 980px;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 13px;
 }
 
+.invoice-table-with-similarity {
+  min-width: 1060px;
+}
+
+.invoice-table-col-check {
+  width: 44px;
+}
+
+.invoice-table-col-company {
+  width: 32%;
+}
+
+.invoice-table-col-date {
+  width: 124px;
+}
+
+.invoice-table-col-code {
+  width: 230px;
+}
+
+.invoice-table-col-amount {
+  width: 132px;
+}
+
+.invoice-table-col-tags {
+  width: auto;
+}
+
+.invoice-table-col-similarity {
+  width: 92px;
+}
+
 .invoice-table th,
 .invoice-table td {
   border-bottom: 1px solid var(--color-border);
-  padding: 10px 12px;
+  padding: 9px 12px;
   text-align: left;
   vertical-align: middle;
   min-width: 0;
@@ -1168,33 +1202,7 @@ textarea:focus {
   width: 42px;
 }
 
-.invoice-table th:nth-child(2),
-.invoice-table td:nth-child(2) {
-  width: 30%;
-}
-
-.invoice-table th:nth-child(3),
-.invoice-table td:nth-child(3) {
-  width: 14%;
-}
-
-.invoice-table th:nth-child(4),
-.invoice-table td:nth-child(4) {
-  width: 20%;
-}
-
-.invoice-table th:nth-child(5),
-.invoice-table td:nth-child(5) {
-  width: 14%;
-}
-
-.invoice-table th:nth-child(6),
-.invoice-table td:nth-child(6) {
-  width: 22%;
-}
-
-.invoice-table td:nth-child(2) strong,
-.invoice-table td:nth-child(4) {
+.invoice-table-company strong {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1235,6 +1243,51 @@ textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.invoice-table-date {
+  color: var(--color-text-secondary);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.invoice-table-code {
+  min-width: 0;
+}
+
+.invoice-code-cell {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.invoice-code-line {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.invoice-code-label {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.invoice-code-value {
+  overflow: hidden;
+  color: var(--color-text);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invoice-code-empty {
+  color: var(--color-text-muted);
+  font-weight: 650;
 }
 
 .invoice-table-amount {

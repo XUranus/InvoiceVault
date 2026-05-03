@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::NaiveDate;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -32,6 +34,7 @@ pub struct InvoiceSummary {
     pub duplicate_status: String,
     pub created_at: String,
     pub updated_at: String,
+    pub badges: Vec<InvoiceBadgeSelection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,9 +108,10 @@ pub fn search_invoices(
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
         bind_values.iter().map(|v| v.as_ref()).collect();
 
-    let invoices = stmt
+    let mut invoices = stmt
         .query_map(param_refs.as_slice(), row_to_invoice_summary)?
         .collect::<Result<Vec<_>, _>>()?;
+    attach_badges_to_summaries(conn, &mut invoices)?;
 
     let total_pages = ((total_count as f64) / (page_size as f64)).ceil() as i64;
 
@@ -935,9 +939,10 @@ pub fn list_invoices(conn: &Connection) -> Result<Vec<InvoiceSummary>, Extractor
         LIMIT 100",
     )?;
 
-    let invoices = stmt
+    let mut invoices = stmt
         .query_map([], row_to_invoice_summary)?
         .collect::<Result<Vec<_>, _>>()?;
+    attach_badges_to_summaries(conn, &mut invoices)?;
 
     Ok(invoices)
 }
@@ -1122,7 +1127,8 @@ fn load_invoice_summary(
     conn: &Connection,
     invoice_id: i64,
 ) -> Result<InvoiceSummary, ExtractorError> {
-    conn.query_row(
+    let mut invoice = conn
+        .query_row(
         "SELECT
             id,
             raw_file_id,
@@ -1147,7 +1153,9 @@ fn load_invoice_summary(
         [invoice_id],
         row_to_invoice_summary,
     )
-    .map_err(ExtractorError::from)
+    .map_err(ExtractorError::from)?;
+    invoice.badges = list_invoice_badges(conn, invoice_id)?;
+    Ok(invoice)
 }
 
 fn row_to_invoice_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceSummary> {
@@ -1170,7 +1178,51 @@ fn row_to_invoice_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceSu
         duplicate_status: row.get(15)?,
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
+        badges: Vec::new(),
     })
+}
+
+fn attach_badges_to_summaries(
+    conn: &Connection,
+    invoices: &mut [InvoiceSummary],
+) -> Result<(), ExtractorError> {
+    if invoices.is_empty() {
+        return Ok(());
+    }
+
+    let ids = invoices
+        .iter()
+        .map(|invoice| invoice.id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut stmt = conn.prepare(&format!(
+        "SELECT invoice_id, group_name, value
+         FROM invoice_badges
+         WHERE invoice_id IN ({ids})
+         ORDER BY invoice_id, group_name"
+    ))?;
+
+    let mut badges_by_invoice: HashMap<i64, Vec<InvoiceBadgeSelection>> = HashMap::new();
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            InvoiceBadgeSelection {
+                group_name: row.get(1)?,
+                value: row.get(2)?,
+            },
+        ))
+    })?;
+
+    for row in rows {
+        let (invoice_id, badge) = row?;
+        badges_by_invoice.entry(invoice_id).or_default().push(badge);
+    }
+
+    for invoice in invoices {
+        invoice.badges = badges_by_invoice.remove(&invoice.id).unwrap_or_default();
+    }
+
+    Ok(())
 }
 
 fn ensure_raw_file_exists(conn: &Connection, raw_file_id: i64) -> Result<(), ExtractorError> {
@@ -1528,9 +1580,10 @@ pub fn batch_update_invoices(
         FROM invoices WHERE id IN ({}) ORDER BY id",
         ids_str
     ))?;
-    let rows = stmt
+    let mut rows = stmt
         .query_map([], |row| row_to_invoice_summary(row))?
         .collect::<Result<Vec<_>, _>>()?;
+    attach_badges_to_summaries(conn, &mut rows)?;
     Ok(rows)
 }
 
