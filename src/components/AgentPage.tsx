@@ -339,7 +339,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
                         {formatToolResult(msg.content)}
                       </div>
                     ) : (
-                      <div className="chat-content">{msg.content}</div>
+                      <MarkdownContent content={msg.content} />
                     )}
                   </div>
                 </div>
@@ -417,6 +417,275 @@ function toolLabel(name: string): string {
     update_invoice: "更新发票",
   };
   return labels[name] ?? name;
+}
+
+type MarkdownBlock =
+  | { type: "paragraph"; lines: string[] }
+  | { type: "heading"; level: number; text: string }
+  | { type: "list"; ordered: boolean; items: string[] }
+  | { type: "quote"; lines: string[] }
+  | { type: "code"; language: string | null; code: string }
+  | { type: "table"; header: string[]; rows: string[][] }
+  | { type: "rule" };
+
+function MarkdownContent({ content }: { content: string }) {
+  const blocks = React.useMemo(() => parseMarkdown(content), [content]);
+
+  return (
+    <div className="chat-content chat-markdown">
+      {blocks.map((block, index) => renderMarkdownBlock(block, index))}
+    </div>
+  );
+}
+
+function parseMarkdown(content: string): MarkdownBlock[] {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const blocks: MarkdownBlock[] = [];
+  let paragraph: string[] = [];
+  let index = 0;
+
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      blocks.push({ type: "paragraph", lines: paragraph });
+      paragraph = [];
+    }
+  };
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      index += 1;
+      continue;
+    }
+
+    const fence = trimmed.match(/^```([A-Za-z0-9_-]+)?\s*$/);
+    if (fence) {
+      flushParagraph();
+      const language = fence[1] ?? null;
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push({ type: "code", language, code: codeLines.join("\n") });
+      continue;
+    }
+
+    if (isTableStart(lines, index)) {
+      flushParagraph();
+      const header = splitTableRow(lines[index]);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
+        rows.push(splitTableRow(lines[index]));
+        index += 1;
+      }
+      blocks.push({ type: "table", header, rows });
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      blocks.push({
+        type: "heading",
+        level: heading[1].length,
+        text: heading[2].trim(),
+      });
+      index += 1;
+      continue;
+    }
+
+    if (/^[-*_]{3,}$/.test(trimmed)) {
+      flushParagraph();
+      blocks.push({ type: "rule" });
+      index += 1;
+      continue;
+    }
+
+    const listMatch = trimmed.match(/^((?:[-*+])|\d+\.)\s+(.+)$/);
+    if (listMatch) {
+      flushParagraph();
+      const ordered = /\d+\./.test(listMatch[1]);
+      const items: string[] = [];
+      while (index < lines.length) {
+        const match = lines[index].trim().match(/^((?:[-*+])|\d+\.)\s+(.+)$/);
+        if (!match || /\d+\./.test(match[1]) !== ordered) break;
+        items.push(match[2]);
+        index += 1;
+      }
+      blocks.push({ type: "list", ordered, items });
+      continue;
+    }
+
+    if (trimmed.startsWith(">")) {
+      flushParagraph();
+      const quoteLines: string[] = [];
+      while (index < lines.length && lines[index].trim().startsWith(">")) {
+        quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
+        index += 1;
+      }
+      blocks.push({ type: "quote", lines: quoteLines });
+      continue;
+    }
+
+    paragraph.push(line);
+    index += 1;
+  }
+
+  flushParagraph();
+  return blocks;
+}
+
+function renderMarkdownBlock(block: MarkdownBlock, key: number): React.ReactNode {
+  switch (block.type) {
+    case "heading": {
+      const children = renderInline(block.text);
+      if (block.level === 1) {
+        return <h3 key={key} className="chat-md-heading">{children}</h3>;
+      }
+      if (block.level === 2) {
+        return <h4 key={key} className="chat-md-heading">{children}</h4>;
+      }
+      if (block.level === 3) {
+        return <h5 key={key} className="chat-md-heading">{children}</h5>;
+      }
+      return <h6 key={key} className="chat-md-heading">{children}</h6>;
+    }
+    case "list": {
+      const ListTag = block.ordered ? "ol" : "ul";
+      return (
+        <ListTag key={key} className="chat-md-list">
+          {block.items.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInline(item)}</li>
+          ))}
+        </ListTag>
+      );
+    }
+    case "quote":
+      return (
+        <blockquote key={key} className="chat-md-quote">
+          {renderLines(block.lines)}
+        </blockquote>
+      );
+    case "code":
+      return (
+        <div key={key} className="chat-md-code-block">
+          {block.language ? <div className="chat-md-code-lang">{block.language}</div> : null}
+          <pre>
+            <code>{block.code}</code>
+          </pre>
+        </div>
+      );
+    case "table":
+      return (
+        <div key={key} className="chat-md-table-wrap">
+          <table className="chat-md-table">
+            <thead>
+              <tr>
+                {block.header.map((cell, cellIndex) => (
+                  <th key={cellIndex}>{renderInline(cell)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {block.header.map((_, cellIndex) => (
+                    <td key={cellIndex}>{renderInline(row[cellIndex] ?? "")}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    case "rule":
+      return <hr key={key} className="chat-md-rule" />;
+    case "paragraph":
+    default:
+      return (
+        <p key={key} className="chat-md-paragraph">
+          {renderLines(block.lines)}
+        </p>
+      );
+  }
+}
+
+function renderLines(lines: string[]): React.ReactNode[] {
+  return lines.flatMap((line, index) => {
+    const nodes = renderInline(line);
+    return index === lines.length - 1 ? nodes : [...nodes, <br key={`br-${index}`} />];
+  });
+}
+
+function renderInline(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    if (token.startsWith("`")) {
+      nodes.push(<code key={key++}>{token.slice(1, -1)}</code>);
+    } else if (token.startsWith("**")) {
+      nodes.push(<strong key={key++}>{renderInline(token.slice(2, -2))}</strong>);
+    } else if (token.startsWith("*")) {
+      nodes.push(<em key={key++}>{renderInline(token.slice(1, -1))}</em>);
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (link && isSafeLink(link[2])) {
+        nodes.push(
+          <a key={key++} href={link[2]} target="_blank" rel="noreferrer">
+            {renderInline(link[1])}
+          </a>,
+        );
+      } else {
+        nodes.push(token);
+      }
+    }
+
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : [text];
+}
+
+function isSafeLink(url: string): boolean {
+  return /^(https?:|mailto:)/i.test(url);
+}
+
+function isTableStart(lines: string[], index: number): boolean {
+  return (
+    index + 1 < lines.length &&
+    lines[index].includes("|") &&
+    splitTableRow(lines[index]).length >= 2 &&
+    splitTableRow(lines[index + 1]).every((cell) => /^:?-{3,}:?$/.test(cell))
+  );
+}
+
+function splitTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
 }
 
 function formatFieldName(key: string): string {

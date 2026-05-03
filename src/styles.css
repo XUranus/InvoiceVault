@@ -2853,14 +2853,17 @@ textarea:focus {
 
 .chat-message-user {
   align-self: flex-end;
+  max-width: min(720px, 72%);
 }
 
 .chat-message-assistant {
   align-self: flex-start;
+  max-width: min(880px, 86%);
 }
 
 .chat-message-tool {
   align-self: flex-start;
+  max-width: min(760px, 82%);
 }
 
 .chat-bubble {
@@ -2869,6 +2872,7 @@ textarea:focus {
   font-size: 13px;
   line-height: 1.55;
   word-break: break-word;
+  max-width: 100%;
 }
 
 .chat-message-user .chat-bubble {
@@ -2883,6 +2887,7 @@ textarea:focus {
   border: 1px solid var(--color-chat-assistant-border);
   border-bottom-left-radius: 4px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  padding: 12px 15px;
 }
 
 .chat-message-tool .chat-bubble {
@@ -2947,7 +2952,133 @@ textarea:focus {
 }
 
 .chat-content {
-  white-space: pre-wrap;
+  min-width: 0;
+}
+
+.chat-markdown {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol,
+.chat-markdown blockquote,
+.chat-markdown pre,
+.chat-markdown table,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  margin: 0;
+}
+
+.chat-md-paragraph {
+  white-space: normal;
+}
+
+.chat-md-heading {
+  color: inherit;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.chat-md-list {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
+}
+
+.chat-md-list li {
+  padding-left: 2px;
+}
+
+.chat-md-quote {
+  border-left: 3px solid var(--color-chat-assistant-border);
+  color: var(--text-secondary);
+  padding-left: 10px;
+}
+
+.chat-md-rule {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border-light);
+}
+
+.chat-markdown code {
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 12px;
+  padding: 1px 4px;
+}
+
+.chat-md-code-block {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-main);
+  overflow: hidden;
+}
+
+.chat-md-code-lang {
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-muted);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 9px;
+  text-transform: uppercase;
+}
+
+.chat-md-code-block pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 10px 12px;
+}
+
+.chat-md-code-block code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+}
+
+.chat-md-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-md-table {
+  width: max-content;
+  min-width: min(520px, 100%);
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.chat-md-table th,
+.chat-md-table td {
+  border: 1px solid var(--border-light);
+  padding: 5px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.chat-md-table th {
+  background: var(--bg-main);
+  font-weight: 700;
+}
+
+.chat-markdown a {
+  color: var(--accent);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.chat-markdown a:hover {
+  text-decoration: underline;
 }
 
 .chat-loading {
