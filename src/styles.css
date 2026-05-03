@@ -4688,10 +4688,28 @@ textarea:focus,
   background: rgba(255, 255, 255, 0.36);
   border-color: var(--color-drop-border);
   border-radius: var(--radius-md);
+  cursor: pointer;
+  user-select: none;
+}
+
+.drop-area:hover {
+  background: rgba(255, 255, 255, 0.48);
+  border-color: rgba(40, 120, 217, 0.42);
+}
+
+.drop-area:focus-visible {
+  outline: 0;
+  border-color: rgba(40, 120, 217, 0.58);
+  box-shadow: 0 0 0 3px rgba(40, 120, 217, 0.14);
 }
 
 .drop-area-active {
   background: rgba(40, 120, 217, 0.12);
+}
+
+.drop-area-disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .invoice-table th,
@@ -5246,4 +5264,43 @@ textarea:focus,
 
 [data-theme="dark"] .badge-chip-remove {
   background: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .import-zone {
+  background: rgba(28, 33, 40, 0.54);
+  border-color: rgba(231, 236, 245, 0.08);
+}
+
+[data-theme="dark"] .drop-area {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent),
+    rgba(16, 20, 26, 0.2);
+  border-color: rgba(231, 236, 245, 0.14);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .drop-area:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), transparent),
+    rgba(104, 173, 255, 0.055);
+  border-color: rgba(104, 173, 255, 0.22);
+}
+
+[data-theme="dark"] .drop-area:focus-visible {
+  border-color: rgba(104, 173, 255, 0.34);
+  box-shadow: 0 0 0 3px rgba(104, 173, 255, 0.11);
+}
+
+[data-theme="dark"] .drop-area-active {
+  background: rgba(104, 173, 255, 0.09);
+  border-color: rgba(104, 173, 255, 0.34);
+}
+
+[data-theme="dark"] .drop-area p {
+  color: var(--color-text);
+}
+
+[data-theme="dark"] .drop-hint,
+[data-theme="dark"] .drop-icon {
+  color: var(--color-text-muted);
 }

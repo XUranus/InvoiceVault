@@ -76,6 +76,7 @@ export function ImportPage() {
   );
 
   const handlePickFiles = async () => {
+    if (isImporting) return;
     const selected = await open({
       multiple: true,
       directory: false,
@@ -87,6 +88,12 @@ export function ImportPage() {
     const paths = Array.isArray(selected) ? selected : [selected];
     if (paths.length === 0) return;
     await doImport(paths);
+  };
+
+  const handleDropAreaKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    handlePickFiles();
   };
 
   const handleRecognize = async (job: ImportJob) => {
@@ -167,11 +174,16 @@ export function ImportPage() {
 
       <div className="import-zone">
         <div
-          className={`drop-area ${isDraggingFiles ? "drop-area-active" : ""}`}
+          className={`drop-area ${isDraggingFiles ? "drop-area-active" : ""} ${isImporting ? "drop-area-disabled" : ""}`}
+          role="button"
+          tabIndex={isImporting ? -1 : 0}
+          aria-disabled={isImporting}
+          onClick={handlePickFiles}
+          onKeyDown={handleDropAreaKeyDown}
         >
           <span className="drop-icon">📎</span>
           <p>{isDraggingFiles ? "松开以导入文件" : "拖入 PDF / PNG / JPG / JPEG 文件"}</p>
-          <span className="drop-hint">或点击右上角 "选择文件" 按钮</span>
+          <span className="drop-hint">也可以点击此区域选择文件</span>
         </div>
       </div>
 
