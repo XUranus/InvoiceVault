@@ -11,6 +11,8 @@ import type {
   UpdateInvoiceResult,
   UpdateItemsRequest,
   InvoiceItemRow,
+  InvoiceBadgeSelection,
+  BadgeConfig,
   LlmConnectionTestResult,
   RecognizeRawFileResult,
   DedupeCheckResult,
@@ -76,6 +78,26 @@ export async function updateInvoiceItems(
   request: UpdateItemsRequest,
 ): Promise<InvoiceItemRow[]> {
   return invoke<InvoiceItemRow[]>("update_invoice_items", { request });
+}
+
+export async function getBadgeConfig(): Promise<BadgeConfig> {
+  return invoke<BadgeConfig>("get_badge_config");
+}
+
+export async function setBadgeConfig(config: BadgeConfig): Promise<void> {
+  return invoke<void>("set_badge_config", { config });
+}
+
+export async function setInvoiceBadge(
+  invoiceId: number,
+  groupName: string,
+  value: string | null,
+): Promise<InvoiceBadgeSelection[]> {
+  return invoke<InvoiceBadgeSelection[]>("set_invoice_badge", {
+    invoiceId,
+    groupName,
+    value,
+  });
 }
 
 export async function batchUpdateInvoices(request: {

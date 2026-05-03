@@ -12,10 +12,17 @@ InvoiceVault 是一个跨平台桌面端发票处理 Agent，用于导入、识�
 核心技术栈：
 
 - 桌面框架：Rust + Tauri
-- 前端：Tauri WebView，建议使用 TypeScript + React 或 Svelte
+- 前端：Tauri WebView + React + TypeScript + Vite
 - 结构化存储：SQLite
 - 向量存储：ChromaDB
 - LLM：OpenAI-compatible Chat Completions / Responses 风格接口，优先支持视觉输入
+
+当前实现快照（2026-05-03）：
+
+- 已完成 Tauri 2 + React + Rust 基础应用、SQLite 迁移（版本 9）、RAW 归档、手动导入、目录监听、图片/PDF 识别、列表详情、编辑、去重、Dashboard、CSV/Excel 导出、ChromaDB 语义搜索和语义去重。
+- 已完成 Agent 基础闭环：会话、消息、工具调用、查询、详情、统计、CSV/Excel 导出、字段更新确认和工具审计日志。
+- 已完成事件/通知中心、日志导出、基础存储清理、自定义 Badge 标签、Linux/KDE 托盘和应用图标适配。
+- 仍待完成批量 PDF/图片按模板导出、Agent 流式输出和任务取消、编辑历史 UI、资源规模测试、加密选项和跨平台安装包验收。
 
 ## 2. 可行性结论
 
@@ -295,10 +302,10 @@ RAW 文件策略：
 
 - `search_invoices`：按条件查询发票。
 - `get_invoice_detail`：读取单张发票详情。
-- `export_excel`：导出 Excel。
-- `export_pdf_batch`：批量导出 PDF。
-- `generate_chart`：生成图表数据。
-- `get_dashboard_metrics`：读取统计指标。
+- `export_invoices`：导出 CSV/Excel。
+- `export_pdf_batch`：批量导出 PDF（规划）。
+- `generate_chart`：生成图表数据（规划）。
+- `get_dashboard_stats`：读取统计指标。
 - `update_invoice`：更新发票字段，需要用户确认。
 
 安全要求：
@@ -340,6 +347,7 @@ RAW 文件策略：
 
 - 用户可编辑所有关键字段。
 - 明细行支持增删改。
+- 用户可配置自定义 Badge 分组，并在发票详情页为单张发票选择标签。
 - 保存时做类型校验，例如日期、金额、税号格式。
 - 保存后重新计算重复检测特征和向量索引。
 - 保留编辑历史。
@@ -437,7 +445,9 @@ RAW 文件策略：
 - `InvoiceDetailView`：原件预览、字段编辑、明细行编辑、重复候选。
 - `DashboardView`：统计指标和图表。
 - `AgentChatView`：对话、工具执行计划、确认面板、结果展示。
-- `SettingsView`：LLM 配置、监听目录、存储策略、系统状态。
+- `EventsView`：事件日志、工具执行和后台任务记录。
+- `NotificationsView`：通知列表、未读状态和引用跳转。
+- `SettingsView`：LLM 配置、Embedding、ChromaDB、监听目录、Badge、存储策略、系统状态。
 
 ### 8.2 Rust 后端模块
 
@@ -450,10 +460,11 @@ RAW 文件策略：
 - `llm`：OpenAI-compatible client、模型能力探测。
 - `extractor`：发票识别 prompt、JSON schema、结果校验。
 - `dedupe`：重复检测、多维相似度评分、候选管理。
-- `vector_store`：ChromaDB 适配器和可替换接口。
+- `chroma`：ChromaDB 适配器和可替换向量存储接口。
+- `embedding`：OpenAI-compatible embedding 配置、连接测试和文本向量生成。
 - `agent`：工具注册、任务规划、执行确认、审计日志。
-- `exporter`：Excel/CSV/PDF/图片导出。
-- `metrics`：Dashboard 统计和缓存。
+- `exporter`：Excel/CSV 导出，后续扩展 PDF/图片批量导出。
+- `event`：事件、通知和后台操作记录。
 
 ### 8.3 数据流
 

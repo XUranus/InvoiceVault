@@ -103,6 +103,20 @@ export type InvoiceItemRow = {
   tax_amount: string | null;
 };
 
+export type InvoiceBadgeSelection = {
+  group_name: string;
+  value: string;
+};
+
+export type BadgeGroupConfig = {
+  name: string;
+  options: string[];
+};
+
+export type BadgeConfig = {
+  groups: BadgeGroupConfig[];
+};
+
 export type InvoiceDetail = {
   id: number;
   raw_file_id: number;
@@ -133,6 +147,7 @@ export type InvoiceDetail = {
   thumbnail_path: string | null;
   extraction_model: string | null;
   extraction_provider: string | null;
+  badges: InvoiceBadgeSelection[];
 };
 
 export type FieldError = {

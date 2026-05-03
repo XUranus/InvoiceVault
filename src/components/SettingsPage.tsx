@@ -6,6 +6,7 @@ import type {
   EmbeddingConfig,
   EmbeddingTestResult,
   ExternalDependencyStatus,
+  BadgeConfig,
 } from "../types";
 import {
   testLlmConnection,
@@ -20,6 +21,8 @@ import {
   exportLogs,
   cleanupStorage,
   checkExternalDependencies,
+  getBadgeConfig,
+  setBadgeConfig,
 } from "../api";
 import type { ExportLogsResult, CleanupStorageResult } from "../types";
 import { WatchDirManager } from "./WatchDirManager";
@@ -83,6 +86,9 @@ export function SettingsPage({
   const [cleanupError, setCleanupError] = React.useState<string | null>(null);
   const [dependencyStatuses, setDependencyStatuses] = React.useState<ExternalDependencyStatus[]>([]);
   const [checkingDependencies, setCheckingDependencies] = React.useState(false);
+  const [badgeConfig, setBadgeConfigState] = React.useState<BadgeConfig>({ groups: [] });
+  const [savingBadgeConfig, setSavingBadgeConfig] = React.useState(false);
+  const [badgeConfigMessage, setBadgeConfigMessage] = React.useState<string | null>(null);
 
   // Gate all auto-save effects until async config load completes.
   // Without this, the initial render fires auto-save with default state
@@ -113,6 +119,11 @@ export function SettingsPage({
       getRecognitionQueueStatus()
         .then((status) => {
           if (!cancelled) setRecognitionConcurrencyState(status.max_concurrent);
+        })
+        .catch(() => {}),
+      getBadgeConfig()
+        .then((cfg) => {
+          if (!cancelled) setBadgeConfigState(cfg);
         })
         .catch(() => {}),
     ]).finally(() => {
@@ -258,6 +269,80 @@ export function SettingsPage({
       await open(path);
     } catch {
       // ignore if shell plugin not available
+    }
+  };
+
+  const updateBadgeGroupName = (index: number, name: string) => {
+    setBadgeConfigState((prev) => ({
+      groups: prev.groups.map((group, idx) =>
+        idx === index ? { ...group, name } : group,
+      ),
+    }));
+    setBadgeConfigMessage(null);
+  };
+
+  const updateBadgeOption = (groupIndex: number, optionIndex: number, value: string) => {
+    setBadgeConfigState((prev) => ({
+      groups: prev.groups.map((group, idx) =>
+        idx === groupIndex
+          ? {
+              ...group,
+              options: group.options.map((option, optIdx) =>
+                optIdx === optionIndex ? value : option,
+              ),
+            }
+          : group,
+      ),
+    }));
+    setBadgeConfigMessage(null);
+  };
+
+  const addBadgeGroup = () => {
+    setBadgeConfigState((prev) => ({
+      groups: [...prev.groups, { name: "", options: [""] }],
+    }));
+    setBadgeConfigMessage(null);
+  };
+
+  const removeBadgeGroup = (index: number) => {
+    setBadgeConfigState((prev) => ({
+      groups: prev.groups.filter((_, idx) => idx !== index),
+    }));
+    setBadgeConfigMessage(null);
+  };
+
+  const addBadgeOption = (groupIndex: number) => {
+    setBadgeConfigState((prev) => ({
+      groups: prev.groups.map((group, idx) =>
+        idx === groupIndex ? { ...group, options: [...group.options, ""] } : group,
+      ),
+    }));
+    setBadgeConfigMessage(null);
+  };
+
+  const removeBadgeOption = (groupIndex: number, optionIndex: number) => {
+    setBadgeConfigState((prev) => ({
+      groups: prev.groups.map((group, idx) =>
+        idx === groupIndex
+          ? { ...group, options: group.options.filter((_, optIdx) => optIdx !== optionIndex) }
+          : group,
+      ),
+    }));
+    setBadgeConfigMessage(null);
+  };
+
+  const saveBadgeConfig = async () => {
+    setSavingBadgeConfig(true);
+    setBadgeConfigMessage(null);
+    try {
+      await setBadgeConfig(badgeConfig);
+      const latest = await getBadgeConfig();
+      setBadgeConfigState(latest);
+      setBadgeConfigMessage("已保存 Badge 配置");
+    } catch (err) {
+      setBadgeConfigMessage(String(err));
+    } finally {
+      setSavingBadgeConfig(false);
     }
   };
 
@@ -479,6 +564,90 @@ export function SettingsPage({
         <button className="btn-primary" onClick={onToggleTheme}>
           {theme === "dark" ? "☀️ 切换到亮色主题" : "🌙 切换到暗色主题"}
         </button>
+      </div>
+
+      <div className="section badge-config-section">
+        <div className="section-header">
+          <h3>自定义 Badge</h3>
+          <button
+            className="btn-small"
+            type="button"
+            onClick={addBadgeGroup}
+          >
+            添加分组
+          </button>
+        </div>
+        <p className="section-desc">
+          配置后可在发票详情页为单张发票选择标签。每个分组一张发票只能选择一个值。
+        </p>
+
+        <div className="badge-config-list">
+          {badgeConfig.groups.map((group, groupIndex) => (
+            <div className="badge-config-card" key={groupIndex}>
+              <div className="badge-config-card-header">
+                <label className="form-field">
+                  <span>分组名称</span>
+                  <input
+                    value={group.name}
+                    onChange={(e) => updateBadgeGroupName(groupIndex, e.target.value)}
+                    placeholder="例如：电商"
+                  />
+                </label>
+                <button
+                  className="btn-danger btn-small"
+                  type="button"
+                  onClick={() => removeBadgeGroup(groupIndex)}
+                >
+                  删除分组
+                </button>
+              </div>
+              <div className="badge-option-editor">
+                {group.options.map((option, optionIndex) => (
+                  <div className="badge-option-row" key={optionIndex}>
+                    <input
+                      value={option}
+                      onChange={(e) =>
+                        updateBadgeOption(groupIndex, optionIndex, e.target.value)
+                      }
+                      placeholder="例如：京东"
+                    />
+                    <button
+                      className="btn-small"
+                      type="button"
+                      onClick={() => removeBadgeOption(groupIndex, optionIndex)}
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+                <button
+                  className="btn-small"
+                  type="button"
+                  onClick={() => addBadgeOption(groupIndex)}
+                >
+                  添加选项
+                </button>
+              </div>
+            </div>
+          ))}
+          {badgeConfig.groups.length === 0 ? (
+            <p className="muted">暂未配置 Badge 分组。</p>
+          ) : null}
+        </div>
+
+        <div className="badge-config-actions">
+          <button
+            className="btn-primary"
+            type="button"
+            onClick={saveBadgeConfig}
+            disabled={savingBadgeConfig}
+          >
+            {savingBadgeConfig ? "保存中..." : "保存 Badge 配置"}
+          </button>
+          {badgeConfigMessage ? (
+            <span className="badge-config-message">{badgeConfigMessage}</span>
+          ) : null}
+        </div>
       </div>
 
       {health ? (

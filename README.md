@@ -11,8 +11,8 @@ InvoiceVault 是一个本地优先的跨平台桌面端发票处理 Agent。目�
 已实现：
 
 - Tauri 2 + React + TypeScript 桌面应用骨架。
-- Rust 后端模块化结构（含 dedupe 去重引擎、exporter 导出模块）。
-- SQLite 数据库和内置迁移（当前版本 3）。
+- Rust 后端模块化结构（含导入、识别、去重、导出、Agent、事件通知和向量能力）。
+- SQLite 数据库和内置迁移（当前版本 9）。
 - 应用数据目录、RAW 归档目录、缩略图目录初始化。
 - PDF/PNG/JPG/JPEG 手动导入、文件选择、拖拽导入和路径导入。
 - RAW 文件按 `raw/YYYY/MM/文件名` 保留原始格式归档。
@@ -23,9 +23,9 @@ InvoiceVault 是一个本地优先的跨平台桌面端发票处理 Agent。目�
 - PDF 发票按页渲染和逐页多模态识别调用链路。
 - LLM 输入图片标准化和预览缩略图生成。
 - 发票识别 JSON 校验和结构化入库。
-- 侧边栏导航：仪表盘、导入、发票库、设置四个独立页面。
+- 侧边栏导航：仪表盘、导入、发票库、Agent、事件、通知、设置。
 - 发票列表分页、筛选（关键词/日期/金额/状态）和排序。
-- 发票详情页（完整字段、明细行、缩略图预览）。
+- 发票详情页（完整字段、明细行、缩略图预览、自定义 Badge 标签）。
 - 发票字段和明细行编辑，字段级校验。
 - 字段级重复检测（发票代码+号码完全匹配、多字段相似度打分）。
 - 重复候选管理（确认/忽略）。
@@ -33,10 +33,16 @@ InvoiceVault 是一个本地优先的跨平台桌面端发票处理 Agent。目�
 - 目录监听和自动导入（配置监听目录后，文件变化时自动导入，支持防抖和扩展名过滤）。
 - Dashboard 统计面板（发票总数/金额汇总/月度趋势/类型分布/状态分布/供应商排名图表）。
 - ChromaDB 向量索引 + 语义搜索 + 语义去重（可配置 ChromaDB sidecar 和 embedding provider）。
+- Agent 聊天窗口基础闭环：会话管理、工具调用、查询、详情、统计、CSV/Excel 导出、字段更新确认和审计日志。
+- 事件和通知中心，支持导入、识别、导出、配置变更等操作记录。
+- 设置页支持 LLM、Embedding、ChromaDB、识别并发、监听目录、依赖检查、日志导出、存储清理和自定义 Badge 配置。
+- Linux/KDE 托盘集成：启动时显示托盘，关闭窗口隐藏到托盘，托盘菜单支持“工作台”、版本信息和退出。
 
 尚未完成：
 
-- Agent 聊天窗口。
+- 批量 PDF/图片按模板导出。
+- Agent 流式输出、任务取消和更丰富的工具集。
+- 编辑历史完整 UI、数据库/RAW 加密和跨平台安装包验收。
 
 详细需求和计划见：
 
@@ -99,10 +105,12 @@ cargo check
 
 1. 启动应用。
 2. 在导入队列中选择或拖入 PDF/PNG/JPG/JPEG 文件。
-3. 在 LLM Provider 区域填写 Base URL、Model 和 API Key。
+3. 在设置页填写 LLM Provider 的 Base URL、Model 和 API Key。
 4. 点击“测试连接”确认配置可用。
 5. 对已导入的图片或 PDF 文件点击“识别”。
-6. 识别成功后，结构化发票会出现在“已入库发票”列表。
+6. 识别成功后，结构化发票会出现在发票库列表。
+7. 在发票详情页修正字段、维护明细行、处理重复候选或选择自定义 Badge。
+8. 在 Agent 页面通过自然语言查询、统计或导出发票。
 
 当前图片识别支持：
 
@@ -120,6 +128,8 @@ PDF 文件会先通过 `pdftoppm` 渲染为 JPEG 页面缓存，再逐页调用�
 - `invoicevault.sqlite3`：SQLite 数据库。
 - `raw/`：原始 PDF/图片归档目录。
 - `thumbnails/`：标准化识别图、PDF 页面缓存和预览缩略图目录。
+- `logs/`：应用运行日志。
+- `llm_config.json`、`embedding_config.json`、`recognition_config.json`、`badge_config.json`：本机应用配置文件。
 
 RAW 文件归档策略：
 
@@ -136,7 +146,7 @@ raw/YYYY/MM/current_name.ext
 
 ## LLM 说明
 
-当前 LLM 配置只保存在界面状态中，不会写入仓库。不要把 API Key 提交到代码或文档。
+当前 LLM 配置保存在本机应用数据目录，不会写入仓库。不要把 API Key 提交到代码或文档。
 
 图片识别接口使用 OpenAI-compatible `/chat/completions`：
 
@@ -145,6 +155,8 @@ POST {base_url}/chat/completions
 ```
 
 模型需要支持多模态图片输入，并能返回 JSON。后端会从模型响应中提取 JSON 对象，校验后写入 SQLite。
+
+Agent 对话同样使用 OpenAI-compatible `/chat/completions`，并通过受控工具执行查询、统计、导出和字段更新。导出和更新等写操作会经过 UI 确认。
 
 ## 测试
 
@@ -155,6 +167,8 @@ npm run build
 cd src-tauri
 cargo fmt --check
 cargo test
+cd ..
+npm run tauri build -- --no-bundle
 ```
 
 真实 LLM 连接测试默认忽略，需要本机环境变量：

@@ -35,11 +35,11 @@ use crate::{
     extractor::invoice_to_embedding_text,
     extractor::{
         batch_delete_invoices, batch_update_invoices, get_dashboard_stats, get_invoice_detail,
-        list_invoices, save_invoice_extraction, search_invoices, update_invoice,
-        update_invoice_items, BatchUpdateRequest, DashboardStats, ExtractorError, InvoiceDetail,
-        InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult, InvoiceSummary,
-        SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
-        UpdateInvoiceResult,
+        list_invoices, save_invoice_extraction, search_invoices, set_invoice_badge, update_invoice,
+        update_invoice_items, BadgeConfig, BadgeGroupConfig, BatchUpdateRequest, DashboardStats,
+        ExtractorError, InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
+        InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest,
+        UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
     },
     importer::{
         import_files, list_import_jobs, update_import_job_status,
@@ -140,12 +140,46 @@ pub fn import_failure_message(error: &str) -> String {
     }
 }
 
+fn sanitize_badge_config(config: BadgeConfig) -> BadgeConfig {
+    let mut groups = Vec::new();
+    for group in config.groups {
+        let name = group.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+
+        let mut options = Vec::new();
+        for option in group.options {
+            let value = option.trim();
+            if value.is_empty() || options.iter().any(|existing| existing == value) {
+                continue;
+            }
+            options.push(value.to_owned());
+        }
+
+        if groups
+            .iter()
+            .any(|existing: &BadgeGroupConfig| existing.name == name)
+        {
+            continue;
+        }
+
+        groups.push(BadgeGroupConfig {
+            name: name.to_owned(),
+            options,
+        });
+    }
+
+    BadgeConfig { groups }
+}
+
 pub struct AppState {
     paths: AppPaths,
     db: Arc<Mutex<Connection>>,
     watcher_manager: WatcherManager,
     chroma_config: Mutex<ChromaConfig>,
     embedding_config: Mutex<EmbeddingConfig>,
+    badge_config: Mutex<BadgeConfig>,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     recognition_pending: Arc<Mutex<i64>>,
     recognition_running: Arc<Mutex<i64>>,
@@ -182,6 +216,9 @@ impl AppState {
                 .map(|v| v as usize)
                 .unwrap_or(3);
 
+        let badge_config = Self::load_config_raw::<BadgeConfig>(&app_data_dir, "badge_config.json")
+            .unwrap_or_default();
+
         let watcher_manager = WatcherManager::new(
             Arc::clone(&db),
             paths.raw_dir.clone(),
@@ -196,6 +233,7 @@ impl AppState {
             watcher_manager,
             chroma_config: Mutex::new(chroma_config),
             embedding_config: Mutex::new(embedding_config),
+            badge_config: Mutex::new(badge_config),
             llm_config,
             recognition_pending: Arc::new(Mutex::new(0)),
             recognition_running: Arc::new(Mutex::new(0)),
@@ -687,6 +725,46 @@ impl AppState {
         self.embedding_config.lock().expect("lock").clone()
     }
 
+    pub fn set_badge_config(&self, config: BadgeConfig) -> Result<(), AppError> {
+        let sanitized = sanitize_badge_config(config);
+        {
+            let mut cfg = self.badge_config.lock().expect("lock");
+            *cfg = sanitized.clone();
+        }
+        let path = self.paths.app_data_dir.join("badge_config.json");
+        if let Ok(json) = serde_json::to_string_pretty(&sanitized) {
+            if let Err(e) = std::fs::write(&path, json) {
+                error!("Failed to persist badge config: {e}");
+            }
+        }
+        let db = self.db.lock().expect("db lock");
+        let _ = event::create_event(
+            &db,
+            "config_change",
+            "更新 Badge 配置",
+            "",
+            "completed",
+            None,
+            None,
+            None,
+        );
+        Ok(())
+    }
+
+    pub fn get_badge_config(&self) -> BadgeConfig {
+        self.badge_config.lock().expect("lock").clone()
+    }
+
+    pub fn set_invoice_badge(
+        &self,
+        invoice_id: i64,
+        group_name: String,
+        value: Option<String>,
+    ) -> Result<Vec<InvoiceBadgeSelection>, AppError> {
+        let mut db = self.db.lock().expect("database mutex poisoned");
+        Ok(set_invoice_badge(&mut db, invoice_id, group_name, value)?)
+    }
+
     pub fn set_llm_config(&self, config: LlmProviderConfig) -> Result<(), AppError> {
         let mut cfg = self.llm_config.lock().expect("lock");
         *cfg = Some(config.clone());
@@ -933,6 +1011,7 @@ impl AppState {
             "llm_config.json",
             "embedding_config.json",
             "recognition_config.json",
+            "badge_config.json",
         ] {
             let config_path = self.paths.app_data_dir.join(config_name);
             if config_path.exists() {

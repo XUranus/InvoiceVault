@@ -24,9 +24,9 @@ use embedding::{EmbeddingConfig, EmbeddingTestResult};
 use event::{EventListResult, NotificationRow};
 use exporter::{ExportInvoicesRequest, ExportResult};
 use extractor::{
-    DashboardStats, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams, InvoiceSearchResult,
-    InvoiceSummary, SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
-    UpdateInvoiceResult,
+    BadgeConfig, DashboardStats, InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow,
+    InvoiceSearchParams, InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest,
+    UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
 };
 use importer::{ImportJobListResult, ImportJobSummary, ImportRequest};
 use llm::LlmProviderConfig;
@@ -549,6 +549,30 @@ fn get_embedding_config(state: State<'_, AppState>) -> Result<EmbeddingConfig, S
 }
 
 #[tauri::command]
+fn set_badge_config(state: State<'_, AppState>, config: BadgeConfig) -> Result<(), String> {
+    state
+        .set_badge_config(config)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn get_badge_config(state: State<'_, AppState>) -> Result<BadgeConfig, String> {
+    Ok(state.get_badge_config())
+}
+
+#[tauri::command]
+fn set_invoice_badge(
+    state: State<'_, AppState>,
+    invoice_id: i64,
+    group_name: String,
+    value: Option<String>,
+) -> Result<Vec<InvoiceBadgeSelection>, String> {
+    state
+        .set_invoice_badge(invoice_id, group_name, value)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn test_chroma_connection(state: State<'_, AppState>) -> Result<bool, String> {
     state
         .test_chroma_connection()
@@ -845,6 +869,9 @@ pub fn run() {
             get_chroma_config,
             set_embedding_config,
             get_embedding_config,
+            set_badge_config,
+            get_badge_config,
+            set_invoice_badge,
             test_chroma_connection,
             test_embedding_connection,
             search_invoices_semantic,

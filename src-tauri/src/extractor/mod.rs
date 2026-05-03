@@ -260,6 +260,45 @@ pub struct InvoiceDetail {
     pub thumbnail_path: Option<String>,
     pub extraction_model: Option<String>,
     pub extraction_provider: Option<String>,
+    pub badges: Vec<InvoiceBadgeSelection>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InvoiceBadgeSelection {
+    pub group_name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BadgeGroupConfig {
+    pub name: String,
+    pub options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BadgeConfig {
+    pub groups: Vec<BadgeGroupConfig>,
+}
+
+impl Default for BadgeConfig {
+    fn default() -> Self {
+        Self {
+            groups: vec![
+                BadgeGroupConfig {
+                    name: "电商".to_owned(),
+                    options: vec!["拼多多".to_owned(), "京东".to_owned(), "淘宝".to_owned()],
+                },
+                BadgeGroupConfig {
+                    name: "类型".to_owned(),
+                    options: vec![
+                        "成品油".to_owned(),
+                        "办公用品".to_owned(),
+                        "食品".to_owned(),
+                    ],
+                },
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -326,6 +365,7 @@ pub fn get_invoice_detail(
                 thumbnail_path: None,
                 extraction_model: None,
                 extraction_provider: None,
+                badges: Vec::new(),
             })
         },
     )?;
@@ -394,6 +434,8 @@ pub fn get_invoice_detail(
         .optional()?
         .unwrap_or((None, None));
 
+    let badges = list_invoice_badges(conn, invoice_id)?;
+
     Ok(InvoiceDetail {
         items,
         raw_file_name: raw_name,
@@ -402,8 +444,75 @@ pub fn get_invoice_detail(
         thumbnail_path,
         extraction_model: model,
         extraction_provider: provider,
+        badges,
         ..invoice
     })
+}
+
+pub fn list_invoice_badges(
+    conn: &Connection,
+    invoice_id: i64,
+) -> Result<Vec<InvoiceBadgeSelection>, ExtractorError> {
+    let mut stmt = conn.prepare(
+        "SELECT group_name, value
+        FROM invoice_badges
+        WHERE invoice_id = ?1
+        ORDER BY group_name",
+    )?;
+
+    let badges = stmt
+        .query_map([invoice_id], |row| {
+            Ok(InvoiceBadgeSelection {
+                group_name: row.get(0)?,
+                value: row.get(1)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(badges)
+}
+
+pub fn set_invoice_badge(
+    conn: &mut Connection,
+    invoice_id: i64,
+    group_name: String,
+    value: Option<String>,
+) -> Result<Vec<InvoiceBadgeSelection>, ExtractorError> {
+    let group_name = group_name.trim().to_owned();
+    let value = value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
+
+    if group_name.is_empty() {
+        return Ok(list_invoice_badges(conn, invoice_id)?);
+    }
+
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM invoices WHERE id = ?1)",
+        [invoice_id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Err(ExtractorError::NotFound(invoice_id));
+    }
+
+    let tx = conn.transaction()?;
+    if let Some(value) = value {
+        tx.execute(
+            "INSERT INTO invoice_badges (invoice_id, group_name, value, updated_at)
+            VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
+            ON CONFLICT(invoice_id, group_name) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP",
+            params![invoice_id, group_name, value],
+        )?;
+    } else {
+        tx.execute(
+            "DELETE FROM invoice_badges WHERE invoice_id = ?1 AND group_name = ?2",
+            params![invoice_id, group_name],
+        )?;
+    }
+    tx.commit()?;
+
+    list_invoice_badges(conn, invoice_id)
 }
 
 #[derive(Debug, Deserialize)]
@@ -758,6 +867,8 @@ pub enum ExtractorError {
     NonInvoice,
     #[error("识别置信度过低，可能是图片分辨率不清晰或发票内容不完整")]
     LowConfidence,
+    #[error("invoice not found: {0}")]
+    NotFound(i64),
     #[error("invalid extraction JSON: {0}")]
     InvalidJson(#[from] serde_json::Error),
     #[error("invalid issue date, expected YYYY-MM-DD: {0}")]

@@ -1,7 +1,18 @@
 import React from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { InvoiceDetail as InvoiceDetailType, InvoiceItemRow, InvoiceItemChange } from "../types";
-import { getInvoiceDetail, openInvoiceRawFileInBrowser, updateInvoiceItems } from "../api";
+import type {
+  BadgeConfig,
+  InvoiceDetail as InvoiceDetailType,
+  InvoiceItemRow,
+  InvoiceItemChange,
+} from "../types";
+import {
+  getBadgeConfig,
+  getInvoiceDetail,
+  openInvoiceRawFileInBrowser,
+  setInvoiceBadge,
+  updateInvoiceItems,
+} from "../api";
 import { InvoiceEditForm } from "./InvoiceEditForm";
 import { DuplicateWarning } from "./DuplicateWarning";
 import { duplicateStatusMeta, invoiceStatusMeta, toneClass } from "../status";
@@ -19,6 +30,8 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
   const [editingItems, setEditingItems] = React.useState<InvoiceItemRow[]>([]);
   const [itemsDirty, setItemsDirty] = React.useState(false);
   const [savingItems, setSavingItems] = React.useState(false);
+  const [badgeConfig, setBadgeConfig] = React.useState<BadgeConfig>({ groups: [] });
+  const [savingBadge, setSavingBadge] = React.useState<string | null>(null);
 
   const loadDetail = React.useCallback(async () => {
     setLoading(true);
@@ -37,6 +50,18 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
   React.useEffect(() => {
     loadDetail();
   }, [loadDetail]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getBadgeConfig()
+      .then((config) => {
+        if (!cancelled) setBadgeConfig(config);
+      })
+      .catch((err) => onError(String(err)));
+    return () => {
+      cancelled = true;
+    };
+  }, [onError]);
 
   const handleSaved = () => {
     setIsEditing(false);
@@ -84,6 +109,30 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
       await openInvoiceRawFileInBrowser(invoiceId);
     } catch (err) {
       onError(String(err));
+    }
+  };
+
+  const selectedBadgeValue = React.useCallback(
+    (groupName: string) =>
+      detail?.badges.find((badge) => badge.group_name === groupName)?.value ?? null,
+    [detail],
+  );
+
+  const handleBadgeClick = async (groupName: string, value: string) => {
+    if (!detail || savingBadge) return;
+    const current = selectedBadgeValue(groupName);
+    setSavingBadge(groupName);
+    try {
+      const badges = await setInvoiceBadge(
+        detail.id,
+        groupName,
+        current === value ? null : value,
+      );
+      setDetail({ ...detail, badges });
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setSavingBadge(null);
     }
   };
 
@@ -148,6 +197,11 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               {detail.source_page_range}
             </span>
           )}
+          {detail.badges.map((badge) => (
+            <span className="badge badge-custom" key={badge.group_name}>
+              {badge.group_name}: {badge.value}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -177,6 +231,40 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               <span>暂无预览</span>
             </div>
           )}
+
+          {badgeConfig.groups.length > 0 ? (
+            <section className="invoice-badge-section">
+              <div className="items-section-header">
+                <h3>自定义标签</h3>
+              </div>
+              <div className="invoice-badge-groups">
+                {badgeConfig.groups.map((group) => {
+                  const selected = selectedBadgeValue(group.name);
+                  return (
+                    <div className="invoice-badge-group" key={group.name}>
+                      <div className="invoice-badge-group-name">{group.name}</div>
+                      <div className="invoice-badge-options">
+                        {group.options.map((option) => (
+                          <button
+                            className={`badge-option ${selected === option ? "is-selected" : ""}`}
+                            type="button"
+                            key={option}
+                            onClick={() => handleBadgeClick(group.name, option)}
+                            disabled={savingBadge === group.name}
+                          >
+                            {option}
+                          </button>
+                        ))}
+                        {group.options.length === 0 ? (
+                          <span className="muted">未配置可选项</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
         </aside>
 
         <div className="detail-content-pane">
@@ -207,94 +295,95 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
             </div>
           )}
 
-          {detail.items.length > 0 || editingItems.length > 0 ? (
-            <div className="items-section">
-              <div className="items-section-header">
-                <h3>明细行</h3>
-                {itemsDirty && (
-                  <button
-                    className="btn-primary btn-small"
-                    onClick={handleSaveItems}
-                    disabled={savingItems}
-                  >
-                    {savingItems ? "保存中..." : "保存明细"}
-                  </button>
-                )}
-              </div>
-              <div className="items-table-wrap">
-                <table className="items-table items-table-editable">
-                  <thead>
-                    <tr>
-                      <th>名称</th>
-                      <th>规格</th>
-                      <th>单位</th>
-                      <th>数量</th>
-                      <th>单价</th>
-                      <th>金额</th>
-                      <th>税率</th>
-                      <th>税额</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {editingItems.map((item, idx) => (
-                      <tr key={item.id}>
-                        <td>
-                          <input
-                            value={item.name}
-                            onChange={(e) => handleItemChange(idx, "name", e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={item.specification ?? ""}
-                            onChange={(e) => handleItemChange(idx, "specification", e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={item.unit ?? ""}
-                            onChange={(e) => handleItemChange(idx, "unit", e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={item.quantity ?? ""}
-                            onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={item.unit_price ?? ""}
-                            onChange={(e) => handleItemChange(idx, "unit_price", e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={item.amount ?? ""}
-                            onChange={(e) => handleItemChange(idx, "amount", e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={item.tax_rate ?? ""}
-                            onChange={(e) => handleItemChange(idx, "tax_rate", e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={item.tax_amount ?? ""}
-                            onChange={(e) => handleItemChange(idx, "tax_amount", e.target.value)}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : null}
         </div>
       </div>
+
+      {detail.items.length > 0 || editingItems.length > 0 ? (
+        <div className="items-section detail-items-section">
+          <div className="items-section-header">
+            <h3>明细行</h3>
+            {itemsDirty && (
+              <button
+                className="btn-primary btn-small"
+                onClick={handleSaveItems}
+                disabled={savingItems}
+              >
+                {savingItems ? "保存中..." : "保存明细"}
+              </button>
+            )}
+          </div>
+          <div className="items-table-wrap">
+            <table className="items-table items-table-editable">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>规格</th>
+                  <th>单位</th>
+                  <th>数量</th>
+                  <th>单价</th>
+                  <th>金额</th>
+                  <th>税率</th>
+                  <th>税额</th>
+                </tr>
+              </thead>
+              <tbody>
+                {editingItems.map((item, idx) => (
+                  <tr key={item.id}>
+                    <td>
+                      <input
+                        value={item.name}
+                        onChange={(e) => handleItemChange(idx, "name", e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={item.specification ?? ""}
+                        onChange={(e) => handleItemChange(idx, "specification", e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={item.unit ?? ""}
+                        onChange={(e) => handleItemChange(idx, "unit", e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={item.quantity ?? ""}
+                        onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={item.unit_price ?? ""}
+                        onChange={(e) => handleItemChange(idx, "unit_price", e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={item.amount ?? ""}
+                        onChange={(e) => handleItemChange(idx, "amount", e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={item.tax_rate ?? ""}
+                        onChange={(e) => handleItemChange(idx, "tax_rate", e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={item.tax_amount ?? ""}
+                        onChange={(e) => handleItemChange(idx, "tax_amount", e.target.value)}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

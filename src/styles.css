@@ -1507,6 +1507,9 @@ textarea:focus {
 }
 
 .detail-preview-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   position: sticky;
   top: 24px;
   min-width: 0;
@@ -1610,6 +1613,11 @@ textarea:focus {
   color: var(--color-badge-neutral-text);
 }
 
+.badge-custom {
+  background: var(--color-tag-blue-bg);
+  color: var(--color-tag-blue-text);
+}
+
 .badge {
   font-size: 12px;
   font-weight: 600;
@@ -1627,6 +1635,67 @@ textarea:focus {
 
 .items-section-header h3 {
   margin: 0;
+}
+
+.invoice-badge-section {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--color-input-bg-subtle);
+}
+
+.invoice-badge-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.invoice-badge-group {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.invoice-badge-group-name {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  padding-top: 5px;
+}
+
+.invoice-badge-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.badge-option {
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 28px;
+  padding: 4px 10px;
+}
+
+.badge-option:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary-text);
+}
+
+.badge-option.is-selected {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary);
+  color: var(--color-primary-text);
+}
+
+.badge-option:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .items-table-editable input {
@@ -1650,6 +1719,21 @@ textarea:focus {
 .items-section {
   border-top: 1px solid var(--color-border);
   padding-top: 12px;
+}
+
+.detail-items-section .items-table {
+  min-width: 920px;
+  table-layout: fixed;
+}
+
+.detail-items-section .items-table th:first-child,
+.detail-items-section .items-table td:first-child {
+  width: 24%;
+}
+
+.detail-items-section .items-table th:nth-child(2),
+.detail-items-section .items-table td:nth-child(2) {
+  width: 14%;
 }
 
 .items-table {
@@ -1906,6 +1990,58 @@ textarea:focus {
 
 .settings-page .section-header .btn-small {
   min-width: 88px;
+}
+
+.badge-config-list {
+  display: grid;
+  gap: 12px;
+}
+
+.badge-config-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-input-bg-subtle);
+  padding: 14px;
+}
+
+.badge-config-card-header {
+  display: grid;
+  grid-template-columns: minmax(180px, 320px) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.badge-config-card-header .form-field {
+  margin: 0;
+}
+
+.badge-option-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.badge-option-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 320px) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.badge-option-row input {
+  min-width: 0;
+}
+
+.badge-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.badge-config-message {
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 
 .form-grid {
