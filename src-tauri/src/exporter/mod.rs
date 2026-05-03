@@ -12,6 +12,15 @@ pub struct ExportInvoicesRequest {
     pub date_to: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ExportPreviewRequest {
+    pub invoice_ids: Option<Vec<i64>>,
+    pub columns: Option<Vec<String>>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub limit: Option<usize>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportResult {
     pub file_path: String,
@@ -19,6 +28,13 @@ pub struct ExportResult {
     pub format: String,
     pub byte_size: u64,
     pub columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportPreviewResult {
+    pub row_count: usize,
+    pub columns: Vec<String>,
+    pub sample_rows: Vec<Vec<String>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -40,6 +56,16 @@ struct ColumnDef {
     key: &'static str,
     label: &'static str,
     numeric: bool,
+    aliases: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportColumnInfo {
+    pub key: String,
+    pub label: String,
+    pub aliases: Vec<String>,
+    pub data_type: String,
+    pub exportable: bool,
 }
 
 const ALL_COLUMNS: &[ColumnDef] = &[
@@ -47,98 +73,154 @@ const ALL_COLUMNS: &[ColumnDef] = &[
         key: "invoice_type",
         label: "发票类型",
         numeric: false,
+        aliases: &["类型", "票种", "发票种类"],
     },
     ColumnDef {
         key: "invoice_code",
         label: "发票代码",
         numeric: false,
+        aliases: &["发票编码", "代码"],
     },
     ColumnDef {
         key: "invoice_number",
         label: "发票号码",
         numeric: false,
+        aliases: &["发票号", "号码"],
     },
     ColumnDef {
         key: "issue_date",
         label: "开票日期",
         numeric: false,
+        aliases: &["日期", "时间", "发票日期"],
     },
     ColumnDef {
         key: "seller_name",
         label: "销售方",
         numeric: false,
+        aliases: &["销方", "供应商", "商家", "公司名称"],
     },
     ColumnDef {
         key: "seller_tax_id",
         label: "销售方税号",
         numeric: false,
+        aliases: &["销方税号", "供应商税号"],
     },
     ColumnDef {
         key: "buyer_name",
         label: "购买方",
         numeric: false,
+        aliases: &["购方", "买方"],
     },
     ColumnDef {
         key: "buyer_tax_id",
         label: "购买方税号",
         numeric: false,
+        aliases: &["购方税号", "买方税号"],
     },
     ColumnDef {
         key: "currency",
         label: "币种",
         numeric: false,
+        aliases: &["货币"],
     },
     ColumnDef {
         key: "amount_without_tax",
         label: "不含税金额",
         numeric: true,
+        aliases: &["未税金额", "金额不含税"],
     },
     ColumnDef {
         key: "tax_amount",
         label: "税额",
         numeric: true,
+        aliases: &["税金"],
     },
     ColumnDef {
         key: "total_amount",
         label: "价税合计",
         numeric: true,
+        aliases: &["总金额", "金额", "合计", "含税金额"],
     },
     ColumnDef {
         key: "category",
         label: "类别",
         numeric: false,
+        aliases: &["分类", "类型", "费用类别"],
     },
     ColumnDef {
         key: "remarks",
         label: "备注",
         numeric: false,
+        aliases: &["说明", "发票内容", "内容"],
     },
     ColumnDef {
         key: "source_page_range",
         label: "页码范围",
         numeric: false,
+        aliases: &["页码"],
     },
     ColumnDef {
         key: "confidence",
         label: "置信度",
         numeric: true,
+        aliases: &["识别置信度"],
     },
     ColumnDef {
         key: "status",
         label: "状态",
         numeric: false,
+        aliases: &["识别状态"],
     },
     ColumnDef {
         key: "duplicate_status",
         label: "重复状态",
         numeric: false,
+        aliases: &["是否重复"],
     },
     ColumnDef {
         key: "created_at",
         label: "创建时间",
         numeric: false,
+        aliases: &["导入时间", "入库时间"],
     },
 ];
+
+pub fn export_column_catalog() -> Vec<ExportColumnInfo> {
+    ALL_COLUMNS
+        .iter()
+        .map(|column| ExportColumnInfo {
+            key: column.key.to_owned(),
+            label: column.label.to_owned(),
+            aliases: column
+                .aliases
+                .iter()
+                .map(|alias| alias.to_string())
+                .collect(),
+            data_type: if column.numeric { "number" } else { "string" }.to_owned(),
+            exportable: true,
+        })
+        .collect()
+}
+
+pub fn resolve_export_column_keys_from_labels(labels: &[String]) -> Vec<String> {
+    let mut keys = Vec::new();
+    for label in labels {
+        let normalized = label.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        if let Some(column) = ALL_COLUMNS.iter().find(|column| {
+            column.key.eq_ignore_ascii_case(normalized)
+                || column.label == normalized
+                || column.aliases.iter().any(|alias| *alias == normalized)
+        }) {
+            if !keys.iter().any(|key| key == column.key) {
+                keys.push(column.key.to_owned());
+            }
+        }
+    }
+    keys
+}
 
 fn resolve_columns(requested: Option<&[String]>) -> Vec<ColumnDef> {
     if let Some(cols) = requested {
@@ -242,6 +324,39 @@ pub fn export_invoices(
     Ok(ExportResult {
         columns: column_labels,
         ..result
+    })
+}
+
+pub fn preview_export(
+    conn: &Connection,
+    request: ExportPreviewRequest,
+) -> Result<ExportPreviewResult, ExportError> {
+    let columns = resolve_columns(request.columns.as_deref());
+    let rows = load_invoices_for_export(
+        conn,
+        request.invoice_ids.as_deref(),
+        request.date_from.as_deref(),
+        request.date_to.as_deref(),
+    )?;
+    let limit = request.limit.unwrap_or(5).clamp(1, 20);
+    let sample_rows = rows
+        .iter()
+        .take(limit)
+        .map(|row| {
+            columns
+                .iter()
+                .map(|column| row.field_by_key(column.key))
+                .collect()
+        })
+        .collect();
+
+    Ok(ExportPreviewResult {
+        row_count: rows.len(),
+        columns: columns
+            .iter()
+            .map(|column| column.label.to_owned())
+            .collect(),
+        sample_rows,
     })
 }
 

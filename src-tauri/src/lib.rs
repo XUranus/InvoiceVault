@@ -13,7 +13,10 @@ mod raw_store;
 mod storage;
 mod watcher;
 
-use agent::{AgentMessageRow, AgentResponse, AgentSession, ConfirmRequest};
+use agent::{
+    AgentArtifact, AgentAttachment, AgentMessageRow, AgentResponse, AgentSession, AgentTask,
+    ConfirmRequest,
+};
 use app_core::{
     import_failure_message, AppHealth, AppState, CleanupStorageResult, ExportLogsResult,
     RecognitionQueueStatus,
@@ -35,11 +38,12 @@ use llm::{
     LlmConnectionTestResult,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::{path::Path, process::Command};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, State, WindowEvent,
+    AppHandle, Emitter, Manager, State, WindowEvent,
 };
 use tracing::{error, info};
 
@@ -63,6 +67,14 @@ struct ExternalDependencyStatus {
     available: bool,
     version: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AgentStreamPayload {
+    stream_id: String,
+    session_id: i64,
+    #[serde(flatten)]
+    event: agent::AgentStreamEvent,
 }
 
 #[tauri::command]
@@ -633,11 +645,139 @@ async fn send_agent_message(
     state: State<'_, AppState>,
     session_id: i64,
     content: String,
+    attachment_ids: Option<Vec<i64>>,
     config: LlmProviderConfig,
 ) -> Result<AgentResponse, String> {
     state
-        .send_agent_message(session_id, &content, &config)
+        .send_agent_message(
+            session_id,
+            &content,
+            attachment_ids.unwrap_or_default(),
+            &config,
+        )
         .await
+        .map_err(|err| err.to_string())
+}
+
+fn make_agent_stream_sink(
+    app: AppHandle,
+    stream_id: String,
+    session_id: i64,
+) -> agent::AgentStreamSink {
+    Arc::new(move |event| {
+        let payload = AgentStreamPayload {
+            stream_id: stream_id.clone(),
+            session_id,
+            event,
+        };
+        let _ = app.emit("agent://stream", payload);
+    })
+}
+
+#[tauri::command]
+async fn send_agent_message_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    stream_id: String,
+    session_id: i64,
+    content: String,
+    attachment_ids: Option<Vec<i64>>,
+    config: LlmProviderConfig,
+) -> Result<AgentResponse, String> {
+    let sink = make_agent_stream_sink(app, stream_id, session_id);
+    sink(agent::AgentStreamEvent::Started);
+    let result = state
+        .send_agent_message_stream(
+            session_id,
+            &content,
+            attachment_ids.unwrap_or_default(),
+            &config,
+            Arc::clone(&sink),
+        )
+        .await;
+    match result {
+        Ok(response) => {
+            sink(agent::AgentStreamEvent::Finished);
+            Ok(response)
+        }
+        Err(err) => {
+            let message = err.to_string();
+            sink(agent::AgentStreamEvent::Error {
+                message: message.clone(),
+            });
+            Err(message)
+        }
+    }
+}
+
+#[tauri::command]
+fn attach_agent_file(
+    state: State<'_, AppState>,
+    session_id: i64,
+    path: String,
+) -> Result<AgentAttachment, String> {
+    state
+        .attach_agent_file(session_id, &path)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_agent_attachments(
+    state: State<'_, AppState>,
+    session_id: i64,
+) -> Result<Vec<AgentAttachment>, String> {
+    state
+        .list_agent_attachments(session_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_agent_tasks(state: State<'_, AppState>, session_id: i64) -> Result<Vec<AgentTask>, String> {
+    state
+        .list_agent_tasks(session_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_agent_artifacts(
+    state: State<'_, AppState>,
+    session_id: i64,
+) -> Result<Vec<AgentArtifact>, String> {
+    state
+        .list_agent_artifacts(session_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn open_agent_artifact_file(
+    state: State<'_, AppState>,
+    session_id: i64,
+    artifact_id: i64,
+) -> Result<(), String> {
+    state
+        .open_agent_artifact_file(session_id, artifact_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn open_agent_artifact_folder(
+    state: State<'_, AppState>,
+    session_id: i64,
+    artifact_id: i64,
+) -> Result<(), String> {
+    state
+        .open_agent_artifact_folder(session_id, artifact_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn delete_agent_artifact(
+    state: State<'_, AppState>,
+    session_id: i64,
+    artifact_id: i64,
+) -> Result<(), String> {
+    state
+        .delete_agent_artifact(session_id, artifact_id)
         .map_err(|err| err.to_string())
 }
 
@@ -651,6 +791,35 @@ async fn confirm_agent_action(
         .confirm_agent_action(request, &config)
         .await
         .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn confirm_agent_action_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    stream_id: String,
+    request: ConfirmRequest,
+    config: LlmProviderConfig,
+) -> Result<AgentResponse, String> {
+    let session_id = request.session_id;
+    let sink = make_agent_stream_sink(app, stream_id, session_id);
+    sink(agent::AgentStreamEvent::Started);
+    let result = state
+        .confirm_agent_action_stream(request, &config, Arc::clone(&sink))
+        .await;
+    match result {
+        Ok(response) => {
+            sink(agent::AgentStreamEvent::Finished);
+            Ok(response)
+        }
+        Err(err) => {
+            let message = err.to_string();
+            sink(agent::AgentStreamEvent::Error {
+                message: message.clone(),
+            });
+            Err(message)
+        }
+    }
 }
 
 #[tauri::command]
@@ -880,7 +1049,16 @@ pub fn run() {
             get_agent_session,
             delete_agent_session,
             send_agent_message,
+            send_agent_message_stream,
+            attach_agent_file,
+            list_agent_attachments,
+            list_agent_tasks,
+            list_agent_artifacts,
+            open_agent_artifact_file,
+            open_agent_artifact_folder,
+            delete_agent_artifact,
             confirm_agent_action,
+            confirm_agent_action_stream,
             list_events,
             list_notifications,
             get_unread_notification_count,

@@ -339,6 +339,43 @@ export type AgentSession = {
   updated_at: string;
 };
 
+export type AgentAttachment = {
+  id: number;
+  session_id: number;
+  message_id: number | null;
+  original_name: string;
+  mime_type: string | null;
+  byte_size: number;
+  storage_path: string;
+  created_at: string;
+};
+
+export type AgentTask = {
+  id: number;
+  session_id: number;
+  tool_name: string;
+  status: string;
+  input_json: string | null;
+  result_json: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type AgentArtifact = {
+  id: number;
+  session_id: number;
+  task_id: number | null;
+  artifact_type: string;
+  title: string;
+  file_path: string | null;
+  mime_type: string | null;
+  byte_size: number | null;
+  metadata_json: string | null;
+  created_at: string;
+};
+
 export type AgentMessage = {
   id: number;
   session_id: number;
@@ -346,6 +383,7 @@ export type AgentMessage = {
   content: string;
   tool_call_json: string | null;
   created_at: string;
+  attachments: AgentAttachment[];
 };
 
 export type PendingConfirmation = {
@@ -358,6 +396,48 @@ export type AgentResponse = {
   messages: AgentMessage[];
   pending_confirmation: PendingConfirmation | null;
 };
+
+export type AgentStreamEvent =
+  | {
+      stream_id: string;
+      session_id: number;
+      type: "started";
+    }
+  | {
+      stream_id: string;
+      session_id: number;
+      type: "assistant_delta";
+      delta: string;
+    }
+  | {
+      stream_id: string;
+      session_id: number;
+      type: "tool_call";
+      tool_name: string;
+    }
+  | {
+      stream_id: string;
+      session_id: number;
+      type: "tool_result";
+      tool_name: string;
+    }
+  | {
+      stream_id: string;
+      session_id: number;
+      type: "pending_confirmation";
+      pending_confirmation: PendingConfirmation;
+    }
+  | {
+      stream_id: string;
+      session_id: number;
+      type: "finished";
+    }
+  | {
+      stream_id: string;
+      session_id: number;
+      type: "error";
+      message: string;
+    };
 
 // Event types
 

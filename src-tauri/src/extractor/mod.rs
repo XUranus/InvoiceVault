@@ -130,11 +130,20 @@ fn build_search_where(
         let q = format!("%{query}%");
         let n = values.len() + 1;
         clauses.push(format!(
-            "(seller_name LIKE ?{n} OR buyer_name LIKE ?{n} OR invoice_number LIKE ?{n} OR invoice_code LIKE ?{n})"
+            "(seller_name LIKE ?{n}
+                OR buyer_name LIKE ?{n}
+                OR invoice_number LIKE ?{n}
+                OR invoice_code LIKE ?{n}
+                OR invoice_type LIKE ?{n}
+                OR category LIKE ?{n}
+                OR remarks LIKE ?{n}
+                OR EXISTS (
+                    SELECT 1 FROM invoice_items item
+                    WHERE item.invoice_id = invoices.id
+                        AND (item.name LIKE ?{n} OR item.specification LIKE ?{n})
+                ))"
         ));
-        for _ in 0..4 {
-            values.push(Box::new(q.clone()));
-        }
+        values.push(Box::new(q));
     }
 
     if let Some(ref t) = params.invoice_type {

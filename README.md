@@ -12,7 +12,7 @@ InvoiceVault 是一个本地优先的跨平台桌面端发票处理 Agent。目�
 
 - Tauri 2 + React + TypeScript 桌面应用骨架。
 - Rust 后端模块化结构（含导入、识别、去重、导出、Agent、事件通知和向量能力）。
-- SQLite 数据库和内置迁移（当前版本 9）。
+- SQLite 数据库和内置迁移（当前版本 11）。
 - 应用数据目录、RAW 归档目录、缩略图目录初始化。
 - PDF/PNG/JPG/JPEG 手动导入、文件选择、拖拽导入和路径导入。
 - RAW 文件按 `raw/YYYY/MM/文件名` 保留原始格式归档。
@@ -33,7 +33,7 @@ InvoiceVault 是一个本地优先的跨平台桌面端发票处理 Agent。目�
 - 目录监听和自动导入（配置监听目录后，文件变化时自动导入，支持防抖和扩展名过滤）。
 - Dashboard 统计面板（发票总数/金额汇总/月度趋势/类型分布/状态分布/供应商排名图表）。
 - ChromaDB 向量索引 + 语义搜索 + 语义去重（可配置 ChromaDB sidecar 和 embedding provider）。
-- Agent 聊天窗口基础闭环：会话管理、工具调用、查询、详情、统计、CSV/Excel 导出、字段更新确认和审计日志。
+- Agent 聊天窗口基础闭环：会话管理、工具调用、查询、详情、统计、CSV/Excel 自定义列导出、字段更新确认、xlsx/csv 附件检查、任务/产物记录和审计日志。
 - 事件和通知中心，支持导入、识别、导出、配置变更等操作记录。
 - 设置页支持 LLM、Embedding、ChromaDB、识别并发、监听目录、依赖检查、日志导出、存储清理和自定义 Badge 配置。
 - Linux/KDE 托盘集成：启动时显示托盘，关闭窗口隐藏到托盘，托盘菜单支持“工作台”、版本信息和退出。
@@ -48,6 +48,7 @@ InvoiceVault 是一个本地优先的跨平台桌面端发票处理 Agent。目�
 
 - [docs/PRD.md](docs/PRD.md)
 - [docs/PLAN.md](docs/PLAN.md)
+- [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md)
 - [TODO.md](TODO.md)
 
 ## 技术栈

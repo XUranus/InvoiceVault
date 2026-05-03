@@ -1,14 +1,27 @@
 import React from "react";
-import type { AgentSession, AgentMessage, PendingConfirmation } from "../types";
+import type {
+  AgentSession,
+  AgentMessage,
+  PendingConfirmation,
+  AgentAttachment,
+  AgentArtifact,
+  AgentStreamEvent,
+} from "../types";
 import {
   createAgentSession,
   listAgentSessions,
   getAgentSession,
   deleteAgentSession,
-  sendAgentMessage,
-  confirmAgentAction,
+  sendAgentMessageStream,
+  confirmAgentActionStream,
+  attachAgentFile,
+  listAgentArtifacts,
+  openAgentArtifactFile,
+  openAgentArtifactFolder,
+  deleteAgentArtifact,
 } from "../api";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 
 type Props = {
   llmBaseUrl: string;
@@ -23,6 +36,14 @@ const EXAMPLE_QUESTIONS = [
   "导出发票为 CSV 格式",
 ];
 
+type StreamUiState = {
+  streamId: string;
+  sessionId: number;
+  assistantMessageId: number;
+  phase: "starting" | "thinking" | "tool" | "answering" | "done" | "error";
+  toolName: string | null;
+};
+
 export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
   const [sessions, setSessions] = React.useState<AgentSession[]>([]);
   const [activeSessionId, setActiveSessionId] = React.useState<number | null>(null);
@@ -30,7 +51,14 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
   const [input, setInput] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirmation | null>(null);
+  const [pendingAttachments, setPendingAttachments] = React.useState<AgentAttachment[]>([]);
+  const [artifacts, setArtifacts] = React.useState<AgentArtifact[]>([]);
+  const [streamState, setStreamState] = React.useState<StreamUiState | null>(null);
   const messagesEnd = React.useRef<HTMLDivElement>(null);
+  const streamStateRef = React.useRef<StreamUiState | null>(null);
+  const activeStreamIdRef = React.useRef<string | null>(null);
+  const activeSessionIdRef = React.useRef<number | null>(null);
+  const skipNextSessionLoadRef = React.useRef<number | null>(null);
 
   const llmConfig = React.useMemo(
     () => ({
@@ -42,6 +70,14 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
     [llmBaseUrl, llmModel, llmApiKey],
   );
 
+  React.useEffect(() => {
+    streamStateRef.current = streamState;
+  }, [streamState]);
+
+  React.useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
   // Load sessions on mount
   React.useEffect(() => {
     listAgentSessions()
@@ -49,25 +85,183 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       .catch((err) => onError(String(err)));
   }, []);
 
+  React.useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<AgentStreamEvent>("agent://stream", (event) => {
+      const payload = event.payload;
+      if (payload.stream_id !== activeStreamIdRef.current) return;
+      const current = streamStateRef.current;
+      if (!current || payload.session_id !== current.sessionId) return;
+      if (activeSessionIdRef.current !== payload.session_id) return;
+
+      if (payload.type === "assistant_delta") {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === current.assistantMessageId
+              ? { ...msg, content: msg.content + payload.delta }
+              : msg,
+          ),
+        );
+        setStreamState((prev) =>
+          prev ? { ...prev, phase: "answering", toolName: null } : prev,
+        );
+      } else if (payload.type === "tool_call") {
+        setStreamState((prev) =>
+          prev ? { ...prev, phase: "tool", toolName: payload.tool_name } : prev,
+        );
+      } else if (payload.type === "tool_result") {
+        setStreamState((prev) =>
+          prev ? { ...prev, phase: "thinking", toolName: payload.tool_name } : prev,
+        );
+      } else if (payload.type === "pending_confirmation") {
+        setPendingConfirm(payload.pending_confirmation);
+        setStreamState((prev) => (prev ? { ...prev, phase: "done" } : prev));
+      } else if (payload.type === "error") {
+        setStreamState((prev) => (prev ? { ...prev, phase: "error" } : prev));
+      }
+    })
+      .then((cleanup) => {
+        unlisten = cleanup;
+      })
+      .catch((err) => onError(String(err)));
+
+    return () => {
+      unlisten?.();
+    };
+  }, [onError]);
+
+  const refreshArtifacts = React.useCallback(async (sessionId: number) => {
+    try {
+      const result = await listAgentArtifacts(sessionId);
+      setArtifacts(result);
+    } catch {
+      setArtifacts([]);
+    }
+  }, []);
+
   // Load messages when switching sessions
   React.useEffect(() => {
     if (activeSessionId === null) {
       setMessages([]);
       setPendingConfirm(null);
+      setPendingAttachments([]);
+      setArtifacts([]);
       return;
     }
-    getAgentSession(activeSessionId)
-      .then((msgs) => {
+    if (skipNextSessionLoadRef.current === activeSessionId) {
+      skipNextSessionLoadRef.current = null;
+      setPendingConfirm(null);
+      setArtifacts([]);
+      return;
+    }
+    Promise.all([
+      getAgentSession(activeSessionId),
+      listAgentArtifacts(activeSessionId),
+    ])
+      .then(([msgs, artifacts]) => {
         setMessages(msgs);
+        setArtifacts(artifacts);
         setPendingConfirm(null);
       })
       .catch((err) => onError(String(err)));
-  }, [activeSessionId]);
+  }, [activeSessionId, refreshArtifacts]);
+
+  React.useEffect(() => {
+    if (activeSessionId === null) return;
+    refreshArtifacts(activeSessionId).catch(() => {});
+  }, [activeSessionId, messages.length, refreshArtifacts]);
 
   // Scroll to bottom on new messages
   React.useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const copyText = async (value: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return;
+      }
+      if (!fallbackCopyText(value)) {
+        throw new Error("clipboard unavailable");
+      }
+    } catch (err) {
+      if (!fallbackCopyText(value)) {
+        onError(`复制失败：${String(err)}`);
+      }
+    }
+  };
+
+  const handleOpenArtifact = async (artifactId: number) => {
+    if (activeSessionId === null) return;
+    try {
+      await openAgentArtifactFile(activeSessionId, artifactId);
+    } catch (err) {
+      onError(`打开产物失败：${String(err)}`);
+    }
+  };
+
+  const handleOpenArtifactFolder = async (artifactId: number) => {
+    if (activeSessionId === null) return;
+    try {
+      await openAgentArtifactFolder(activeSessionId, artifactId);
+    } catch (err) {
+      onError(`打开产物目录失败：${String(err)}`);
+    }
+  };
+
+  const handleDeleteArtifact = async (artifactId: number) => {
+    if (activeSessionId === null) return;
+    const confirmed = window.confirm("移除此产物记录？已导出的文件不会被删除。");
+    if (!confirmed) return;
+    try {
+      await deleteAgentArtifact(activeSessionId, artifactId);
+      setArtifacts((prev) => prev.filter((artifact) => artifact.id !== artifactId));
+    } catch (err) {
+      onError(`删除产物失败：${String(err)}`);
+    }
+  };
+
+  const startStreamingPlaceholder = (
+    sessionId: number,
+    userText: string | null,
+    attachments: AgentAttachment[] = [],
+  ) => {
+    const streamId = createStreamId();
+    const baseMessageId = -Date.now();
+    const assistantMessageId = baseMessageId - 1;
+    const optimisticMessages: AgentMessage[] = [];
+    if (userText !== null) {
+      optimisticMessages.push(
+        createTempMessage(sessionId, "user", userText, attachments, baseMessageId),
+      );
+    }
+    optimisticMessages.push(
+      createTempMessage(sessionId, "assistant", "", [], assistantMessageId),
+    );
+
+    activeStreamIdRef.current = streamId;
+    setStreamState({
+      streamId,
+      sessionId,
+      assistantMessageId,
+      phase: "starting",
+      toolName: null,
+    });
+    setMessages((prev) => [...prev, ...optimisticMessages]);
+    return { streamId, tempIds: optimisticMessages.map((msg) => msg.id) };
+  };
+
+  const finishStreamingResponse = (
+    response: { messages: AgentMessage[]; pending_confirmation: PendingConfirmation | null },
+    tempIds: number[],
+  ) => {
+    setMessages((prev) => appendUniqueMessages(
+      prev.filter((msg) => !tempIds.includes(msg.id)),
+      response.messages,
+    ));
+    setPendingConfirm(response.pending_confirmation);
+  };
 
   const handleNewSession = async () => {
     try {
@@ -86,6 +280,8 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       if (activeSessionId === id) {
         setActiveSessionId(null);
         setMessages([]);
+        setPendingAttachments([]);
+        setArtifacts([]);
       }
     } catch (err) {
       onError(String(err));
@@ -94,7 +290,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || loading) return;
+    if ((!text && pendingAttachments.length === 0) || loading) return;
     if (!llmBaseUrl || !llmApiKey || !llmModel) {
       onError("请先在设置页配置 LLM Provider");
       return;
@@ -105,6 +301,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       try {
         const session = await createAgentSession();
         setSessions((prev) => [session, ...prev]);
+        skipNextSessionLoadRef.current = session.id;
         sessionId = session.id;
         setActiveSessionId(sessionId);
       } catch (err) {
@@ -113,22 +310,81 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       }
     }
 
+    const attachments = pendingAttachments;
+    const visibleText = text || "请查看我上传的附件。";
+    const attachmentIds = attachments.map((attachment) => attachment.id);
+    const { streamId, tempIds } = startStreamingPlaceholder(
+      sessionId,
+      visibleText,
+      attachments,
+    );
     setInput("");
+    setPendingAttachments([]);
+    setPendingConfirm(null);
     setLoading(true);
 
     try {
-      const response = await sendAgentMessage(sessionId, text, llmConfig);
-      setMessages((prev) => [...prev, ...response.messages]);
-      setPendingConfirm(response.pending_confirmation);
+      const response = await sendAgentMessageStream(
+        streamId,
+        sessionId,
+        visibleText,
+        llmConfig,
+        attachmentIds,
+      );
+      finishStreamingResponse(response, tempIds);
 
       // Refresh session list (title may have updated)
       listAgentSessions()
         .then(setSessions)
         .catch(() => {});
+      refreshArtifacts(sessionId).catch(() => {});
     } catch (err) {
       onError(String(err));
+      getAgentSession(sessionId)
+        .then(setMessages)
+        .catch(() => {});
     } finally {
+      activeStreamIdRef.current = null;
+      setStreamState(null);
       setLoading(false);
+    }
+  };
+
+
+  const ensureSession = async (): Promise<number | null> => {
+    if (activeSessionId !== null) return activeSessionId;
+    try {
+      const session = await createAgentSession();
+      setSessions((prev) => [session, ...prev]);
+      setActiveSessionId(session.id);
+      return session.id;
+    } catch (err) {
+      onError(String(err));
+      return null;
+    }
+  };
+
+  const handleAttach = async () => {
+    if (loading) return;
+    const sessionId = await ensureSession();
+    if (sessionId === null) return;
+    try {
+      const selected = await open({
+        title: "选择表格附件",
+        multiple: true,
+        filters: [
+          { name: "Spreadsheet", extensions: ["xlsx", "csv"] },
+        ],
+      });
+      const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+      if (paths.length === 0) return;
+      const uploaded: AgentAttachment[] = [];
+      for (const path of paths) {
+        uploaded.push(await attachAgentFile(sessionId, path));
+      }
+      setPendingAttachments((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      onError(String(err));
     }
   };
 
@@ -138,11 +394,19 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
     let extraParams: Record<string, unknown> | null = null;
 
     // For export confirmations, open file picker
-    if (confirmed && pendingConfirm.tool_name === "export_invoices") {
+    if (
+      confirmed &&
+      (pendingConfirm.tool_name === "export_invoices" ||
+        pendingConfirm.tool_name === "export_invoices_with_template")
+    ) {
       try {
-        const path = await open({
+        const requestedFormat =
+          (pendingConfirm.arguments as Record<string, unknown>).format ??
+          (pendingConfirm.tool_name === "export_invoices_with_template" ? "xlsx" : "csv");
+        const extension = requestedFormat === "xlsx" ? "xlsx" : "csv";
+        const path = await save({
           title: "选择导出位置",
-          defaultPath: `invoices_export.${pendingConfirm.arguments && (pendingConfirm.arguments as Record<string, unknown>).format === "xlsx" ? "xlsx" : "csv"}`,
+          defaultPath: `invoices_export.${extension}`,
           filters: [
             {
               name: "Spreadsheet",
@@ -172,27 +436,33 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
   ) => {
     if (activeSessionId === null) return;
 
-    const confirm = pendingConfirm;
     setPendingConfirm(null);
+    const { streamId, tempIds } = startStreamingPlaceholder(activeSessionId, null);
     setLoading(true);
 
     try {
-      const response = await confirmAgentAction(
+      const response = await confirmAgentActionStream(
+        streamId,
         activeSessionId,
         confirmed,
         extraParams,
         llmConfig,
       );
-      setMessages((prev) => [...prev, ...response.messages]);
-      setPendingConfirm(response.pending_confirmation);
+      finishStreamingResponse(response, tempIds);
 
       // Refresh session list
       listAgentSessions()
         .then(setSessions)
         .catch(() => {});
+      refreshArtifacts(activeSessionId).catch(() => {});
     } catch (err) {
       onError(String(err));
+      getAgentSession(activeSessionId)
+        .then(setMessages)
+        .catch(() => {});
     } finally {
+      activeStreamIdRef.current = null;
+      setStreamState(null);
       setLoading(false);
     }
   };
@@ -224,6 +494,107 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
     try {
       const parsed = JSON.parse(content);
       if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        if (
+          typeof (parsed as { artifact?: unknown }).artifact === "object" &&
+          (parsed as { artifact?: unknown }).artifact !== null &&
+          typeof (parsed as { export?: unknown }).export === "object" &&
+          (parsed as { export?: unknown }).export !== null
+        ) {
+          const artifact = (parsed as {
+            artifact: {
+              title?: string;
+              file_path?: string | null;
+              byte_size?: number | null;
+            };
+            export: {
+              row_count?: number;
+              format?: string;
+              columns?: string[];
+            };
+            task?: {
+              id?: number;
+              status?: string;
+            } | null;
+          });
+          return (
+            <div className="chat-tool-summary agent-artifact-result">
+              <div className="chat-tool-field">
+                <span className="chat-tool-field-key">产物</span>
+                <span className="chat-tool-field-value">
+                  {artifact.artifact.title ?? "导出结果"}
+                </span>
+              </div>
+              <div className="chat-tool-field">
+                <span className="chat-tool-field-key">文件</span>
+                <span className="chat-tool-field-value mono">
+                  {artifact.artifact.file_path ?? "未记录路径"}
+                </span>
+              </div>
+              <div className="chat-tool-field">
+                <span className="chat-tool-field-key">内容</span>
+                <span className="chat-tool-field-value">
+                  {(artifact.export.row_count ?? 0).toLocaleString()} 行 · {(artifact.export.columns ?? []).length} 列 · {artifact.export.format ?? "文件"}
+                </span>
+              </div>
+              {artifact.task?.id ? (
+                <div className="chat-tool-field">
+                  <span className="chat-tool-field-key">任务</span>
+                  <span className="chat-tool-field-value">
+                    #{artifact.task.id} · {artifact.task.status ?? "completed"}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+        if (
+          Array.isArray((parsed as { columns?: unknown }).columns) &&
+          Array.isArray((parsed as { sample_rows?: unknown }).sample_rows)
+        ) {
+          const preview = parsed as {
+            row_count?: number;
+            columns: string[];
+            sample_rows: string[][];
+          };
+          return (
+            <div className="chat-tool-summary export-preview-summary">
+              <div className="chat-tool-field">
+                <span className="chat-tool-field-key">匹配行数</span>
+                <span className="chat-tool-field-value">
+                  {(preview.row_count ?? 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="chat-tool-field">
+                <span className="chat-tool-field-key">导出列</span>
+                <span className="chat-tool-field-value">
+                  {preview.columns.join(" / ")}
+                </span>
+              </div>
+              {preview.sample_rows.length > 0 ? (
+                <div className="chat-md-table-wrap">
+                  <table className="chat-md-table">
+                    <thead>
+                      <tr>
+                        {preview.columns.map((column) => (
+                          <th key={column}>{column}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.sample_rows.slice(0, 5).map((row, rowIndex) => (
+                        <tr key={rowIndex}>
+                          {preview.columns.map((column, columnIndex) => (
+                            <td key={column}>{row[columnIndex] ?? ""}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </div>
+          );
+        }
         const entries = Object.entries(parsed).slice(0, 5);
         const more = Object.keys(parsed).length > 5;
         return (
@@ -327,23 +698,55 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
                   <p className="muted">发送消息开始对话</p>
                 </div>
               )}
-              {messages.map((msg) => (
-                <div key={msg.id} className={`chat-message chat-message-${msg.role}`}>
-                  <div className="chat-bubble">
-                    {msg.role === "assistant" && msg.tool_call_json && (
-                      <div className="chat-tool-call">{toolCallSummary(msg)}</div>
-                    )}
-                    {msg.role === "tool" ? (
-                      <div className="chat-tool-result">
-                        <span className="chat-tool-label">工具结果</span>
-                        {formatToolResult(msg.content)}
-                      </div>
-                    ) : (
-                      <MarkdownContent content={msg.content} />
-                    )}
+              {messages.map((msg) => {
+                const isStreamingAssistant =
+                  streamState?.assistantMessageId === msg.id;
+                return (
+                  <div key={msg.id} className={`chat-message chat-message-${msg.role}`}>
+                    <div className="chat-bubble">
+                      {msg.role === "assistant" ? (
+                        <div className="chat-card-header">
+                          <span>
+                            {msg.tool_call_json
+                              ? "工具调用"
+                              : isStreamingAssistant
+                                ? "正在回复"
+                                : "回复"}
+                          </span>
+                        </div>
+                      ) : null}
+                      {msg.role === "assistant" && msg.tool_call_json && (
+                        <div className="chat-tool-call">
+                          <span className="chat-tool-call-dot" />
+                          <span>{toolCallSummary(msg)}</span>
+                        </div>
+                      )}
+                      {msg.attachments && msg.attachments.length > 0 ? (
+                        <AttachmentList attachments={msg.attachments} />
+                      ) : null}
+                      {msg.role === "tool" ? (
+                        <div className="chat-tool-result">
+                          <div className="chat-tool-result-header">
+                            <span className="chat-tool-result-icon" />
+                            <span className="chat-tool-label">工具结果</span>
+                          </div>
+                          <div className="chat-tool-result-body">
+                            {formatToolResult(msg.content)}
+                          </div>
+                        </div>
+                      ) : isStreamingAssistant ? (
+                        <StreamingAssistantContent
+                          content={msg.content}
+                          phase={streamState!.phase}
+                          toolName={streamState!.toolName}
+                        />
+                      ) : (
+                        <MarkdownContent content={msg.content} />
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {/* Confirmation panel */}
               {pendingConfirm && (
@@ -373,17 +776,36 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
                 </div>
               )}
 
-              {loading && (
-                <div className="chat-message chat-message-assistant">
-                  <div className="chat-bubble">
-                    <span className="chat-loading">思考中...</span>
-                  </div>
-                </div>
-              )}
               <div ref={messagesEnd} />
             </div>
 
-            <div className="chat-input-bar">
+            <div className="chat-input-wrap">
+              {pendingAttachments.length > 0 ? (
+                <div className="chat-pending-attachments">
+                  {pendingAttachments.map((attachment) => (
+                    <span className="chat-attachment-chip" key={attachment.id}>
+                      {attachment.original_name}
+                      <button
+                        type="button"
+                        onClick={() => setPendingAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
+                        title="移除附件"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="chat-input-bar">
+                <button
+                  className="btn-secondary chat-attach-btn"
+                  type="button"
+                  onClick={handleAttach}
+                  disabled={loading}
+                  title="上传 xlsx/csv 表格"
+                >
+                  附件
+                </button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -396,16 +818,97 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
               <button
                 className="btn-primary"
                 onClick={handleSend}
-                disabled={loading || !input.trim()}
+                disabled={loading || (!input.trim() && pendingAttachments.length === 0)}
               >
                 发送
               </button>
+              </div>
             </div>
           </>
         )}
       </div>
+
+      {activeSessionId !== null ? (
+        <ArtifactPanel
+          artifacts={artifacts}
+          onOpen={handleOpenArtifact}
+          onOpenFolder={handleOpenArtifactFolder}
+          onCopy={copyText}
+          onDelete={handleDeleteArtifact}
+        />
+      ) : null}
     </div>
   );
+}
+
+function createStreamId(): string {
+  return `agent-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createTempMessage(
+  sessionId: number,
+  role: string,
+  content: string,
+  attachments: AgentAttachment[] = [],
+  id = -Date.now(),
+): AgentMessage {
+  return {
+    id,
+    session_id: sessionId,
+    role,
+    content,
+    tool_call_json: null,
+    created_at: new Date().toISOString(),
+    attachments,
+  };
+}
+
+function appendUniqueMessages(
+  current: AgentMessage[],
+  next: AgentMessage[],
+): AgentMessage[] {
+  const seen = new Set(current.map((msg) => msg.id));
+  const additions = next.filter((msg) => {
+    if (seen.has(msg.id)) return false;
+    seen.add(msg.id);
+    return true;
+  });
+  return [...current, ...additions];
+}
+
+function StreamingAssistantContent({
+  content,
+  phase,
+  toolName,
+}: {
+  content: string;
+  phase: StreamUiState["phase"];
+  toolName: string | null;
+}) {
+  return (
+    <div className="streaming-assistant">
+      {content ? <MarkdownContent content={content} /> : null}
+      <div className={`streaming-status streaming-status-${phase}`}>
+        <span className="thinking-orbit" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+        <span>{streamingStatusText(phase, toolName)}</span>
+        {phase === "answering" ? <span className="typing-caret" /> : null}
+      </div>
+    </div>
+  );
+}
+
+function streamingStatusText(
+  phase: StreamUiState["phase"],
+  toolName: string | null,
+): string {
+  if (phase === "tool" && toolName) return `正在使用 ${toolLabel(toolName)}`;
+  if (phase === "answering") return "正在生成";
+  if (phase === "error") return "回复中断";
+  return "思考中";
 }
 
 function toolLabel(name: string): string {
@@ -413,10 +916,163 @@ function toolLabel(name: string): string {
     search_invoices: "搜索发票",
     get_invoice_detail: "获取发票详情",
     get_dashboard_stats: "获取统计数据",
+    get_current_date_context: "获取日期上下文",
+    get_invoice_field_catalog: "获取字段字典",
+    list_message_attachments: "查看附件",
+    inspect_spreadsheet: "检查表格",
+    create_export_preview: "预览导出",
     export_invoices: "导出发票",
+    export_invoices_with_template: "按模板导出",
     update_invoice: "更新发票",
   };
   return labels[name] ?? name;
+}
+
+function ArtifactPanel({
+  artifacts,
+  onOpen,
+  onOpenFolder,
+  onCopy,
+  onDelete,
+}: {
+  artifacts: AgentArtifact[];
+  onOpen: (artifactId: number) => void;
+  onOpenFolder: (artifactId: number) => void;
+  onCopy: (value: string) => void;
+  onDelete: (artifactId: number) => void;
+}) {
+  return (
+    <aside className="agent-artifacts">
+      <div className="agent-artifacts-header">
+        <h3>产物</h3>
+        <span>{artifacts.length}</span>
+      </div>
+      <div className="agent-artifact-list">
+        {artifacts.map((artifact) => {
+          const metadata = parseArtifactMetadata(artifact.metadata_json);
+          return (
+            <div className="agent-artifact-card" key={artifact.id}>
+              <div className="agent-artifact-title-row">
+                <strong title={artifact.title}>{artifact.title}</strong>
+                <span className="mini-tag tag-recognized">
+                  {artifact.artifact_type}
+                </span>
+              </div>
+              <div className="agent-artifact-meta">
+                {metadata.row_count != null ? (
+                  <span>{metadata.row_count.toLocaleString()} 行</span>
+                ) : null}
+                {metadata.columns?.length ? (
+                  <span>{metadata.columns.length} 列</span>
+                ) : null}
+                {artifact.byte_size != null ? (
+                  <span>{formatFileSize(artifact.byte_size)}</span>
+                ) : null}
+              </div>
+              {artifact.file_path ? (
+                <div className="agent-artifact-path" title={artifact.file_path}>
+                  {artifact.file_path}
+                </div>
+              ) : null}
+              {artifact.file_path ? (
+                <div className="agent-artifact-actions">
+                  <button type="button" onClick={() => onOpen(artifact.id)}>
+                    打开
+                  </button>
+                  <button type="button" onClick={() => onOpenFolder(artifact.id)}>
+                    目录
+                  </button>
+                  <button type="button" onClick={() => onCopy(artifact.file_path!)}>
+                    复制
+                  </button>
+                  <button
+                    type="button"
+                    className="agent-artifact-delete"
+                    onClick={() => onDelete(artifact.id)}
+                  >
+                    移除
+                  </button>
+                </div>
+              ) : (
+                <div className="agent-artifact-actions">
+                  <button
+                    type="button"
+                    className="agent-artifact-delete"
+                    onClick={() => onDelete(artifact.id)}
+                  >
+                    移除
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {artifacts.length === 0 ? (
+          <p className="muted agent-artifacts-empty">暂无导出产物</p>
+        ) : null}
+      </div>
+    </aside>
+  );
+}
+
+function parseArtifactMetadata(value: string | null): {
+  row_count?: number;
+  format?: string;
+  columns?: string[];
+} {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as {
+      row_count?: unknown;
+      format?: unknown;
+      columns?: unknown;
+    };
+    return {
+      row_count: typeof parsed.row_count === "number" ? parsed.row_count : undefined,
+      format: typeof parsed.format === "string" ? parsed.format : undefined,
+      columns: Array.isArray(parsed.columns)
+        ? parsed.columns.filter((item): item is string => typeof item === "string")
+        : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function fallbackCopyText(value: string): boolean {
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+  return copied;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AttachmentList({ attachments }: { attachments: AgentAttachment[] }) {
+  return (
+    <div className="chat-attachment-list">
+      {attachments.map((attachment) => (
+        <span className="chat-attachment-chip" key={attachment.id}>
+          {attachment.original_name}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 type MarkdownBlock =

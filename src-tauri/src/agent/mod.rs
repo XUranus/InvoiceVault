@@ -33,9 +33,16 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
                     "date_from": {"type": "string", "description": "开始日期 YYYY-MM-DD"},
                     "date_to": {"type": "string", "description": "结束日期 YYYY-MM-DD"},
                     "seller_name": {"type": "string", "description": "销售方名称"},
-                    "invoice_type": {"type": "string", "description": "发票类型"},
+                    "buyer_name": {"type": "string", "description": "购买方名称"},
+                    "invoice_number": {"type": "string", "description": "发票号码"},
+                    "invoice_type": {"type": "string", "description": "发票类型，如增值税普通发票/增值税专用发票"},
                     "category": {"type": "string", "description": "消费类别"},
                     "status": {"type": "string", "description": "状态: pending_confirmation/recognized/reviewed/flagged"},
+                    "duplicate_status": {"type": "string", "description": "重复状态"},
+                    "amount_min": {"type": "string", "description": "最小金额"},
+                    "amount_max": {"type": "string", "description": "最大金额"},
+                    "sort_by": {"type": "string", "description": "排序字段"},
+                    "sort_order": {"type": "string", "description": "asc 或 desc"},
                     "page": {"type": "integer", "description": "页码，默认 1"},
                     "page_size": {"type": "integer", "description": "每页条数，默认 20"}
                 }
@@ -70,19 +77,115 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
             requires_confirmation: false,
         },
         ToolDefinition {
-            name: "export_invoices",
-            description: "导出筛选的发票为 CSV 或 Excel 文件。需要用户选择保存位置。",
+            name: "get_current_date_context",
+            description: "获取当前日期上下文，用于解析这个月、上个月、本季度等相对时间表达。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "get_invoice_field_catalog",
+            description: "获取发票字段字典，包括可导出字段 key、中文名、别名和数据类型。用于把用户说的列名映射为导出字段。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "list_message_attachments",
+            description: "列出当前会话中用户上传的附件。用户提到表格、上传文件、模板时，先使用此工具查找附件 ID。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "inspect_spreadsheet",
+            description: "检查上传的 CSV/XLSX 表格，返回工作表、表头、列名和前几行样例。用于理解用户提供的导出模板格式。",
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "format": {"type": "string", "description": "导出格式: csv 或 xlsx"},
+                    "attachment_id": {"type": "integer", "description": "附件 ID"},
+                    "max_rows": {"type": "integer", "description": "最多读取的样例行数，默认 5"}
+                },
+                "required": ["attachment_id"]
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "export_invoices",
+            description: "导出筛选的发票为 CSV 或 Excel 文件。支持自定义导出列和日期范围。需要用户选择保存位置。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "enum": ["csv", "xlsx"], "description": "导出格式: csv 或 xlsx"},
                     "invoice_ids": {
                         "type": "array",
                         "items": {"type": "integer"},
-                        "description": "要导出的发票 ID 列表，为空则导出全部"
-                    }
+                        "description": "要导出的发票 ID 列表。为空时按日期范围或全部导出"
+                    },
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "导出字段 key 列表，例如只导出发票代码时传 invoice_code。可先调用 get_invoice_field_catalog 获取字段字典"
+                    },
+                    "date_from": {"type": "string", "description": "开始日期 YYYY-MM-DD"},
+                    "date_to": {"type": "string", "description": "结束日期 YYYY-MM-DD"}
                 },
                 "required": ["format"]
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "create_export_preview",
+            description: "预览一次发票导出，返回匹配行数、导出列和前几行样例。复杂导出前应先使用此工具让用户确认。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "invoice_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "要预览的发票 ID 列表。为空时按日期范围或全部预览"
+                    },
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "导出字段 key 列表"
+                    },
+                    "date_from": {"type": "string", "description": "开始日期 YYYY-MM-DD"},
+                    "date_to": {"type": "string", "description": "结束日期 YYYY-MM-DD"},
+                    "limit": {"type": "integer", "description": "样例行数，默认 5"}
+                }
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "export_invoices_with_template",
+            description: "按上传表格模板的表头列顺序导出发票。当前版本复用模板列结构，不复制样式/公式/合并单元格。需要用户选择保存位置。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "attachment_id": {"type": "integer", "description": "模板表格附件 ID"},
+                    "format": {"type": "string", "enum": ["xlsx", "csv"], "description": "导出格式，默认 xlsx"},
+                    "invoice_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "要导出的发票 ID 列表。为空时按日期范围或全部导出"
+                    },
+                    "date_from": {"type": "string", "description": "开始日期 YYYY-MM-DD"},
+                    "date_to": {"type": "string", "description": "结束日期 YYYY-MM-DD"}
+                },
+                "required": ["attachment_id"]
             }),
             is_read_only: false,
             requires_confirmation: true,
@@ -138,12 +241,77 @@ pub struct AgentMessageRow {
     pub content: String,
     pub tool_call_json: Option<String>,
     pub created_at: String,
+    pub attachments: Vec<AgentAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentAttachment {
+    pub id: i64,
+    pub session_id: i64,
+    pub message_id: Option<i64>,
+    pub original_name: String,
+    pub mime_type: Option<String>,
+    pub byte_size: i64,
+    pub storage_path: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTask {
+    pub id: i64,
+    pub session_id: i64,
+    pub tool_name: String,
+    pub status: String,
+    pub input_json: Option<String>,
+    pub result_json: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentArtifact {
+    pub id: i64,
+    pub session_id: i64,
+    pub task_id: Option<i64>,
+    pub artifact_type: String,
+    pub title: String,
+    pub file_path: Option<String>,
+    pub mime_type: Option<String>,
+    pub byte_size: Option<i64>,
+    pub metadata_json: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentResponse {
     pub messages: Vec<AgentMessageRow>,
     pub pending_confirmation: Option<PendingConfirmation>,
+}
+
+pub type AgentStreamSink = Arc<dyn Fn(AgentStreamEvent) + Send + Sync>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentStreamEvent {
+    Started,
+    AssistantDelta {
+        delta: String,
+    },
+    ToolCall {
+        tool_name: String,
+    },
+    ToolResult {
+        tool_name: String,
+    },
+    PendingConfirmation {
+        pending_confirmation: PendingConfirmation,
+    },
+    Finished,
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,6 +423,8 @@ struct ToolChatRequest<'a> {
     tool_choice: &'a str,
     temperature: f32,
     max_tokens: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,6 +445,47 @@ struct ToolChatMessage {
     tool_calls: Option<Vec<ToolCall>>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ToolChatStreamChunk {
+    choices: Vec<ToolChatStreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolChatStreamChoice {
+    delta: ToolChatStreamDelta,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolChatStreamDelta {
+    #[allow(dead_code)]
+    role: Option<String>,
+    content: Option<String>,
+    tool_calls: Option<Vec<ToolCallDelta>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolCallDelta {
+    index: usize,
+    id: Option<String>,
+    #[serde(rename = "type")]
+    type_: Option<String>,
+    function: Option<ToolCallFunctionDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolCallFunctionDelta {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct ToolCallAccumulator {
+    id: Option<String>,
+    type_: Option<String>,
+    name: String,
+    arguments: String,
+}
+
 // ---------------------------------------------------------------------------
 // System prompt
 // ---------------------------------------------------------------------------
@@ -285,7 +496,9 @@ const SYSTEM_PROMPT: &str = r#"你是 InvoiceVault 发票处理助手，只能�
 - 查询发票时使用 search_invoices 工具，根据用户意图设置筛选条件
 - 需要发票详情时使用 get_invoice_detail 工具
 - 统计信息使用 get_dashboard_stats 工具
-- 用户要求导出时，使用 export_invoices 工具，告知将要导出的数量和格式
+- 用户要求导出时，先用 get_invoice_field_catalog 映射列名；需要相对日期时先用 get_current_date_context；如果用户上传了表格模板，先用 list_message_attachments 和 inspect_spreadsheet 理解表头
+- 复杂导出前先调用 create_export_preview，向用户说明匹配行数、列和样例；确认后再调用 export_invoices 或 export_invoices_with_template
+- export_invoices 支持 columns，自定义列必须传字段 key。例如“只包含发票代码”应传 columns=["invoice_code"]
 - 修改发票信息使用 update_invoice 工具
 - 工具返回什么数据就如实汇报，不要虚构或编造数据
 - 如果用户请求超出你的工具能力范围，如实说明并给出建议
@@ -335,7 +548,7 @@ pub fn get_session_messages(
          WHERE session_id = ?1
          ORDER BY id ASC",
     )?;
-    let msgs = stmt
+    let mut msgs = stmt
         .query_map([session_id], |row| {
             Ok(AgentMessageRow {
                 id: row.get(0)?,
@@ -344,10 +557,263 @@ pub fn get_session_messages(
                 content: row.get(3)?,
                 tool_call_json: row.get(4)?,
                 created_at: row.get(5)?,
+                attachments: Vec::new(),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    attach_attachments(conn, &mut msgs)?;
     Ok(msgs)
+}
+
+pub fn insert_attachment(
+    conn: &Connection,
+    session_id: i64,
+    original_name: &str,
+    mime_type: Option<&str>,
+    byte_size: i64,
+    storage_path: &str,
+) -> Result<AgentAttachment, AgentError> {
+    conn.execute(
+        "INSERT INTO agent_attachments (session_id, original_name, mime_type, byte_size, storage_path) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![session_id, original_name, mime_type, byte_size, storage_path],
+    )?;
+    let id = conn.last_insert_rowid();
+    get_attachment(conn, id)
+}
+
+pub fn get_attachment(conn: &Connection, id: i64) -> Result<AgentAttachment, AgentError> {
+    conn.query_row(
+        "SELECT id, session_id, message_id, original_name, mime_type, byte_size, storage_path, created_at FROM agent_attachments WHERE id = ?1",
+        [id],
+        map_attachment,
+    ).map_err(AgentError::from)
+}
+
+pub fn list_session_attachments(
+    conn: &Connection,
+    session_id: i64,
+) -> Result<Vec<AgentAttachment>, AgentError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, message_id, original_name, mime_type, byte_size, storage_path, created_at
+         FROM agent_attachments
+         WHERE session_id = ?1
+         ORDER BY id DESC",
+    )?;
+    let attachments = stmt
+        .query_map([session_id], map_attachment)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(attachments)
+}
+
+pub fn create_task(
+    conn: &Connection,
+    session_id: i64,
+    tool_name: &str,
+    input_json: Option<&str>,
+) -> Result<AgentTask, AgentError> {
+    conn.execute(
+        "INSERT INTO agent_tasks (session_id, tool_name, status, input_json)
+         VALUES (?1, ?2, 'running', ?3)",
+        rusqlite::params![session_id, tool_name, input_json],
+    )?;
+    let id = conn.last_insert_rowid();
+    get_task(conn, id)
+}
+
+pub fn complete_task(
+    conn: &Connection,
+    task_id: i64,
+    status: &str,
+    result_json: Option<&str>,
+    error_message: Option<&str>,
+) -> Result<AgentTask, AgentError> {
+    conn.execute(
+        "UPDATE agent_tasks
+         SET status = ?1,
+             result_json = ?2,
+             error_message = ?3,
+             updated_at = datetime('now'),
+             completed_at = datetime('now')
+         WHERE id = ?4",
+        rusqlite::params![status, result_json, error_message, task_id],
+    )?;
+    get_task(conn, task_id)
+}
+
+pub fn get_task(conn: &Connection, id: i64) -> Result<AgentTask, AgentError> {
+    conn.query_row(
+        "SELECT id, session_id, tool_name, status, input_json, result_json, error_message,
+                created_at, updated_at, completed_at
+         FROM agent_tasks
+         WHERE id = ?1",
+        [id],
+        map_task,
+    )
+    .map_err(AgentError::from)
+}
+
+pub fn list_session_tasks(
+    conn: &Connection,
+    session_id: i64,
+) -> Result<Vec<AgentTask>, AgentError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, tool_name, status, input_json, result_json, error_message,
+                created_at, updated_at, completed_at
+         FROM agent_tasks
+         WHERE session_id = ?1
+         ORDER BY id DESC",
+    )?;
+    let tasks = stmt
+        .query_map([session_id], map_task)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(tasks)
+}
+
+pub fn insert_artifact(
+    conn: &Connection,
+    session_id: i64,
+    task_id: Option<i64>,
+    artifact_type: &str,
+    title: &str,
+    file_path: Option<&str>,
+    mime_type: Option<&str>,
+    byte_size: Option<i64>,
+    metadata_json: Option<&str>,
+) -> Result<AgentArtifact, AgentError> {
+    conn.execute(
+        "INSERT INTO agent_artifacts
+            (session_id, task_id, artifact_type, title, file_path, mime_type, byte_size, metadata_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![
+            session_id,
+            task_id,
+            artifact_type,
+            title,
+            file_path,
+            mime_type,
+            byte_size,
+            metadata_json
+        ],
+    )?;
+    let id = conn.last_insert_rowid();
+    get_artifact(conn, id)
+}
+
+pub fn get_artifact(conn: &Connection, id: i64) -> Result<AgentArtifact, AgentError> {
+    conn.query_row(
+        "SELECT id, session_id, task_id, artifact_type, title, file_path, mime_type,
+                byte_size, metadata_json, created_at
+         FROM agent_artifacts
+         WHERE id = ?1",
+        [id],
+        map_artifact,
+    )
+    .map_err(AgentError::from)
+}
+
+pub fn list_session_artifacts(
+    conn: &Connection,
+    session_id: i64,
+) -> Result<Vec<AgentArtifact>, AgentError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, task_id, artifact_type, title, file_path, mime_type,
+                byte_size, metadata_json, created_at
+         FROM agent_artifacts
+         WHERE session_id = ?1
+         ORDER BY id DESC",
+    )?;
+    let artifacts = stmt
+        .query_map([session_id], map_artifact)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(artifacts)
+}
+
+pub fn delete_artifact(
+    conn: &Connection,
+    session_id: i64,
+    artifact_id: i64,
+) -> Result<(), AgentError> {
+    conn.execute(
+        "DELETE FROM agent_artifacts WHERE id = ?1 AND session_id = ?2",
+        rusqlite::params![artifact_id, session_id],
+    )?;
+    Ok(())
+}
+
+fn link_attachments_to_message(
+    conn: &Connection,
+    session_id: i64,
+    message_id: i64,
+    attachment_ids: &[i64],
+) -> Result<(), AgentError> {
+    for id in attachment_ids {
+        conn.execute(
+            "UPDATE agent_attachments SET message_id = ?1 WHERE id = ?2 AND session_id = ?3",
+            rusqlite::params![message_id, id, session_id],
+        )?;
+    }
+    Ok(())
+}
+
+fn attach_attachments(
+    conn: &Connection,
+    messages: &mut [AgentMessageRow],
+) -> Result<(), AgentError> {
+    for message in messages {
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, message_id, original_name, mime_type, byte_size, storage_path, created_at
+             FROM agent_attachments
+             WHERE message_id = ?1
+             ORDER BY id ASC",
+        )?;
+        message.attachments = stmt
+            .query_map([message.id], map_attachment)?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    Ok(())
+}
+
+fn map_attachment(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentAttachment> {
+    Ok(AgentAttachment {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        message_id: row.get(2)?,
+        original_name: row.get(3)?,
+        mime_type: row.get(4)?,
+        byte_size: row.get(5)?,
+        storage_path: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
+fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTask> {
+    Ok(AgentTask {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        tool_name: row.get(2)?,
+        status: row.get(3)?,
+        input_json: row.get(4)?,
+        result_json: row.get(5)?,
+        error_message: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        completed_at: row.get(9)?,
+    })
+}
+
+fn map_artifact(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentArtifact> {
+    Ok(AgentArtifact {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        task_id: row.get(2)?,
+        artifact_type: row.get(3)?,
+        title: row.get(4)?,
+        file_path: row.get(5)?,
+        mime_type: row.get(6)?,
+        byte_size: row.get(7)?,
+        metadata_json: row.get(8)?,
+        created_at: row.get(9)?,
+    })
 }
 
 pub fn delete_session(conn: &Connection, session_id: i64) -> Result<(), AgentError> {
@@ -386,6 +852,7 @@ fn save_message(
         content,
         tool_call_json,
         created_at: String::new(),
+        attachments: Vec::new(),
     })
 }
 
@@ -465,6 +932,7 @@ async fn send_chat_request(
         tool_choice: "auto",
         temperature: 0.0,
         max_tokens: 2000,
+        stream: None,
     };
 
     let response = client
@@ -492,6 +960,202 @@ async fn send_chat_request(
     Ok(body)
 }
 
+async fn send_chat_request_stream(
+    messages: Vec<LlmMessage>,
+    config: &LlmProviderConfig,
+    stream_sink: &AgentStreamSink,
+) -> Result<ToolChatResponse, AgentError> {
+    let base_url = config.base_url.trim().trim_end_matches('/');
+    let api_key = config.api_key.trim();
+    let model = config.model.trim();
+
+    if base_url.is_empty() {
+        return Err(LlmError::MissingBaseUrl.into());
+    }
+    if api_key.is_empty() {
+        return Err(LlmError::MissingApiKey.into());
+    }
+    if model.is_empty() {
+        return Err(LlmError::MissingModel.into());
+    }
+
+    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(60).clamp(1, 300));
+    let client = reqwest::Client::builder().timeout(timeout).build()?;
+
+    let tools: Vec<ToolDef> = agent_tools()
+        .into_iter()
+        .map(|t| ToolDef {
+            type_: "function".to_owned(),
+            function: FunctionDef {
+                name: t.name.to_owned(),
+                description: t.description.to_owned(),
+                parameters: t.parameters,
+            },
+        })
+        .collect();
+
+    let request = ToolChatRequest {
+        model,
+        messages,
+        tools,
+        tool_choice: "auto",
+        temperature: 0.0,
+        max_tokens: 2000,
+        stream: Some(true),
+    };
+
+    let mut request_headers = headers(api_key)?;
+    request_headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static("text/event-stream"),
+    );
+
+    let mut response = client
+        .post(format!("{base_url}/chat/completions"))
+        .headers(request_headers)
+        .json(&request)
+        .send()
+        .await?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        error!(
+            "Agent stream: LLM HTTP {status}: {}",
+            crate::llm::truncate(&body, 200)
+        );
+        return Err(LlmError::ProviderStatus {
+            status: status.as_u16(),
+            body: crate::llm::truncate(&body, 500),
+        }
+        .into());
+    }
+
+    let mut buffer = String::new();
+    let mut content = String::new();
+    let mut tool_calls: Vec<ToolCallAccumulator> = Vec::new();
+    let mut done = false;
+
+    while let Some(chunk) = response.chunk().await? {
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        buffer = buffer.replace("\r\n", "\n");
+
+        while let Some(index) = buffer.find("\n\n") {
+            let event = buffer[..index].to_owned();
+            buffer = buffer[index + 2..].to_owned();
+            if process_sse_event(&event, &mut content, &mut tool_calls, stream_sink)? {
+                done = true;
+                break;
+            }
+        }
+
+        if done {
+            break;
+        }
+    }
+
+    if !buffer.trim().is_empty() {
+        let _ = process_sse_event(&buffer, &mut content, &mut tool_calls, stream_sink)?;
+    }
+
+    let tool_calls = tool_calls
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, call)| {
+            if call.name.is_empty() {
+                return None;
+            }
+            Some(ToolCall {
+                id: call.id.unwrap_or_else(|| format!("call_{index}")),
+                type_: call.type_.unwrap_or_else(|| "function".to_owned()),
+                function: ToolCallFunction {
+                    name: call.name,
+                    arguments: call.arguments,
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(ToolChatResponse {
+        choices: vec![ToolChatChoice {
+            message: ToolChatMessage {
+                role: Some("assistant".to_owned()),
+                content: if content.is_empty() {
+                    None
+                } else {
+                    Some(content)
+                },
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
+            },
+        }],
+    })
+}
+
+fn process_sse_event(
+    event: &str,
+    content: &mut String,
+    tool_calls: &mut Vec<ToolCallAccumulator>,
+    stream_sink: &AgentStreamSink,
+) -> Result<bool, AgentError> {
+    for raw_line in event.lines() {
+        let line = raw_line.trim_start();
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim_start();
+        if data.is_empty() {
+            continue;
+        }
+        if data == "[DONE]" {
+            return Ok(true);
+        }
+
+        let chunk: ToolChatStreamChunk = serde_json::from_str(data)?;
+        for choice in chunk.choices {
+            if let Some(delta) = choice.delta.content {
+                if !delta.is_empty() {
+                    content.push_str(&delta);
+                    stream_sink(AgentStreamEvent::AssistantDelta { delta });
+                }
+            }
+
+            if let Some(deltas) = choice.delta.tool_calls {
+                for delta in deltas {
+                    while tool_calls.len() <= delta.index {
+                        tool_calls.push(ToolCallAccumulator::default());
+                    }
+                    let call = &mut tool_calls[delta.index];
+                    if let Some(id) = delta.id {
+                        call.id = Some(id);
+                    }
+                    if let Some(type_) = delta.type_ {
+                        call.type_ = Some(type_);
+                    }
+                    if let Some(function) = delta.function {
+                        if let Some(name) = function.name {
+                            if !name.is_empty() {
+                                call.name.push_str(&name);
+                                stream_sink(AgentStreamEvent::ToolCall {
+                                    tool_name: call.name.clone(),
+                                });
+                            }
+                        }
+                        if let Some(arguments) = function.arguments {
+                            call.arguments.push_str(&arguments);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(false)
+}
+
 // ---------------------------------------------------------------------------
 // Agent chat loop
 // ---------------------------------------------------------------------------
@@ -502,21 +1166,82 @@ pub async fn run_agent_turn(
     db: &Mutex<Connection>,
     session_id: i64,
     user_message: &str,
+    attachment_ids: Vec<i64>,
+    attachment_context: Option<String>,
     config: &LlmProviderConfig,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
 ) -> Result<AgentResponse, AgentError> {
+    run_agent_turn_impl(
+        db,
+        session_id,
+        user_message,
+        attachment_ids,
+        attachment_context,
+        config,
+        execute_tool,
+        None,
+    )
+    .await
+}
+
+pub async fn run_agent_turn_stream(
+    db: &Mutex<Connection>,
+    session_id: i64,
+    user_message: &str,
+    attachment_ids: Vec<i64>,
+    attachment_context: Option<String>,
+    config: &LlmProviderConfig,
+    execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
+    stream_sink: AgentStreamSink,
+) -> Result<AgentResponse, AgentError> {
+    run_agent_turn_impl(
+        db,
+        session_id,
+        user_message,
+        attachment_ids,
+        attachment_context,
+        config,
+        execute_tool,
+        Some(stream_sink),
+    )
+    .await
+}
+
+async fn run_agent_turn_impl(
+    db: &Mutex<Connection>,
+    session_id: i64,
+    user_message: &str,
+    attachment_ids: Vec<i64>,
+    attachment_context: Option<String>,
+    config: &LlmProviderConfig,
+    execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
+    stream_sink: Option<AgentStreamSink>,
+) -> Result<AgentResponse, AgentError> {
     let mut new_messages: Vec<AgentMessageRow> = Vec::new();
 
-    // Save user message
+    // Save the visible user message, but send attachment context to the model.
     let user_msg = LlmMessage {
         role: "user".to_owned(),
         content: Some(user_message.to_owned()),
         tool_calls: None,
         tool_call_id: None,
     };
+    let llm_user_msg = LlmMessage {
+        role: "user".to_owned(),
+        content: Some(match attachment_context {
+            Some(ctx) if !ctx.is_empty() => format!("{user_message}\n\n{ctx}"),
+            _ => user_message.to_owned(),
+        }),
+        tool_calls: None,
+        tool_call_id: None,
+    };
     {
         let conn = db.lock().expect("db lock");
-        new_messages.push(save_message(&conn, &user_msg, session_id)?);
+        let saved = save_message(&conn, &user_msg, session_id)?;
+        link_attachments_to_message(&conn, session_id, saved.id, &attachment_ids)?;
+        let mut saved_messages = vec![saved];
+        attach_attachments(&conn, &mut saved_messages)?;
+        new_messages.extend(saved_messages);
         update_session_title(&conn, session_id)?;
     }
 
@@ -528,11 +1253,18 @@ pub async fn run_agent_turn(
 
     // Build initial message list
     let mut llm_messages = build_llm_messages(&history);
-    llm_messages.push(user_msg.clone());
+    llm_messages.push(llm_user_msg);
 
     // Tool calling loop
-    let result =
-        run_agent_loop_from_inner(db, session_id, llm_messages, config, execute_tool).await?;
+    let result = run_agent_loop_from_inner(
+        db,
+        session_id,
+        llm_messages,
+        config,
+        execute_tool,
+        stream_sink,
+    )
+    .await?;
     new_messages.extend(result.messages);
     Ok(AgentResponse {
         messages: new_messages,
@@ -549,6 +1281,48 @@ pub async fn continue_agent_turn(
     extra_params: Option<serde_json::Value>,
     config: &LlmProviderConfig,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
+) -> Result<AgentResponse, AgentError> {
+    continue_agent_turn_impl(
+        db,
+        session_id,
+        confirmed,
+        extra_params,
+        config,
+        execute_tool,
+        None,
+    )
+    .await
+}
+
+pub async fn continue_agent_turn_stream(
+    db: &Mutex<Connection>,
+    session_id: i64,
+    confirmed: bool,
+    extra_params: Option<serde_json::Value>,
+    config: &LlmProviderConfig,
+    execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
+    stream_sink: AgentStreamSink,
+) -> Result<AgentResponse, AgentError> {
+    continue_agent_turn_impl(
+        db,
+        session_id,
+        confirmed,
+        extra_params,
+        config,
+        execute_tool,
+        Some(stream_sink),
+    )
+    .await
+}
+
+async fn continue_agent_turn_impl(
+    db: &Mutex<Connection>,
+    session_id: i64,
+    confirmed: bool,
+    extra_params: Option<serde_json::Value>,
+    config: &LlmProviderConfig,
+    execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
+    stream_sink: Option<AgentStreamSink>,
 ) -> Result<AgentResponse, AgentError> {
     let mut new_messages: Vec<AgentMessageRow> = Vec::new();
 
@@ -590,8 +1364,15 @@ pub async fn continue_agent_turn(
         }
         llm_messages.push(user_msg);
 
-        let rest =
-            run_agent_loop_from_inner(db, session_id, llm_messages, config, execute_tool).await?;
+        let rest = run_agent_loop_from_inner(
+            db,
+            session_id,
+            llm_messages,
+            config,
+            execute_tool,
+            stream_sink,
+        )
+        .await?;
         new_messages.extend(rest.messages);
         return Ok(AgentResponse {
             messages: new_messages,
@@ -608,6 +1389,11 @@ pub async fn continue_agent_turn(
             final_args = merge_json(final_args, extra.clone());
         }
 
+        if let Some(sink) = &stream_sink {
+            sink(AgentStreamEvent::ToolCall {
+                tool_name: tc.function.name.clone(),
+            });
+        }
         let result = execute_tool(&tc.function.name, &final_args);
 
         let tool_content = match result {
@@ -655,6 +1441,11 @@ pub async fn continue_agent_turn(
             let conn = db.lock().expect("db lock");
             new_messages.push(save_message(&conn, &tool_msg, session_id)?);
         }
+        if let Some(sink) = &stream_sink {
+            sink(AgentStreamEvent::ToolResult {
+                tool_name: tc.function.name.clone(),
+            });
+        }
         llm_messages.push(tool_msg);
     } else {
         // User rejected
@@ -680,12 +1471,24 @@ pub async fn continue_agent_turn(
             let conn = db.lock().expect("db lock");
             new_messages.push(save_message(&conn, &tool_msg, session_id)?);
         }
+        if let Some(sink) = &stream_sink {
+            sink(AgentStreamEvent::ToolResult {
+                tool_name: tc.function.name.clone(),
+            });
+        }
         llm_messages.push(tool_msg);
     }
 
     // Continue loop
-    let rest =
-        run_agent_loop_from_inner(db, session_id, llm_messages, config, execute_tool).await?;
+    let rest = run_agent_loop_from_inner(
+        db,
+        session_id,
+        llm_messages,
+        config,
+        execute_tool,
+        stream_sink,
+    )
+    .await?;
     new_messages.extend(rest.messages);
     Ok(AgentResponse {
         messages: new_messages,
@@ -700,12 +1503,16 @@ async fn run_agent_loop_from_inner(
     mut llm_messages: Vec<LlmMessage>,
     config: &LlmProviderConfig,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
+    stream_sink: Option<AgentStreamSink>,
 ) -> Result<AgentResponse, AgentError> {
     let mut new_messages: Vec<AgentMessageRow> = Vec::new();
     const MAX_ITERATIONS: usize = 5;
 
     for _iteration in 0..MAX_ITERATIONS {
-        let response = send_chat_request(llm_messages.clone(), config).await?;
+        let response = match &stream_sink {
+            Some(sink) => send_chat_request_stream(llm_messages.clone(), config, sink).await?,
+            None => send_chat_request(llm_messages.clone(), config).await?,
+        };
         let choice = response
             .choices
             .into_iter()
@@ -746,6 +1553,11 @@ async fn run_agent_loop_from_inner(
             let mut tool_result_msgs: Vec<LlmMessage> = Vec::new();
             for tc in &tool_calls {
                 let args: serde_json::Value = serde_json::from_str(&tc.function.arguments)?;
+                if let Some(sink) = &stream_sink {
+                    sink(AgentStreamEvent::ToolCall {
+                        tool_name: tc.function.name.clone(),
+                    });
+                }
                 let result = execute_tool(&tc.function.name, &args);
 
                 match result {
@@ -773,6 +1585,11 @@ async fn run_agent_loop_from_inner(
                             let conn = db.lock().expect("db lock");
                             new_messages.push(save_message(&conn, &tool_msg, session_id)?);
                         }
+                        if let Some(sink) = &stream_sink {
+                            sink(AgentStreamEvent::ToolResult {
+                                tool_name: tc.function.name.clone(),
+                            });
+                        }
                         tool_result_msgs.push(tool_msg);
                     }
                     ToolExecResult::ConfirmationRequired {
@@ -780,13 +1597,19 @@ async fn run_agent_loop_from_inner(
                         arguments,
                         message,
                     } => {
+                        let pending_confirmation = PendingConfirmation {
+                            tool_name,
+                            arguments,
+                            message,
+                        };
+                        if let Some(sink) = &stream_sink {
+                            sink(AgentStreamEvent::PendingConfirmation {
+                                pending_confirmation: pending_confirmation.clone(),
+                            });
+                        }
                         return Ok(AgentResponse {
                             messages: new_messages,
-                            pending_confirmation: Some(PendingConfirmation {
-                                tool_name,
-                                arguments,
-                                message,
-                            }),
+                            pending_confirmation: Some(pending_confirmation),
                         });
                     }
                     ToolExecResult::Error { message } => {
@@ -800,6 +1623,11 @@ async fn run_agent_loop_from_inner(
                         {
                             let conn = db.lock().expect("db lock");
                             new_messages.push(save_message(&conn, &tool_msg, session_id)?);
+                        }
+                        if let Some(sink) = &stream_sink {
+                            sink(AgentStreamEvent::ToolResult {
+                                tool_name: tc.function.name.clone(),
+                            });
                         }
                         tool_result_msgs.push(tool_msg);
                     }
@@ -853,10 +1681,12 @@ fn get_recent_messages(
                 content: row.get(3)?,
                 tool_call_json: row.get(4)?,
                 created_at: row.get(5)?,
+                attachments: Vec::new(),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
     msgs.reverse();
+    attach_attachments(conn, &mut msgs)?;
     Ok(msgs)
 }
 

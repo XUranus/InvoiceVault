@@ -1,11 +1,13 @@
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
+    process::Command,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
+use chrono::{Datelike, Local};
 use tracing::{error, info, warn};
 
 use rusqlite::{Connection, OptionalExtension};
@@ -14,8 +16,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     agent::{
-        self, AgentError, AgentMessageRow, AgentResponse, AgentSession, ConfirmRequest,
-        ToolExecResult,
+        self, AgentArtifact, AgentAttachment, AgentError, AgentMessageRow, AgentResponse,
+        AgentSession, AgentTask, ConfirmRequest, ToolExecResult,
     },
     chroma::{self, ChromaConfig, ChromaError},
     dedupe::{
@@ -31,7 +33,11 @@ use crate::{
         EmbeddingError, EmbeddingTestResult,
     },
     event::{self, EventError, EventListResult, NotificationRow},
-    exporter::{export_invoices, ExportError, ExportInvoicesRequest, ExportResult},
+    exporter::{
+        export_column_catalog, export_invoices, preview_export,
+        resolve_export_column_keys_from_labels, ExportError, ExportInvoicesRequest,
+        ExportPreviewRequest, ExportResult,
+    },
     extractor::invoice_to_embedding_text,
     extractor::{
         batch_delete_invoices, batch_update_invoices, get_dashboard_stats, get_invoice_detail,
@@ -80,6 +86,8 @@ pub enum AppError {
     Agent(#[from] AgentError),
     #[error("event error: {0}")]
     Event(#[from] EventError),
+    #[error("{0}")]
+    InvalidOperation(String),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,6 +97,7 @@ pub struct AppPaths {
     pub raw_dir: PathBuf,
     pub thumbnails_dir: PathBuf,
     pub logs_dir: PathBuf,
+    pub agent_uploads_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +133,28 @@ pub struct CleanupStorageResult {
     pub files_removed: usize,
     pub db_records_removed: usize,
     pub bytes_freed: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpreadsheetInspection {
+    pub attachment_id: i64,
+    pub file_name: String,
+    pub file_type: String,
+    pub sheets: Vec<SpreadsheetSheet>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpreadsheetSheet {
+    pub name: String,
+    pub header_row: usize,
+    pub columns: Vec<SpreadsheetColumn>,
+    pub sample_rows: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpreadsheetColumn {
+    pub index: usize,
+    pub label: String,
 }
 
 pub fn import_failure_message(error: &str) -> String {
@@ -1222,6 +1253,127 @@ impl AppState {
         Ok(invoice_id)
     }
 
+    pub fn attach_agent_file(
+        &self,
+        session_id: i64,
+        source_path: &str,
+    ) -> Result<AgentAttachment, AppError> {
+        let source = Path::new(source_path);
+        let original_name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("attachment")
+            .to_owned();
+        let extension = source
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !matches!(extension.as_str(), "xlsx" | "csv") {
+            return Err(AppError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "目前 Agent 仅支持上传 xlsx/csv 表格",
+            )));
+        }
+
+        let session_dir = self.paths.agent_uploads_dir.join(session_id.to_string());
+        fs::create_dir_all(&session_dir)?;
+        let stored_name = format!(
+            "{}-{}",
+            chrono::Utc::now().timestamp_millis(),
+            sanitize_filename(&original_name)
+        );
+        let dest = session_dir.join(stored_name);
+        fs::copy(source, &dest)?;
+        let metadata = fs::metadata(&dest)?;
+        let mime = mime_guess::from_path(&dest)
+            .first_raw()
+            .map(|value| value.to_owned());
+
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(agent::insert_attachment(
+            &db,
+            session_id,
+            &original_name,
+            mime.as_deref(),
+            metadata.len() as i64,
+            &display_path(&dest),
+        )?)
+    }
+
+    pub fn list_agent_attachments(
+        &self,
+        session_id: i64,
+    ) -> Result<Vec<AgentAttachment>, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(agent::list_session_attachments(&db, session_id)?)
+    }
+
+    pub fn list_agent_tasks(&self, session_id: i64) -> Result<Vec<AgentTask>, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(agent::list_session_tasks(&db, session_id)?)
+    }
+
+    pub fn list_agent_artifacts(&self, session_id: i64) -> Result<Vec<AgentArtifact>, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(agent::list_session_artifacts(&db, session_id)?)
+    }
+
+    pub fn open_agent_artifact_file(
+        &self,
+        session_id: i64,
+        artifact_id: i64,
+    ) -> Result<(), AppError> {
+        let path = self.agent_artifact_path(session_id, artifact_id)?;
+        if !path.exists() {
+            return Err(AppError::InvalidOperation(format!(
+                "产物文件不存在：{}",
+                path.display()
+            )));
+        }
+        open_path_with_system(&path)
+    }
+
+    pub fn open_agent_artifact_folder(
+        &self,
+        session_id: i64,
+        artifact_id: i64,
+    ) -> Result<(), AppError> {
+        let path = self.agent_artifact_path(session_id, artifact_id)?;
+        let folder = if path.is_dir() {
+            path
+        } else {
+            path.parent()
+                .map(Path::to_path_buf)
+                .ok_or_else(|| AppError::InvalidOperation("产物路径没有父目录".to_owned()))?
+        };
+        if !folder.exists() {
+            return Err(AppError::InvalidOperation(format!(
+                "产物目录不存在：{}",
+                folder.display()
+            )));
+        }
+        open_path_with_system(&folder)
+    }
+
+    pub fn delete_agent_artifact(&self, session_id: i64, artifact_id: i64) -> Result<(), AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        agent::delete_artifact(&db, session_id, artifact_id)?;
+        Ok(())
+    }
+
+    fn agent_artifact_path(&self, session_id: i64, artifact_id: i64) -> Result<PathBuf, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        let artifact = agent::get_artifact(&db, artifact_id)?;
+        if artifact.session_id != session_id {
+            return Err(AppError::InvalidOperation("产物不属于当前会话".to_owned()));
+        }
+        let path = artifact
+            .file_path
+            .ok_or_else(|| AppError::InvalidOperation("产物没有可打开的文件路径".to_owned()))?;
+        Ok(PathBuf::from(path))
+    }
+
     pub fn delete_agent_session(&self, session_id: i64) -> Result<(), AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(agent::delete_session(&db, session_id)?)
@@ -1231,13 +1383,78 @@ impl AppState {
         &self,
         session_id: i64,
         content: &str,
+        attachment_ids: Vec<i64>,
         config: &crate::llm::LlmProviderConfig,
     ) -> Result<AgentResponse, AppError> {
+        let attachment_context = self.agent_attachment_context(session_id, &attachment_ids)?;
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
             Arc::clone(&self.db),
+            session_id,
         ));
-        Ok(agent::run_agent_turn(&self.db, session_id, content, config, executor).await?)
+        Ok(agent::run_agent_turn(
+            &self.db,
+            session_id,
+            content,
+            attachment_ids,
+            attachment_context,
+            config,
+            executor,
+        )
+        .await?)
+    }
+
+    pub async fn send_agent_message_stream(
+        &self,
+        session_id: i64,
+        content: &str,
+        attachment_ids: Vec<i64>,
+        config: &crate::llm::LlmProviderConfig,
+        stream_sink: agent::AgentStreamSink,
+    ) -> Result<AgentResponse, AppError> {
+        let attachment_context = self.agent_attachment_context(session_id, &attachment_ids)?;
+        let executor = Arc::new(make_tool_executor(
+            self.paths.thumbnails_dir.clone(),
+            Arc::clone(&self.db),
+            session_id,
+        ));
+        Ok(agent::run_agent_turn_stream(
+            &self.db,
+            session_id,
+            content,
+            attachment_ids,
+            attachment_context,
+            config,
+            executor,
+            stream_sink,
+        )
+        .await?)
+    }
+
+    fn agent_attachment_context(
+        &self,
+        session_id: i64,
+        attachment_ids: &[i64],
+    ) -> Result<Option<String>, AppError> {
+        if attachment_ids.is_empty() {
+            return Ok(None);
+        }
+        let db = self.db.lock().expect("database mutex poisoned");
+        let mut lines = vec!["用户本次消息附带了以下文件，可使用 list_message_attachments 和 inspect_spreadsheet 工具读取：".to_owned()];
+        for id in attachment_ids {
+            let attachment = agent::get_attachment(&db, *id)?;
+            if attachment.session_id != session_id {
+                continue;
+            }
+            lines.push(format!(
+                "- attachment_id={} name={} mime={} size={} bytes",
+                attachment.id,
+                attachment.original_name,
+                attachment.mime_type.as_deref().unwrap_or("unknown"),
+                attachment.byte_size
+            ));
+        }
+        Ok(Some(lines.join("\n")))
     }
 
     pub async fn confirm_agent_action(
@@ -1248,6 +1465,7 @@ impl AppState {
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
             Arc::clone(&self.db),
+            request.session_id,
         ));
         Ok(agent::continue_agent_turn(
             &self.db,
@@ -1259,11 +1477,35 @@ impl AppState {
         )
         .await?)
     }
+
+    pub async fn confirm_agent_action_stream(
+        &self,
+        request: ConfirmRequest,
+        config: &crate::llm::LlmProviderConfig,
+        stream_sink: agent::AgentStreamSink,
+    ) -> Result<AgentResponse, AppError> {
+        let executor = Arc::new(make_tool_executor(
+            self.paths.thumbnails_dir.clone(),
+            Arc::clone(&self.db),
+            request.session_id,
+        ));
+        Ok(agent::continue_agent_turn_stream(
+            &self.db,
+            request.session_id,
+            request.confirmed,
+            request.extra_params,
+            config,
+            executor,
+            stream_sink,
+        )
+        .await?)
+    }
 }
 
 fn make_tool_executor(
     thumbnails_dir: std::path::PathBuf,
     db: Arc<Mutex<Connection>>,
+    session_id: i64,
 ) -> impl Fn(&str, &serde_json::Value) -> ToolExecResult {
     move |tool_name: &str, args: &serde_json::Value| match tool_name {
         "search_invoices" => {
@@ -1295,13 +1537,34 @@ fn make_tool_executor(
                     .map(String::from),
                 page: args.get("page").and_then(|v| v.as_i64()),
                 page_size: args.get("page_size").and_then(|v| v.as_i64()),
-                buyer_name: None,
-                invoice_number: None,
-                amount_min: None,
-                amount_max: None,
-                duplicate_status: None,
-                sort_by: None,
-                sort_order: None,
+                buyer_name: args
+                    .get("buyer_name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                invoice_number: args
+                    .get("invoice_number")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                amount_min: args
+                    .get("amount_min")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                amount_max: args
+                    .get("amount_max")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                duplicate_status: args
+                    .get("duplicate_status")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                sort_by: args
+                    .get("sort_by")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                sort_order: args
+                    .get("sort_order")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
             };
             let conn = db.lock().expect("db lock");
             match search_invoices(&conn, params) {
@@ -1352,6 +1615,227 @@ fn make_tool_executor(
                 },
             }
         }
+        "get_current_date_context" => {
+            let now = Local::now().date_naive();
+            let month_start = now.with_day(1).unwrap_or(now);
+            let next_month = if now.month() == 12 {
+                chrono::NaiveDate::from_ymd_opt(now.year() + 1, 1, 1).unwrap_or(month_start)
+            } else {
+                chrono::NaiveDate::from_ymd_opt(now.year(), now.month() + 1, 1)
+                    .unwrap_or(month_start)
+            };
+            let month_end = next_month.pred_opt().unwrap_or(now);
+            let content = serde_json::json!({
+                "today": now.to_string(),
+                "current_month": {
+                    "date_from": month_start.to_string(),
+                    "date_to": month_end.to_string()
+                },
+                "year": now.year(),
+                "month": now.month()
+            })
+            .to_string();
+            ToolExecResult::Success { content }
+        }
+        "get_invoice_field_catalog" => {
+            let content = serde_json::to_string(&export_column_catalog()).unwrap_or_default();
+            ToolExecResult::Success { content }
+        }
+        "list_message_attachments" => {
+            let conn = db.lock().expect("db lock");
+            match agent::list_session_attachments(&conn, session_id) {
+                Ok(attachments) => {
+                    let content = serde_json::to_string(&attachments).unwrap_or_default();
+                    ToolExecResult::Success { content }
+                }
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "inspect_spreadsheet" => {
+            let Some(attachment_id) = args.get("attachment_id").and_then(|v| v.as_i64()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 attachment_id 参数".to_owned(),
+                };
+            };
+            let max_rows = args
+                .get("max_rows")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5)
+                .clamp(1, 20) as usize;
+            let conn = db.lock().expect("db lock");
+            let attachment = match agent::get_attachment(&conn, attachment_id) {
+                Ok(attachment) if attachment.session_id == session_id => attachment,
+                Ok(_) => {
+                    return ToolExecResult::Error {
+                        message: "附件不属于当前会话".to_owned(),
+                    }
+                }
+                Err(e) => {
+                    return ToolExecResult::Error {
+                        message: e.to_string(),
+                    }
+                }
+            };
+            drop(conn);
+            match inspect_spreadsheet_attachment(&attachment, max_rows) {
+                Ok(result) => {
+                    let content = serde_json::to_string(&result).unwrap_or_default();
+                    ToolExecResult::Success { content }
+                }
+                Err(e) => ToolExecResult::Error { message: e },
+            }
+        }
+        "create_export_preview" => {
+            let request = export_preview_request_from_args(args);
+            let conn = db.lock().expect("db lock");
+            match preview_export(&conn, request) {
+                Ok(preview) => {
+                    let content = serde_json::to_string(&preview).unwrap_or_default();
+                    ToolExecResult::Success { content }
+                }
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "export_invoices_with_template" => {
+            let Some(attachment_id) = args.get("attachment_id").and_then(|v| v.as_i64()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 attachment_id 参数".to_owned(),
+                };
+            };
+            let conn = db.lock().expect("db lock");
+            let attachment = match agent::get_attachment(&conn, attachment_id) {
+                Ok(attachment) if attachment.session_id == session_id => attachment,
+                Ok(_) => {
+                    return ToolExecResult::Error {
+                        message: "附件不属于当前会话".to_owned(),
+                    }
+                }
+                Err(e) => {
+                    return ToolExecResult::Error {
+                        message: e.to_string(),
+                    }
+                }
+            };
+            drop(conn);
+
+            let columns = match export_columns_from_template(&attachment) {
+                Ok(columns) if !columns.is_empty() => columns,
+                Ok(_) => {
+                    return ToolExecResult::Error {
+                        message: "模板表头未匹配到可导出的发票字段".to_owned(),
+                    }
+                }
+                Err(e) => return ToolExecResult::Error { message: e },
+            };
+
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                let format = args
+                    .get("format")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("xlsx");
+                let preview_request = ExportPreviewRequest {
+                    columns: Some(columns.clone()),
+                    ..export_preview_request_from_args(args)
+                };
+                let conn = db.lock().expect("db lock");
+                let preview = preview_export(&conn, preview_request).ok();
+                let row_count = preview.as_ref().map(|p| p.row_count).unwrap_or(0);
+                let column_desc = columns.join(", ");
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "export_invoices_with_template".to_owned(),
+                    arguments: args.clone(),
+                    message: format!(
+                        "将按模板 {} 的表头导出 {row_count} 张发票为 {format} 格式，字段: {column_desc}。请选择保存位置。",
+                        attachment.original_name
+                    ),
+                };
+            }
+
+            let Some(output_path) = args.get("output_path").and_then(|v| v.as_str()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 output_path 参数".to_owned(),
+                };
+            };
+            let format = args
+                .get("format")
+                .and_then(|v| v.as_str())
+                .unwrap_or("xlsx")
+                .to_owned();
+            let request = ExportInvoicesRequest {
+                format,
+                output_path: output_path.to_owned(),
+                invoice_ids: json_i64_vec(args, "invoice_ids"),
+                columns: Some(columns),
+                date_from: json_string(args, "date_from"),
+                date_to: json_string(args, "date_to"),
+            };
+            let conn = db.lock().expect("db lock");
+            let input_json = serde_json::to_string(args).unwrap_or_default();
+            let task = match agent::create_task(
+                &conn,
+                session_id,
+                "export_invoices_with_template",
+                Some(&input_json),
+            ) {
+                Ok(task) => Some(task),
+                Err(e) => {
+                    warn!("Failed to create agent export task: {e}");
+                    None
+                }
+            };
+            match export_invoices(&conn, request) {
+                Ok(result) => {
+                    let artifact = record_export_artifact(
+                        &conn,
+                        session_id,
+                        task.as_ref().map(|task| task.id),
+                        "模板导出结果",
+                        &result,
+                    )
+                    .ok();
+                    let completed_task = task.as_ref().and_then(|task| {
+                        let result_json = serde_json::to_string(&result).ok();
+                        agent::complete_task(
+                            &conn,
+                            task.id,
+                            "completed",
+                            result_json.as_deref(),
+                            None,
+                        )
+                        .ok()
+                    });
+                    let content = serde_json::json!({
+                        "export": result,
+                        "artifact": artifact,
+                        "task": completed_task
+                    })
+                    .to_string();
+                    ToolExecResult::Success { content }
+                }
+                Err(e) => {
+                    if let Some(task) = task {
+                        let _ = agent::complete_task(
+                            &conn,
+                            task.id,
+                            "failed",
+                            None,
+                            Some(&e.to_string()),
+                        );
+                    }
+                    ToolExecResult::Error {
+                        message: e.to_string(),
+                    }
+                }
+            }
+        }
         "export_invoices" => {
             let is_confirmed = args
                 .get("_confirmed")
@@ -1364,11 +1848,39 @@ fn make_tool_executor(
                     .and_then(|v| v.as_array())
                     .map(|a| a.len())
                     .unwrap_or(0);
-                let desc = if count_hint > 0 {
-                    format!("将导出 {count_hint} 张发票为 {format} 格式，请选择保存位置。")
+                let scope = if count_hint > 0 {
+                    format!("{count_hint} 张发票")
                 } else {
-                    format!("将导出所有发票为 {format} 格式，请选择保存位置。")
+                    "匹配条件的发票".to_owned()
                 };
+                let column_desc = args
+                    .get("columns")
+                    .and_then(|v| v.as_array())
+                    .map(|columns| {
+                        let names = columns
+                            .iter()
+                            .filter_map(|value| value.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        if names.is_empty() {
+                            "全部默认列".to_owned()
+                        } else {
+                            format!("列: {names}")
+                        }
+                    })
+                    .unwrap_or_else(|| "全部默认列".to_owned());
+                let date_desc = match (
+                    args.get("date_from").and_then(|v| v.as_str()),
+                    args.get("date_to").and_then(|v| v.as_str()),
+                ) {
+                    (Some(from), Some(to)) => format!("，日期 {from} 至 {to}"),
+                    (Some(from), None) => format!("，日期从 {from} 起"),
+                    (None, Some(to)) => format!("，日期截至 {to}"),
+                    _ => String::new(),
+                };
+                let desc = format!(
+                    "将导出{scope}为 {format} 格式，{column_desc}{date_desc}。请选择保存位置。"
+                );
                 return ToolExecResult::ConfirmationRequired {
                     tool_name: "export_invoices".to_owned(),
                     arguments: args.clone(),
@@ -1389,15 +1901,31 @@ fn make_tool_executor(
                 .get("invoice_ids")
                 .and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|v| v.as_i64()).collect());
+            let columns: Option<Vec<String>> = json_string_vec(args, "columns");
             let request = ExportInvoicesRequest {
                 format,
                 output_path: output_path.to_owned(),
                 invoice_ids,
-                columns: None,
-                date_from: None,
-                date_to: None,
+                columns,
+                date_from: args
+                    .get("date_from")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                date_to: args
+                    .get("date_to")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
             };
             let conn = db.lock().expect("db lock");
+            let input_json = serde_json::to_string(args).unwrap_or_default();
+            let task =
+                match agent::create_task(&conn, session_id, "export_invoices", Some(&input_json)) {
+                    Ok(task) => Some(task),
+                    Err(e) => {
+                        warn!("Failed to create agent export task: {e}");
+                        None
+                    }
+                };
             match export_invoices(&conn, request) {
                 Ok(result) => {
                     let count = result.row_count;
@@ -1410,12 +1938,47 @@ fn make_tool_executor(
                         None,
                         None,
                     );
-                    let content = serde_json::to_string(&result).unwrap_or_default();
+                    let artifact = record_export_artifact(
+                        &conn,
+                        session_id,
+                        task.as_ref().map(|task| task.id),
+                        "发票导出结果",
+                        &result,
+                    )
+                    .ok();
+                    let completed_task = task.as_ref().and_then(|task| {
+                        let result_json = serde_json::to_string(&result).ok();
+                        agent::complete_task(
+                            &conn,
+                            task.id,
+                            "completed",
+                            result_json.as_deref(),
+                            None,
+                        )
+                        .ok()
+                    });
+                    let content = serde_json::json!({
+                        "export": result,
+                        "artifact": artifact,
+                        "task": completed_task
+                    })
+                    .to_string();
                     ToolExecResult::Success { content }
                 }
-                Err(e) => ToolExecResult::Error {
-                    message: e.to_string(),
-                },
+                Err(e) => {
+                    if let Some(task) = task {
+                        let _ = agent::complete_task(
+                            &conn,
+                            task.id,
+                            "failed",
+                            None,
+                            Some(&e.to_string()),
+                        );
+                    }
+                    ToolExecResult::Error {
+                        message: e.to_string(),
+                    }
+                }
             }
         }
         "update_invoice" => {
@@ -1469,13 +2032,304 @@ fn make_tool_executor(
     }
 }
 
+fn export_preview_request_from_args(args: &serde_json::Value) -> ExportPreviewRequest {
+    ExportPreviewRequest {
+        invoice_ids: json_i64_vec(args, "invoice_ids"),
+        columns: json_string_vec(args, "columns"),
+        date_from: json_string(args, "date_from"),
+        date_to: json_string(args, "date_to"),
+        limit: args
+            .get("limit")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize),
+    }
+}
+
+fn record_export_artifact(
+    conn: &Connection,
+    session_id: i64,
+    task_id: Option<i64>,
+    title: &str,
+    result: &ExportResult,
+) -> Result<AgentArtifact, AgentError> {
+    let mime_type = match result.format.as_str() {
+        "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        "csv" => Some("text/csv"),
+        _ => None,
+    };
+    let metadata = serde_json::to_string(&serde_json::json!({
+        "row_count": result.row_count,
+        "format": result.format,
+        "columns": result.columns,
+    }))
+    .ok();
+    agent::insert_artifact(
+        conn,
+        session_id,
+        task_id,
+        "export",
+        title,
+        Some(&result.file_path),
+        mime_type,
+        Some(result.byte_size as i64),
+        metadata.as_deref(),
+    )
+}
+
+fn export_columns_from_template(attachment: &AgentAttachment) -> Result<Vec<String>, String> {
+    let inspection = inspect_spreadsheet_attachment(attachment, 3)?;
+    let labels = inspection
+        .sheets
+        .first()
+        .map(|sheet| {
+            sheet
+                .columns
+                .iter()
+                .map(|column| column.label.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(resolve_export_column_keys_from_labels(&labels))
+}
+
+fn json_i64_vec(args: &serde_json::Value, key: &str) -> Option<Vec<i64>> {
+    args.get(key)
+        .and_then(|value| value.as_array())
+        .map(|items| items.iter().filter_map(|value| value.as_i64()).collect())
+}
+
+fn json_string_vec(args: &serde_json::Value, key: &str) -> Option<Vec<String>> {
+    args.get(key)
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|value| value.as_str().map(|item| item.to_owned()))
+                .collect()
+        })
+}
+
+fn json_string(args: &serde_json::Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(|value| value.as_str())
+        .map(String::from)
+}
+
+fn inspect_spreadsheet_attachment(
+    attachment: &AgentAttachment,
+    max_rows: usize,
+) -> Result<SpreadsheetInspection, String> {
+    let path = Path::new(&attachment.storage_path);
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let sheet = match extension.as_str() {
+        "csv" => inspect_csv(path, max_rows)?,
+        "xlsx" => inspect_xlsx(path, max_rows)?,
+        _ => return Err("目前仅支持检查 csv/xlsx 表格".to_owned()),
+    };
+
+    Ok(SpreadsheetInspection {
+        attachment_id: attachment.id,
+        file_name: attachment.original_name.clone(),
+        file_type: extension,
+        sheets: vec![sheet],
+    })
+}
+
+fn inspect_csv(path: &Path, max_rows: usize) -> Result<SpreadsheetSheet, String> {
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_path(path)
+        .map_err(|e| e.to_string())?;
+    let mut rows = Vec::new();
+    for record in reader.records().take(max_rows + 1) {
+        let record = record.map_err(|e| e.to_string())?;
+        rows.push(
+            record
+                .iter()
+                .map(|cell| cell.trim().to_owned())
+                .collect::<Vec<_>>(),
+        );
+    }
+    Ok(sheet_from_rows("CSV", rows, max_rows))
+}
+
+fn inspect_xlsx(path: &Path, max_rows: usize) -> Result<SpreadsheetSheet, String> {
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let shared_strings = read_xlsx_shared_strings(&mut archive).unwrap_or_default();
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .map_err(|_| "未找到第一个工作表".to_owned())?
+        .read_to_string(&mut sheet_xml)
+        .map_err(|e| e.to_string())?;
+    let rows = parse_xlsx_sheet_rows(&sheet_xml, &shared_strings, max_rows + 1);
+    Ok(sheet_from_rows("Sheet1", rows, max_rows))
+}
+
+fn read_xlsx_shared_strings<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<Vec<String>, String> {
+    let mut xml = String::new();
+    archive
+        .by_name("xl/sharedStrings.xml")
+        .map_err(|e| e.to_string())?
+        .read_to_string(&mut xml)
+        .map_err(|e| e.to_string())?;
+    let mut values = Vec::new();
+    for item in xml.split("<si").skip(1) {
+        let segment = item.split("</si>").next().unwrap_or("");
+        let mut text = String::new();
+        for part in segment.split("<t").skip(1) {
+            if let Some(after) = part.split('>').nth(1) {
+                if let Some(value) = after.split("</t>").next() {
+                    text.push_str(&xml_unescape(value));
+                }
+            }
+        }
+        values.push(text);
+    }
+    Ok(values)
+}
+
+fn parse_xlsx_sheet_rows(
+    xml: &str,
+    shared_strings: &[String],
+    max_rows: usize,
+) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    for row_xml in xml.split("<row").skip(1).take(max_rows) {
+        let segment = row_xml.split("</row>").next().unwrap_or("");
+        let mut cells: Vec<(usize, String)> = Vec::new();
+        for cell_xml in segment.split("<c").skip(1) {
+            let cell_segment = cell_xml.split("</c>").next().unwrap_or("");
+            let col = cell_reference_to_index(cell_segment).unwrap_or(cells.len());
+            let is_shared = cell_segment.contains(" t=\"s\"") || cell_segment.contains(" t='s'");
+            let is_inline = cell_segment.contains(" t=\"inlineStr\"")
+                || cell_segment.contains(" t='inlineStr'");
+            let value = if is_inline {
+                extract_between(cell_segment, "<t", "</t>")
+                    .and_then(|raw| raw.split('>').nth(1).map(xml_unescape))
+                    .unwrap_or_default()
+            } else {
+                let raw = extract_between(cell_segment, "<v>", "</v>").unwrap_or_default();
+                if is_shared {
+                    raw.parse::<usize>()
+                        .ok()
+                        .and_then(|idx| shared_strings.get(idx).cloned())
+                        .unwrap_or_default()
+                } else {
+                    xml_unescape(&raw)
+                }
+            };
+            cells.push((col, value));
+        }
+        let width = cells
+            .iter()
+            .map(|(idx, _)| *idx)
+            .max()
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        let mut row = vec![String::new(); width];
+        for (idx, value) in cells {
+            if idx < row.len() {
+                row[idx] = value;
+            }
+        }
+        if row.iter().any(|cell| !cell.trim().is_empty()) {
+            rows.push(row);
+        }
+    }
+    rows
+}
+
+fn sheet_from_rows(name: &str, rows: Vec<Vec<String>>, max_rows: usize) -> SpreadsheetSheet {
+    let header_index = rows
+        .iter()
+        .position(|row| row.iter().any(|cell| !cell.trim().is_empty()))
+        .unwrap_or(0);
+    let header = rows.get(header_index).cloned().unwrap_or_default();
+    let columns = header
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, label)| {
+            let label = label.trim();
+            (!label.is_empty()).then(|| SpreadsheetColumn {
+                index: idx + 1,
+                label: label.to_owned(),
+            })
+        })
+        .collect();
+    let sample_rows = rows
+        .into_iter()
+        .skip(header_index + 1)
+        .take(max_rows)
+        .collect();
+    SpreadsheetSheet {
+        name: name.to_owned(),
+        header_row: header_index + 1,
+        columns,
+        sample_rows,
+    }
+}
+
+fn cell_reference_to_index(cell_segment: &str) -> Option<usize> {
+    let reference = cell_segment
+        .split(" r=\"")
+        .nth(1)
+        .and_then(|part| part.split('"').next())
+        .or_else(|| {
+            cell_segment
+                .split(" r='")
+                .nth(1)
+                .and_then(|part| part.split('\'').next())
+        })?;
+    let mut value = 0usize;
+    let mut found = false;
+    for ch in reference.chars().take_while(|ch| ch.is_ascii_alphabetic()) {
+        found = true;
+        value = value * 26 + (ch.to_ascii_uppercase() as usize - 'A' as usize + 1);
+    }
+    found.then(|| value.saturating_sub(1))
+}
+
+fn extract_between(value: &str, start: &str, end: &str) -> Option<String> {
+    let after = value.split(start).nth(1)?;
+    Some(after.split(end).next()?.to_owned())
+}
+
+fn xml_unescape(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+fn sanitize_filename(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => ch,
+        })
+        .collect()
+}
+
 fn create_app_paths(app_data_dir: &Path) -> Result<AppPaths, AppError> {
     let raw_dir = app_data_dir.join("raw");
     let thumbnails_dir = app_data_dir.join("thumbnails");
     let logs_dir = app_data_dir.join("logs");
+    let agent_uploads_dir = app_data_dir.join("agent_uploads");
     fs::create_dir_all(&raw_dir)?;
     fs::create_dir_all(&thumbnails_dir)?;
     fs::create_dir_all(&logs_dir)?;
+    fs::create_dir_all(&agent_uploads_dir)?;
 
     Ok(AppPaths {
         app_data_dir: app_data_dir.to_path_buf(),
@@ -1483,11 +2337,38 @@ fn create_app_paths(app_data_dir: &Path) -> Result<AppPaths, AppError> {
         raw_dir,
         thumbnails_dir,
         logs_dir,
+        agent_uploads_dir,
     })
 }
 
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn open_path_with_system(path: &Path) -> Result<(), AppError> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("explorer");
+        command.arg(path);
+        command
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(path);
+        command
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+
+    command.spawn()?;
+    Ok(())
 }
 
 fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {

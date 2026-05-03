@@ -27,6 +27,9 @@ import type {
   EmbeddingTestResult,
   SimilarResult,
   AgentSession,
+  AgentAttachment,
+  AgentArtifact,
+  AgentTask,
   AgentMessage,
   AgentResponse,
   EventListResult,
@@ -253,8 +256,76 @@ export async function sendAgentMessage(
   sessionId: number,
   content: string,
   config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+  attachmentIds: number[] = [],
 ): Promise<AgentResponse> {
-  return invoke<AgentResponse>("send_agent_message", { sessionId, content, config });
+  return invoke<AgentResponse>("send_agent_message", {
+    sessionId,
+    content,
+    config,
+    attachmentIds,
+  });
+}
+
+export async function sendAgentMessageStream(
+  streamId: string,
+  sessionId: number,
+  content: string,
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+  attachmentIds: number[] = [],
+): Promise<AgentResponse> {
+  return invoke<AgentResponse>("send_agent_message_stream", {
+    streamId,
+    sessionId,
+    content,
+    config,
+    attachmentIds,
+  });
+}
+
+export async function attachAgentFile(
+  sessionId: number,
+  path: string,
+): Promise<AgentAttachment> {
+  return invoke<AgentAttachment>("attach_agent_file", { sessionId, path });
+}
+
+export async function listAgentAttachments(
+  sessionId: number,
+): Promise<AgentAttachment[]> {
+  return invoke<AgentAttachment[]>("list_agent_attachments", { sessionId });
+}
+
+export async function listAgentTasks(
+  sessionId: number,
+): Promise<AgentTask[]> {
+  return invoke<AgentTask[]>("list_agent_tasks", { sessionId });
+}
+
+export async function listAgentArtifacts(
+  sessionId: number,
+): Promise<AgentArtifact[]> {
+  return invoke<AgentArtifact[]>("list_agent_artifacts", { sessionId });
+}
+
+export async function openAgentArtifactFile(
+  sessionId: number,
+  artifactId: number,
+): Promise<void> {
+  return invoke<void>("open_agent_artifact_file", { sessionId, artifactId });
+}
+
+export async function openAgentArtifactFolder(
+  sessionId: number,
+  artifactId: number,
+): Promise<void> {
+  return invoke<void>("open_agent_artifact_folder", { sessionId, artifactId });
+}
+
+export async function deleteAgentArtifact(
+  sessionId: number,
+  artifactId: number,
+): Promise<void> {
+  return invoke<void>("delete_agent_artifact", { sessionId, artifactId });
 }
 
 export async function confirmAgentAction(
@@ -264,6 +335,20 @@ export async function confirmAgentAction(
   config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
 ): Promise<AgentResponse> {
   return invoke<AgentResponse>("confirm_agent_action", {
+    request: { session_id: sessionId, confirmed, extra_params: extraParams },
+    config,
+  });
+}
+
+export async function confirmAgentActionStream(
+  streamId: string,
+  sessionId: number,
+  confirmed: boolean,
+  extraParams: Record<string, unknown> | null,
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+): Promise<AgentResponse> {
+  return invoke<AgentResponse>("confirm_agent_action_stream", {
+    streamId,
     request: { session_id: sessionId, confirmed, extra_params: extraParams },
     config,
   });
