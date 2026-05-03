@@ -7,13 +7,10 @@ import type {
 import { getDashboardStats, getRecognitionQueueStatus, listImportJobs } from "../api";
 import { importStatusMeta, toneClass } from "../status";
 import { DashboardStats } from "./DashboardStats";
+import { useAppStore } from "../stores/appStore";
+import { useRefreshStore } from "../stores/refreshStore";
 
 type DateRange = "all" | "this_month" | "last_month" | "last_3m" | "custom";
-
-type Props = {
-  error: string | null;
-  refreshKey: number;
-};
 
 function dateRangeToParams(
   range: DateRange,
@@ -70,7 +67,9 @@ function queueTotal(queueStatus: RecognitionQueueStatus | null): number {
   return queueStatus ? queueStatus.pending + queueStatus.running : 0;
 }
 
-export function DashboardPage({ error, refreshKey }: Props) {
+export function DashboardPage() {
+  const error = useAppStore((s) => s.error);
+  const refreshKey = useRefreshStore((s) => s.dashboardKey);
   const [stats, setStats] = React.useState<DashboardStatsType | null>(null);
   const [statsError, setStatsError] = React.useState<string | null>(null);
   const [queueStatus, setQueueStatus] = React.useState<RecognitionQueueStatus | null>(null);
@@ -284,3 +283,5 @@ export function DashboardPage({ error, refreshKey }: Props) {
     </div>
   );
 }
+
+export default DashboardPage;

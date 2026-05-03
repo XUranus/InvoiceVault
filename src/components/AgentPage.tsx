@@ -22,13 +22,8 @@ import {
 } from "../api";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-
-type Props = {
-  llmBaseUrl: string;
-  llmModel: string;
-  llmApiKey: string;
-  onError: (error: string) => void;
-};
+import { useAppStore } from "../stores/appStore";
+import { useLlmStore } from "../stores/llmStore";
 
 const EXAMPLE_QUESTIONS = [
   "本月发票总金额是多少？",
@@ -44,7 +39,9 @@ type StreamUiState = {
   toolName: string | null;
 };
 
-export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
+export function AgentPage() {
+  const { llmBaseUrl, llmModel, llmApiKey } = useLlmStore();
+  const setError = useAppStore((s) => s.setError);
   const [sessions, setSessions] = React.useState<AgentSession[]>([]);
   const [activeSessionId, setActiveSessionId] = React.useState<number | null>(null);
   const [messages, setMessages] = React.useState<AgentMessage[]>([]);
@@ -82,7 +79,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
   React.useEffect(() => {
     listAgentSessions()
       .then(setSessions)
-      .catch((err) => onError(String(err)));
+      .catch((err) => setError(String(err)));
   }, []);
 
   React.useEffect(() => {
@@ -123,12 +120,12 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       .then((cleanup) => {
         unlisten = cleanup;
       })
-      .catch((err) => onError(String(err)));
+      .catch((err) => setError(String(err)));
 
     return () => {
       unlisten?.();
     };
-  }, [onError]);
+  }, [setError]);
 
   const refreshArtifacts = React.useCallback(async (sessionId: number) => {
     try {
@@ -163,7 +160,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
         setArtifacts(artifacts);
         setPendingConfirm(null);
       })
-      .catch((err) => onError(String(err)));
+      .catch((err) => setError(String(err)));
   }, [activeSessionId, refreshArtifacts]);
 
   React.useEffect(() => {
@@ -187,7 +184,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       }
     } catch (err) {
       if (!fallbackCopyText(value)) {
-        onError(`复制失败：${String(err)}`);
+        setError(`复制失败：${String(err)}`);
       }
     }
   };
@@ -197,7 +194,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
     try {
       await openAgentArtifactFile(activeSessionId, artifactId);
     } catch (err) {
-      onError(`打开产物失败：${String(err)}`);
+      setError(`打开产物失败：${String(err)}`);
     }
   };
 
@@ -206,7 +203,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
     try {
       await openAgentArtifactFolder(activeSessionId, artifactId);
     } catch (err) {
-      onError(`打开产物目录失败：${String(err)}`);
+      setError(`打开产物目录失败：${String(err)}`);
     }
   };
 
@@ -218,7 +215,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       await deleteAgentArtifact(activeSessionId, artifactId);
       setArtifacts((prev) => prev.filter((artifact) => artifact.id !== artifactId));
     } catch (err) {
-      onError(`删除产物失败：${String(err)}`);
+      setError(`删除产物失败：${String(err)}`);
     }
   };
 
@@ -269,7 +266,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       setSessions((prev) => [session, ...prev]);
       setActiveSessionId(session.id);
     } catch (err) {
-      onError(String(err));
+      setError(String(err));
     }
   };
 
@@ -284,7 +281,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
         setArtifacts([]);
       }
     } catch (err) {
-      onError(String(err));
+      setError(String(err));
     }
   };
 
@@ -292,7 +289,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
     const text = input.trim();
     if ((!text && pendingAttachments.length === 0) || loading) return;
     if (!llmBaseUrl || !llmApiKey || !llmModel) {
-      onError("请先在设置页配置 LLM Provider");
+      setError("请先在设置页配置 LLM Provider");
       return;
     }
 
@@ -305,7 +302,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
         sessionId = session.id;
         setActiveSessionId(sessionId);
       } catch (err) {
-        onError(String(err));
+        setError(String(err));
         return;
       }
     }
@@ -339,7 +336,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
         .catch(() => {});
       refreshArtifacts(sessionId).catch(() => {});
     } catch (err) {
-      onError(String(err));
+      setError(String(err));
       getAgentSession(sessionId)
         .then(setMessages)
         .catch(() => {});
@@ -359,7 +356,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       setActiveSessionId(session.id);
       return session.id;
     } catch (err) {
-      onError(String(err));
+      setError(String(err));
       return null;
     }
   };
@@ -384,7 +381,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
       }
       setPendingAttachments((prev) => [...prev, ...uploaded]);
     } catch (err) {
-      onError(String(err));
+      setError(String(err));
     }
   };
 
@@ -422,7 +419,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
           return;
         }
       } catch {
-        onError("文件选择失败");
+        setError("文件选择失败");
         return;
       }
     }
@@ -456,7 +453,7 @@ export function AgentPage({ llmBaseUrl, llmModel, llmApiKey, onError }: Props) {
         .catch(() => {});
       refreshArtifacts(activeSessionId).catch(() => {});
     } catch (err) {
-      onError(String(err));
+      setError(String(err));
       getAgentSession(activeSessionId)
         .then(setMessages)
         .catch(() => {});
@@ -1371,3 +1368,5 @@ function formatFieldName(key: string): string {
   };
   return names[key] ?? key;
 }
+
+export default AgentPage;

@@ -9,28 +9,18 @@ import {
   rawFileHasInvoices,
 } from "../api";
 import { importStatusMeta, toneClass } from "../status";
+import { useAppStore } from "../stores/appStore";
+import { useLlmStore } from "../stores/llmStore";
+import { useRefreshStore } from "../stores/refreshStore";
+import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 
-type Props = {
-  isDraggingFiles: boolean;
-  llmApiKey: string;
-  llmBaseUrl: string;
-  llmModel: string;
-  refreshKey: number;
-  onInvoicesAdded: () => void;
-  onNavigateToInvoice: (id: number) => void;
-  onError: (error: string) => void;
-};
-
-export function ImportPage({
-  isDraggingFiles,
-  llmApiKey,
-  llmBaseUrl,
-  llmModel,
-  refreshKey,
-  onInvoicesAdded,
-  onNavigateToInvoice,
-  onError,
-}: Props) {
+export function ImportPage() {
+  const isDraggingFiles = useAppStore((s) => s.isDraggingFiles);
+  const { llmBaseUrl, llmModel, llmApiKey } = useLlmStore();
+  const refreshKey = useRefreshStore((s) => s.importKey);
+  const onInvoicesAdded = useAppStore((s) => s.refreshInvoices);
+  const onNavigateToInvoice = useNavigateToInvoice();
+  const setError = useAppStore((s) => s.setError);
   const [isImporting, setIsImporting] = React.useState(false);
   const [recognizingJobId, setRecognizingJobId] = React.useState<number | null>(null);
   const [expandedJobId, setExpandedJobId] = React.useState<number | null>(null);
@@ -57,9 +47,9 @@ export function ImportPage({
       }
       setRecognizedFileIds(recognized);
     } catch (err) {
-      onError(String(err));
+      setError(String(err));
     }
-  }, [onError]);
+  }, [setError]);
 
   React.useEffect(() => {
     fetchJobs(1);
@@ -76,13 +66,13 @@ export function ImportPage({
         await fetchJobs(1);
         setTimeout(() => fetchJobs(1), 1500);
       } catch (err) {
-        onError(String(err));
+        setError(String(err));
       } finally {
         setIsImporting(false);
         setOptimisticJobs([]);
       }
     },
-    [fetchJobs, onError],
+    [fetchJobs, setError],
   );
 
   const handlePickFiles = async () => {
@@ -101,11 +91,11 @@ export function ImportPage({
 
   const handleRecognize = async (job: ImportJob) => {
     if (!job.raw_file_id) {
-      onError("该导入任务没有可识别的 RAW 文件。");
+      setError("该导入任务没有可识别的 RAW 文件。");
       return;
     }
     if (!llmApiKey.trim()) {
-      onError("请先在设置中填写 LLM API Key。");
+      setError("请先在设置中填写 LLM API Key。");
       return;
     }
     setRecognizingJobId(job.id);
@@ -123,7 +113,7 @@ export function ImportPage({
       setExpandedJobId(job.id);
       fetchJobs(page);
     } catch (err) {
-      onError(String(err));
+      setError(String(err));
       fetchJobs(page);
     } finally {
       setRecognizingJobId(null);
@@ -136,7 +126,7 @@ export function ImportPage({
       return;
     }
     if (!job.raw_file_id) {
-      onError("该导入任务没有可打开的发票详情。");
+      setError("该导入任务没有可打开的发票详情。");
       return;
     }
     try {
@@ -144,10 +134,10 @@ export function ImportPage({
       if (invoiceId) {
         onNavigateToInvoice(invoiceId);
       } else {
-        onError("该文件还没有生成发票详情。");
+        setError("该文件还没有生成发票详情。");
       }
     } catch (err) {
-      onError(String(err));
+      setError(String(err));
     }
   };
 
@@ -594,3 +584,5 @@ function formatImportTime(value: string): string {
   }
   return value;
 }
+
+export default ImportPage;

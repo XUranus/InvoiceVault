@@ -2,10 +2,7 @@ import React from "react";
 import type { EventListResult, EventRow } from "../types";
 import { listEvents, deleteAllEvents, getInvoiceIdByRawFile } from "../api";
 import { ConfirmDialog } from "./ConfirmDialog";
-
-type Props = {
-  onNavigateToInvoice?: (id: number) => void;
-};
+import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   import: "导入",
@@ -28,7 +25,8 @@ type ImportEventMetadata = {
   invoice_ids?: number[];
 };
 
-export function EventsPage({ onNavigateToInvoice }: Props) {
+export function EventsPage() {
+  const onNavigateToInvoice = useNavigateToInvoice();
   const [result, setResult] = React.useState<EventListResult | null>(null);
   const [typeFilter, setTypeFilter] = React.useState<string | null>(null);
   const [page, setPage] = React.useState(1);
@@ -300,3 +298,5 @@ function SourcePaths({ paths, onOpen }: { paths: string[]; onOpen: (path: string
       </div>
   );
 }
+
+export default EventsPage;

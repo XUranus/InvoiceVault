@@ -8,11 +8,8 @@ import {
   deleteAllNotifications,
 } from "../api";
 import { ConfirmDialog } from "./ConfirmDialog";
-
-type Props = {
-  onNavigateToInvoice?: (id: number) => void;
-  onUnreadCountChange?: (count: number) => void;
-};
+import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
+import { useAppStore } from "../stores/appStore";
 
 const LEVEL_LABELS: Record<string, string> = {
   info: "通知",
@@ -20,7 +17,9 @@ const LEVEL_LABELS: Record<string, string> = {
   error: "错误",
 };
 
-export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: Props) {
+export function NotificationsPage() {
+  const onNavigateToInvoice = useNavigateToInvoice();
+  const setUnreadNotificationCount = useAppStore((s) => s.setUnreadNotificationCount);
   const [notifications, setNotifications] = React.useState<NotificationRow[]>([]);
   const [page, setPage] = React.useState(1);
   const [clearDialogOpen, setClearDialogOpen] = React.useState(false);
@@ -31,9 +30,9 @@ export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: 
     listNotifications().then((list) => {
       setNotifications(list);
       const unread = list.filter((n) => !n.is_read).length;
-      onUnreadCountChange?.(unread);
+      setUnreadNotificationCount(unread);
     }).catch(() => {});
-  }, [onUnreadCountChange]);
+  }, [setUnreadNotificationCount]);
 
   React.useEffect(() => {
     fetch();
@@ -205,3 +204,5 @@ export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: 
     </div>
   );
 }
+
+export default NotificationsPage;

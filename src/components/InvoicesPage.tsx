@@ -11,20 +11,14 @@ import { InvoiceListControls } from "./InvoiceListControls";
 import { ExportButton } from "./ExportButton";
 import { InvoiceDetail } from "./InvoiceDetail";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { useAppStore } from "../stores/appStore";
+import { useRefreshStore } from "../stores/refreshStore";
 import {
   duplicateStatusMeta,
   invoiceStatusMeta,
   shouldShowDuplicateStatus,
   toneClass,
 } from "../status";
-
-type Props = {
-  invoices: Invoice[];
-  onInvoicesChanged: () => void;
-  onError: (error: string) => void;
-  refreshKey?: number;
-  onInvoiceDetailOpened?: () => void;
-};
 
 const BATCH_STATUS_OPTIONS = [
   { value: "", label: "不修改状态" },
@@ -48,7 +42,12 @@ const BATCH_CATEGORY_OPTIONS = [
   { value: "其他", label: "其他" },
 ];
 
-export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey, onInvoiceDetailOpened }: Props) {
+export function InvoicesPage() {
+  const invoices = useAppStore((s) => s.invoices);
+  const refreshInvoices = useAppStore((s) => s.refreshInvoices);
+  const setError = useAppStore((s) => s.setError);
+  const refreshKey = useRefreshStore((s) => s.invoicesKey);
+  const decrementInvoiceBadgeCount = useAppStore((s) => s.decrementInvoiceBadgeCount);
   const [view, setView] = React.useState<"list" | "detail">("list");
   const [viewMode, setViewMode] = React.useState<"cards" | "table">("table");
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
@@ -83,7 +82,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
 
   const showError = (err: string) => {
     setLocalError(err);
-    onError(err);
+    setError(err);
   };
 
   const doSearch = React.useCallback(
@@ -206,7 +205,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
       setBatchStatus("");
       setBatchCategory("");
       doSearch(params);
-      onInvoicesChanged();
+      refreshInvoices();
     } catch (err) {
       showError(String(err));
     } finally {
@@ -221,7 +220,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
       setSelected(new Set());
       setDeleteDialogOpen(false);
       doSearch(params);
-      onInvoicesChanged();
+      refreshInvoices();
     } catch (err) {
       showError(String(err));
     } finally {
@@ -232,7 +231,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
   const handleSelectInvoice = (id: number) => {
     setSelectedId(id);
     setView("detail");
-    onInvoiceDetailOpened?.();
+    decrementInvoiceBadgeCount();
   };
 
   React.useEffect(() => {
@@ -250,7 +249,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
     setView("list");
     setSelectedId(null);
     doSearch(params);
-    onInvoicesChanged();
+    refreshInvoices();
   };
 
   const handleFilterChange = (p: Partial<InvoiceSearchParams>) => {
@@ -273,7 +272,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
         <InvoiceDetail
           invoiceId={selectedId}
           onBack={handleBack}
-          onError={onError}
+          onError={setError}
         />
       </div>
     );
@@ -310,7 +309,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
           </div>
           <ExportButton
             onError={showError}
-            onRefresh={onInvoicesChanged}
+            onRefresh={refreshInvoices}
             invoiceIds={selected.size > 0 ? Array.from(selected) : undefined}
           />
         </div>
@@ -726,3 +725,5 @@ function getSelectedSummary(
   if (selectedInvoices.length <= 5) return preview;
   return preview + ` 等 ${selectedInvoices.length} 张`;
 }
+
+export default InvoicesPage;

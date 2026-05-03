@@ -1,6 +1,5 @@
 import React from "react";
 import type {
-  AppHealth,
   LlmConnectionTestResult,
   ChromaConfig,
   EmbeddingConfig,
@@ -28,32 +27,22 @@ import {
 import type { ExportLogsResult, CleanupStorageResult } from "../types";
 import { WatchDirManager } from "./WatchDirManager";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { useAppStore } from "../stores/appStore";
+import { useLlmStore } from "../stores/llmStore";
 
-type Props = {
-  health: AppHealth | null;
-  error: string | null;
-  llmBaseUrl: string;
-  llmModel: string;
-  llmApiKey: string;
-  onBaseUrlChange: (v: string) => void;
-  onModelChange: (v: string) => void;
-  onApiKeyChange: (v: string) => void;
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
-};
-
-export function SettingsPage({
-  health,
-  error,
-  llmBaseUrl,
-  llmModel,
-  llmApiKey,
-  onBaseUrlChange,
-  onModelChange,
-  onApiKeyChange,
-  theme,
-  onToggleTheme,
-}: Props) {
+export function SettingsPage() {
+  const health = useAppStore((s) => s.health);
+  const error = useAppStore((s) => s.error);
+  const {
+    llmBaseUrl,
+    llmModel,
+    llmApiKey,
+    setLlmBaseUrl,
+    setLlmModel,
+    setLlmApiKey,
+  } = useLlmStore();
+  const theme = useAppStore((s) => s.theme);
+  const toggleTheme = useAppStore((s) => s.toggleTheme);
   const [llmTestResult, setLlmTestResult] =
     React.useState<LlmConnectionTestResult | null>(null);
   const [isTestingLlm, setIsTestingLlm] = React.useState(false);
@@ -390,7 +379,7 @@ export function SettingsPage({
             <span>Base URL</span>
             <input
               value={llmBaseUrl}
-              onChange={(e) => onBaseUrlChange(e.target.value)}
+              onChange={(e) => setLlmBaseUrl(e.target.value)}
               placeholder="https://api.openai.com/v1"
               spellCheck={false}
             />
@@ -400,7 +389,7 @@ export function SettingsPage({
             <span>Model</span>
             <input
               value={llmModel}
-              onChange={(e) => onModelChange(e.target.value)}
+              onChange={(e) => setLlmModel(e.target.value)}
               placeholder="qwen3.6-plus"
               spellCheck={false}
             />
@@ -410,7 +399,7 @@ export function SettingsPage({
             <span>API Key</span>
             <input
               value={llmApiKey}
-              onChange={(e) => onApiKeyChange(e.target.value)}
+              onChange={(e) => setLlmApiKey(e.target.value)}
               type="password"
               placeholder="sk-..."
               spellCheck={false}
@@ -588,7 +577,7 @@ export function SettingsPage({
         <p className="section-desc">
           当前: {theme === "dark" ? "暗色主题" : "亮色主题"}
         </p>
-        <button className="btn-primary" onClick={onToggleTheme}>
+        <button className="btn-primary" onClick={toggleTheme}>
           {theme === "dark" ? "☀️ 切换到亮色主题" : "🌙 切换到暗色主题"}
         </button>
       </div>
@@ -815,3 +804,5 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+export default SettingsPage;
