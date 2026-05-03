@@ -239,13 +239,17 @@ pub fn record_import_event(
     duplicate_count: usize,
     failure_count: usize,
     source_paths: &[String],
+    raw_file_ids: &[i64],
 ) -> Result<(), EventError> {
     let status = if failure_count == 0 {
         "completed"
     } else {
         "completed"
     };
-    let metadata = serde_json::json!({ "source_paths": source_paths });
+    let metadata = serde_json::json!({
+        "source_paths": source_paths,
+        "raw_file_ids": raw_file_ids,
+    });
     create_event(
         conn,
         "import",

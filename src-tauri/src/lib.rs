@@ -15,7 +15,8 @@ mod watcher;
 
 use agent::{AgentMessageRow, AgentResponse, AgentSession, ConfirmRequest};
 use app_core::{
-    AppHealth, AppState, CleanupStorageResult, ExportLogsResult, RecognitionQueueStatus,
+    import_failure_message, AppHealth, AppState, CleanupStorageResult, ExportLogsResult,
+    RecognitionQueueStatus,
 };
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
@@ -365,6 +366,7 @@ async fn recognize_raw_file(
         "Starting recognition for {} pages",
         recognition_inputs.len()
     );
+    let _ = state.set_import_job_status_for_raw_file(raw_file.id, "recognizing", None);
     let page_count = recognition_inputs.len();
     let mut invoices = Vec::new();
     let mut total_duration_ms = 0_u128;
@@ -374,11 +376,22 @@ async fn recognize_raw_file(
 
     for input in recognition_inputs {
         thumbnail_paths.push(input.thumbnail_path.to_string_lossy().into_owned());
-        let recognition =
-            recognize_invoice_image(request.config.clone(), &input.image_path, &input.mime_type)
-                .await
-                .inspect_err(|e| error!("LLM recognition failed: {e}"))
-                .map_err(|err| err.to_string())?;
+        let recognition = match recognize_invoice_image(
+            request.config.clone(),
+            &input.image_path,
+            &input.mime_type,
+        )
+        .await
+        {
+            Ok(recognition) => recognition,
+            Err(err) => {
+                error!("LLM recognition failed: {err}");
+                let message = import_failure_message(&err.to_string());
+                let _ =
+                    state.set_import_job_status_for_raw_file(raw_file.id, "failed", Some(&message));
+                return Err(message);
+            }
+        };
 
         model = recognition.model.clone();
         total_duration_ms += recognition.duration_ms;
@@ -393,16 +406,22 @@ async fn recognize_raw_file(
         ));
 
         let rec_model = recognition.model.clone();
-        let invoice = state
-            .save_invoice_extraction(SaveInvoiceExtractionRequest {
-                raw_file_id: raw_file.id,
-                source_page_range: input.source_page_range,
-                provider_name: Some(request.config.base_url.clone()),
-                model: Some(recognition.model),
-                response_json: recognition.response_json,
-            })
-            .inspect_err(|e| error!("Failed to save invoice extraction: {e}"))
-            .map_err(|err| err.to_string())?;
+        let invoice = match state.save_invoice_extraction(SaveInvoiceExtractionRequest {
+            raw_file_id: raw_file.id,
+            source_page_range: input.source_page_range,
+            provider_name: Some(request.config.base_url.clone()),
+            model: Some(recognition.model),
+            response_json: recognition.response_json,
+        }) {
+            Ok(invoice) => invoice,
+            Err(err) => {
+                error!("Failed to save invoice extraction: {err}");
+                let message = import_failure_message(&err.to_string());
+                let _ =
+                    state.set_import_job_status_for_raw_file(raw_file.id, "failed", Some(&message));
+                return Err(message);
+            }
+        };
 
         let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
         let _ = state.record_recognition_event(
@@ -418,6 +437,7 @@ async fn recognize_raw_file(
 
     let count = invoices.len();
     info!("Recognition complete: {count} invoices, model {model}, {total_duration_ms}ms");
+    let _ = state.set_import_job_status_for_raw_file(raw_file.id, "imported", None);
 
     // Create notification
     let _ = state.create_notification(
@@ -693,6 +713,16 @@ fn raw_file_has_invoices(state: State<'_, AppState>, raw_file_id: i64) -> Result
 }
 
 #[tauri::command]
+fn get_invoice_id_by_raw_file(
+    state: State<'_, AppState>,
+    raw_file_id: i64,
+) -> Result<Option<i64>, String> {
+    state
+        .invoice_id_for_raw_file(raw_file_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn export_logs(
     state: State<'_, AppState>,
     output_path: String,
@@ -835,6 +865,7 @@ pub fn run() {
             get_recognition_queue_status,
             set_recognition_concurrency,
             raw_file_has_invoices,
+            get_invoice_id_by_raw_file,
             delete_all_events,
             delete_all_notifications,
             export_logs,

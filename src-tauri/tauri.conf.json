@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "InvoiceVault",
-        "width": 1024,
-        "height": 680,
+        "width": 860,
+        "height": 560,
         "minWidth": 860,
         "minHeight": 560
       }

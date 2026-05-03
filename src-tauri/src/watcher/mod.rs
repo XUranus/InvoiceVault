@@ -567,16 +567,16 @@ fn process_pending(
             let jobs = import_files(&mut conn, raw_dir, path_strs).unwrap_or_default();
             let ids: Vec<i64> = jobs
                 .iter()
-                .filter(|j| j.status == "completed" && j.raw_file_id.is_some())
+                .filter(|j| j.status == "imported" && j.raw_file_id.is_some())
                 .filter_map(|j| j.raw_file_id)
                 .collect();
 
             // Record event and notification
             let total = jobs.len();
-            let success = jobs.iter().filter(|j| j.status == "completed").count();
+            let success = jobs.iter().filter(|j| j.status == "imported").count();
             let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
             let failed = jobs.iter().filter(|j| j.status == "failed").count();
-            let _ = event::record_import_event(&conn, total, success, dups, failed, &[]);
+            let _ = event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
             let _ = event::create_notification(
                 &conn,
                 "info",

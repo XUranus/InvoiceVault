@@ -22,8 +22,10 @@ const LEVEL_LABELS: Record<string, string> = {
 
 export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: Props) {
   const [notifications, setNotifications] = React.useState<NotificationRow[]>([]);
+  const [page, setPage] = React.useState(1);
   const [clearDialogOpen, setClearDialogOpen] = React.useState(false);
   const [clearing, setClearing] = React.useState(false);
+  const pageSize = 10;
 
   const fetch = React.useCallback(() => {
     listNotifications().then((list) => {
@@ -36,6 +38,10 @@ export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: 
   React.useEffect(() => {
     fetch();
   }, [fetch]);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [notifications.length]);
 
   const handleMarkRead = async (id: number) => {
     await markNotificationRead(id).catch(() => {});
@@ -73,6 +79,12 @@ export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: 
   };
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
+  const totalPages = Math.max(1, Math.ceil(notifications.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedNotifications = notifications.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
+  );
 
   return (
     <div className="page">
@@ -101,25 +113,34 @@ export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: 
           <p>暂无通知</p>
         </div>
       ) : (
-        <div className="notification-list">
-          {notifications.map((n) => (
-            <div
-              key={n.id}
-              className={`notification-card notification-level-${n.level} ${!n.is_read ? "notification-unread" : ""}`}
-            >
-              <div className="notification-indicator" />
-              <div className="notification-body">
-                <div className="notification-header">
+        <div className="notification-table-wrap">
+          <table className="notification-table">
+            <thead>
+              <tr>
+                <th>级别</th>
+                <th>标题</th>
+                <th>内容</th>
+                <th>时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pagedNotifications.map((n) => (
+                <tr
+                  key={n.id}
+                  className={`notification-row notification-level-${n.level} ${!n.is_read ? "notification-unread" : ""}`}
+                  onClick={() => handleReferenceClick(n)}
+                >
+                  <td>
                   <span className={`notification-level-tag notification-tag-${n.level}`}>
                     {LEVEL_LABELS[n.level] ?? n.level}
                   </span>
-                  <span className="notification-time">{n.created_at}</span>
-                </div>
-                <strong className="notification-title">{n.title}</strong>
-                {n.message ? (
-                  <p className="notification-message">{n.message}</p>
-                ) : null}
-                <div className="notification-actions">
+                    {!n.is_read ? <span className="notification-unread-dot" title="未读" /> : null}
+                  </td>
+                  <td className="notification-title">{n.title}</td>
+                  <td className="notification-message">{n.message || "-"}</td>
+                  <td className="notification-time">{n.created_at}</td>
+                  <td className="notification-actions" onClick={(e) => e.stopPropagation()}>
                   {n.reference_type === "invoice" && n.reference_id ? (
                     <button
                       className="btn-small"
@@ -142,10 +163,32 @@ export function NotificationsPage({ onNavigateToInvoice, onUnreadCountChange }: 
                   >
                     忽略
                   </button>
-                </div>
-              </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {totalPages > 1 ? (
+            <div className="pagination table-pagination">
+              <button
+                className="page-btn"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                上一页
+              </button>
+              <span className="page-info">
+                {currentPage} / {totalPages}（共 {notifications.length} 条）
+              </span>
+              <button
+                className="page-btn"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                下一页
+              </button>
             </div>
-          ))}
+          ) : null}
         </div>
       )}
 

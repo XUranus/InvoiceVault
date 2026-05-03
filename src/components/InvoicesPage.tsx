@@ -50,10 +50,7 @@ const BATCH_CATEGORY_OPTIONS = [
 
 export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey, onInvoiceDetailOpened }: Props) {
   const [view, setView] = React.useState<"list" | "detail">("list");
-  const [viewMode, setViewMode] = React.useState<"cards" | "table">(() => {
-    const stored = localStorage.getItem("invoiceViewMode");
-    return stored === "table" ? "table" : "cards";
-  });
+  const [viewMode, setViewMode] = React.useState<"cards" | "table">("table");
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
   const [searchResult, setSearchResult] = React.useState<{
     invoices: Invoice[];
@@ -125,6 +122,7 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
           invoiceData.push({
             id: detail.id,
             raw_file_id: detail.raw_file_id,
+            raw_file_mime: detail.raw_file_mime,
             invoice_type: detail.invoice_type,
             invoice_code: detail.invoice_code,
             invoice_number: detail.invoice_number,
@@ -235,6 +233,17 @@ export function InvoicesPage({ invoices, onInvoicesChanged, onError, refreshKey,
     setView("detail");
     onInvoiceDetailOpened?.();
   };
+
+  React.useEffect(() => {
+    const targetInvoiceId = sessionStorage.getItem("focusInvoiceId");
+    if (!targetInvoiceId) return;
+
+    const id = Number(targetInvoiceId);
+    sessionStorage.removeItem("focusInvoiceId");
+    if (Number.isFinite(id) && id > 0) {
+      handleSelectInvoice(id);
+    }
+  }, [refreshKey]);
 
   const handleBack = () => {
     setView("list");
@@ -558,13 +567,11 @@ function InvoiceTableView({
         <thead>
           <tr>
             <th className="invoice-table-check-col" aria-label="选择" />
-            <th>{sortableHeader("供应商", "seller_name")}</th>
-            <th>{sortableHeader("发票号码", "invoice_number")}</th>
-            <th>{sortableHeader("日期", "issue_date")}</th>
+            <th>{sortableHeader("公司名称", "seller_name")}</th>
+            <th>{sortableHeader("时间", "issue_date")}</th>
+            <th>{sortableHeader("发票编码", "invoice_number")}</th>
             <th>{sortableHeader("金额", "total_amount")}</th>
-            <th>类别</th>
-            <th>状态</th>
-            <th>重复</th>
+            <th>标签</th>
             {similarities ? <th>相似度</th> : null}
           </tr>
         </thead>
@@ -583,26 +590,18 @@ function InvoiceTableView({
                 />
               </td>
               <td>
-                <strong>{invoice.seller_name ?? "未命名发票"}</strong>
-                <span className="invoice-table-subtext">{invoice.invoice_type ?? "类型未识别"}</span>
+                <strong>{invoice.seller_name ?? invoice.buyer_name ?? "未命名发票"}</strong>
+                {invoice.buyer_name ? (
+                  <span className="invoice-table-subtext">购买方：{invoice.buyer_name}</span>
+                ) : null}
               </td>
-              <td>{invoice.invoice_number ?? "待确认"}</td>
               <td>{invoice.issue_date ?? "未识别"}</td>
-              <td className="invoice-table-amount">{formatInvoiceAmount(invoice)}</td>
-              <td>{invoice.category ?? "未分类"}</td>
               <td>
-                <span className={`mini-tag ${toneClass(invoiceStatusMeta(invoice.status).tone)}`}>
-                  {invoiceStatusMeta(invoice.status).label}
-                </span>
+                {formatInvoiceCode(invoice)}
               </td>
+              <td className="invoice-table-amount">{formatInvoiceAmount(invoice)}</td>
               <td>
-                {shouldShowDuplicateStatus(invoice.duplicate_status) ? (
-                  <span className={`mini-tag ${toneClass(duplicateStatusMeta(invoice.duplicate_status).tone)}`}>
-                    {duplicateStatusMeta(invoice.duplicate_status).label}
-                  </span>
-                ) : (
-                  <span className="muted">-</span>
-                )}
+                <InvoiceTagBadges invoice={invoice} />
               </td>
               {similarities ? (
                 <td className="similarity-badge">
@@ -620,6 +619,57 @@ function InvoiceTableView({
 function formatInvoiceAmount(invoice: Invoice): string {
   if (!invoice.total_amount) return "金额未识别";
   return `${invoice.currency || "¥"} ${invoice.total_amount}`;
+}
+
+function formatInvoiceCode(invoice: Invoice): string {
+  if (invoice.invoice_code && invoice.invoice_number) {
+    return `${invoice.invoice_code} / ${invoice.invoice_number}`;
+  }
+  return invoice.invoice_code ?? invoice.invoice_number ?? "待确认";
+}
+
+function InvoiceTagBadges({ invoice }: { invoice: Invoice }) {
+  const tags = buildInvoiceTags(invoice);
+  if (tags.length === 0) {
+    return <span className="muted">-</span>;
+  }
+  return (
+    <div className="invoice-table-tags">
+      {tags.map((tag) => (
+        <span key={`${tag.label}-${tag.tone}`} className={`mini-tag ${toneClass(tag.tone)}`}>
+          {tag.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function buildInvoiceTags(invoice: Invoice): Array<{ label: string; tone: "success" | "warning" | "danger" | "info" | "neutral" }> {
+  const tags: Array<{ label: string; tone: "success" | "warning" | "danger" | "info" | "neutral" }> = [];
+  const fileTag = fileTypeTag(invoice.raw_file_mime);
+  if (fileTag) tags.push(fileTag);
+
+  const invoiceType = invoice.invoice_type ?? "";
+  if (invoiceType.includes("专用")) {
+    tags.push({ label: "专票", tone: "info" });
+  } else if (invoiceType.includes("普通")) {
+    tags.push({ label: "普票", tone: "info" });
+  } else if (invoiceType) {
+    tags.push({ label: invoiceType, tone: "neutral" });
+  }
+
+  if (invoice.category) {
+    tags.push({ label: invoice.category, tone: "neutral" });
+  }
+
+  return tags;
+}
+
+function fileTypeTag(mimeType: string | null): { label: string; tone: "neutral" | "info" } | null {
+  if (!mimeType) return null;
+  if (mimeType === "application/pdf") return { label: "PDF", tone: "neutral" };
+  if (mimeType.startsWith("image/")) return { label: "图片", tone: "neutral" };
+  return { label: "文件", tone: "neutral" };
 }
 
 function formatSimilarity(value: number | undefined): string {

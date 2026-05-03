@@ -9,6 +9,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+const appIcon = new URL("../../icons/icon.png", import.meta.url).href;
+
 type Page = "dashboard" | "import" | "invoices" | "agent" | "events" | "notifications" | "settings";
 
 type Props = {
@@ -35,6 +37,7 @@ export function Sidebar({ activePage, onNavigate, healthReady, hasError, unreadN
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
+        <img className="sidebar-app-icon" src={appIcon} alt="" aria-hidden="true" />
         <h1 className="sidebar-logo">InvoiceVault</h1>
         <p className="sidebar-subtitle">发票处理工作台</p>
       </div>

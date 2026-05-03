@@ -38,9 +38,9 @@ export default function App() {
   const [invoiceBadgeCount, setInvoiceBadgeCount] = React.useState(0);
 
   const navigateToInvoice = (id: number) => {
-    setPage("invoices");
-    // Store the target invoice ID for the invoices page to pick up
     sessionStorage.setItem("focusInvoiceId", String(id));
+    setPage("invoices");
+    setInvoicesKey((k) => k + 1);
   };
 
   const toggleTheme = () => {
@@ -182,6 +182,7 @@ export default function App() {
             llmModel={llmModel}
             refreshKey={importKey}
             onInvoicesAdded={refreshInvoices}
+            onNavigateToInvoice={navigateToInvoice}
             onError={setError}
           />
         ) : page === "invoices" ? (

@@ -16,6 +16,7 @@ pub struct SaveInvoiceExtractionRequest {
 pub struct InvoiceSummary {
     pub id: i64,
     pub raw_file_id: i64,
+    pub raw_file_mime: Option<String>,
     pub invoice_type: Option<String>,
     pub invoice_code: Option<String>,
     pub invoice_number: Option<String>,
@@ -83,7 +84,9 @@ pub fn search_invoices(
 
     let query_sql = format!(
         "SELECT
-            id, raw_file_id, invoice_type, invoice_code, invoice_number,
+            id, raw_file_id,
+            (SELECT mime_type FROM raw_files rf WHERE rf.id = invoices.raw_file_id) AS raw_file_mime,
+            invoice_type, invoice_code, invoice_number,
             issue_date, seller_name, buyer_name, currency, total_amount,
             category, source_page_range, confidence, status, duplicate_status,
             created_at, updated_at
@@ -751,8 +754,10 @@ struct InvoiceItemExtraction {
 pub enum ExtractorError {
     #[error("raw file does not exist: {0}")]
     MissingRawFile(i64),
-    #[error("LLM result is marked as non-invoice")]
+    #[error("文件不含有发票")]
     NonInvoice,
+    #[error("识别置信度过低，可能是图片分辨率不清晰或发票内容不完整")]
+    LowConfidence,
     #[error("invalid extraction JSON: {0}")]
     InvalidJson(#[from] serde_json::Error),
     #[error("invalid issue date, expected YYYY-MM-DD: {0}")]
@@ -789,6 +794,7 @@ pub fn list_invoices(conn: &Connection) -> Result<Vec<InvoiceSummary>, Extractor
         "SELECT
             id,
             raw_file_id,
+            (SELECT mime_type FROM raw_files rf WHERE rf.id = invoices.raw_file_id) AS raw_file_mime,
             invoice_type,
             invoice_code,
             invoice_number,
@@ -851,6 +857,14 @@ fn normalize_extraction(extraction: &mut InvoiceExtraction) -> Result<(), Extrac
         return Err(ExtractorError::InvalidConfidence);
     }
 
+    if extraction.needs_review.unwrap_or(true)
+        || extraction
+            .confidence
+            .is_none_or(|confidence| confidence < 0.85)
+    {
+        return Err(ExtractorError::LowConfidence);
+    }
+
     for item in &mut extraction.items {
         item.name = clean_optional(item.name.take());
         item.spec = clean_optional(item.spec.take());
@@ -869,15 +883,7 @@ fn insert_invoice(
     extraction: &InvoiceExtraction,
 ) -> Result<i64, ExtractorError> {
     let currency = extraction.currency.as_deref().unwrap_or("CNY");
-    let status = if extraction.needs_review.unwrap_or(true)
-        || extraction
-            .confidence
-            .is_none_or(|confidence| confidence < 0.85)
-    {
-        "pending_confirmation"
-    } else {
-        "recognized"
-    };
+    let status = "recognized";
 
     conn.execute(
         "INSERT INTO invoices (
@@ -1000,6 +1006,7 @@ fn load_invoice_summary(
         "SELECT
             id,
             raw_file_id,
+            (SELECT mime_type FROM raw_files rf WHERE rf.id = invoices.raw_file_id) AS raw_file_mime,
             invoice_type,
             invoice_code,
             invoice_number,
@@ -1027,21 +1034,22 @@ fn row_to_invoice_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceSu
     Ok(InvoiceSummary {
         id: row.get(0)?,
         raw_file_id: row.get(1)?,
-        invoice_type: row.get(2)?,
-        invoice_code: row.get(3)?,
-        invoice_number: row.get(4)?,
-        issue_date: row.get(5)?,
-        seller_name: row.get(6)?,
-        buyer_name: row.get(7)?,
-        currency: row.get(8)?,
-        total_amount: row.get(9)?,
-        category: row.get(10)?,
-        source_page_range: row.get(11)?,
-        confidence: row.get(12)?,
-        status: row.get(13)?,
-        duplicate_status: row.get(14)?,
-        created_at: row.get(15)?,
-        updated_at: row.get(16)?,
+        raw_file_mime: row.get(2)?,
+        invoice_type: row.get(3)?,
+        invoice_code: row.get(4)?,
+        invoice_number: row.get(5)?,
+        issue_date: row.get(6)?,
+        seller_name: row.get(7)?,
+        buyer_name: row.get(8)?,
+        currency: row.get(9)?,
+        total_amount: row.get(10)?,
+        category: row.get(11)?,
+        source_page_range: row.get(12)?,
+        confidence: row.get(13)?,
+        status: row.get(14)?,
+        duplicate_status: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
     })
 }
 
@@ -1392,6 +1400,7 @@ pub fn batch_update_invoices(
     let mut stmt = conn.prepare(&format!(
         "SELECT
             id, raw_file_id,
+            (SELECT mime_type FROM raw_files rf WHERE rf.id = invoices.raw_file_id) AS raw_file_mime,
             invoice_type, invoice_code, invoice_number, issue_date,
             seller_name, buyer_name, currency, total_amount, category,
             source_page_range, confidence, status, duplicate_status,
@@ -1610,7 +1619,7 @@ mod tests {
                     "seller": {"name": "SellerB"},
                     "buyer": {"name": "BuyerB"},
                     "total_amount": 200.0,
-                    "confidence": 0.8,
+                    "confidence": 0.9,
                     "needs_review": false
                 }"#
                 .into(),

@@ -8,7 +8,7 @@ use std::{
 
 use tracing::{error, info, warn};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -42,7 +42,8 @@ use crate::{
         UpdateInvoiceResult,
     },
     importer::{
-        import_files, list_import_jobs, ImportError, ImportJobListResult, ImportJobSummary,
+        import_files, list_import_jobs, update_import_job_status,
+        update_import_job_status_by_raw_file, ImportError, ImportJobListResult, ImportJobSummary,
     },
     llm::LlmProviderConfig,
     storage::{run_migrations, StorageError},
@@ -123,6 +124,20 @@ pub struct CleanupStorageResult {
     pub files_removed: usize,
     pub db_records_removed: usize,
     pub bytes_freed: u64,
+}
+
+pub fn import_failure_message(error: &str) -> String {
+    if error.contains("文件不含有发票") || error.contains("non-invoice") {
+        "文件不含有发票".to_owned()
+    } else if error.contains("置信度过低")
+        || error.contains("did not include a JSON object")
+        || error.contains("invalid extraction JSON")
+        || error.contains("provider response did not include assistant content")
+    {
+        "识别失败：可能是图片分辨率不清晰、内容不完整，或文件不含有可识别的发票。".to_owned()
+    } else {
+        format!("识别失败：{error}")
+    }
 }
 
 pub struct AppState {
@@ -215,15 +230,28 @@ impl AppState {
         info!("Importing {} files", paths.len());
         let jobs = import_files(&mut db, &self.paths.raw_dir, paths)?;
         let total = jobs.len();
-        let success = jobs.iter().filter(|j| j.status == "completed").count();
+        let success = jobs.iter().filter(|j| j.status == "imported").count();
         let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
         let failed = jobs.iter().filter(|j| j.status == "failed").count();
+        let raw_file_ids: Vec<i64> = jobs
+            .iter()
+            .filter(|j| j.status == "imported")
+            .filter_map(|j| j.raw_file_id)
+            .collect();
         if failed > 0 {
             warn!("Import completed with {failed} failures, {success} success, {dups} duplicates");
         } else {
             info!("Import completed: {success} success, {dups} duplicates");
         }
-        let _ = event::record_import_event(&db, total, success, dups, failed, &source_paths);
+        let _ = event::record_import_event(
+            &db,
+            total,
+            success,
+            dups,
+            failed,
+            &source_paths,
+            &raw_file_ids,
+        );
         let _ = event::create_notification(
             &db,
             "info",
@@ -238,7 +266,7 @@ impl AppState {
         if let Some(cfg) = config {
             if !cfg.api_key.is_empty() {
                 for job in &jobs {
-                    if job.status == "completed" && job.raw_file_id.is_some() {
+                    if job.status == "imported" && job.raw_file_id.is_some() {
                         self.spawn_recognition_task(job.id, job.raw_file_id.unwrap(), cfg.clone());
                     }
                 }
@@ -248,7 +276,7 @@ impl AppState {
         Ok(jobs)
     }
 
-    fn spawn_recognition_task(&self, _job_id: i64, raw_file_id: i64, config: LlmProviderConfig) {
+    fn spawn_recognition_task(&self, job_id: i64, raw_file_id: i64, config: LlmProviderConfig) {
         let db = Arc::clone(&self.db);
         let thumbnails_dir = self.paths.thumbnails_dir.clone();
         let pending = Arc::clone(&self.recognition_pending);
@@ -277,6 +305,10 @@ impl AppState {
             }
             if let Ok(mut r) = running.lock() {
                 *r += 1;
+            }
+
+            if let Ok(db) = db.lock() {
+                let _ = update_import_job_status(&db, job_id, None, "recognizing", None);
             }
 
             let result: Result<(), String> = async {
@@ -390,10 +422,14 @@ impl AppState {
             }
 
             if let Err(e) = result {
-                error!("Auto recognition failed: {e}");
+                let message = import_failure_message(&e);
+                error!("Auto recognition failed: {message}");
                 if let Ok(db) = db.lock() {
-                    let _ = event::notify_error(&db, "自动识别失败", &e);
+                    let _ = update_import_job_status(&db, job_id, None, "failed", Some(&message));
+                    let _ = event::notify_error(&db, "自动识别失败", &message);
                 }
+            } else if let Ok(db) = db.lock() {
+                let _ = update_import_job_status(&db, job_id, None, "imported", None);
             }
         });
     }
@@ -1078,6 +1114,33 @@ impl AppState {
             |row| row.get(0),
         )?;
         Ok(count > 0)
+    }
+
+    pub fn set_import_job_status_for_raw_file(
+        &self,
+        raw_file_id: i64,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> Result<(), AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(update_import_job_status_by_raw_file(
+            &db,
+            raw_file_id,
+            status,
+            error_message,
+        )?)
+    }
+
+    pub fn invoice_id_for_raw_file(&self, raw_file_id: i64) -> Result<Option<i64>, AppError> {
+        let db = self.db.lock().expect("db lock");
+        let invoice_id = db
+            .query_row(
+                "SELECT id FROM invoices WHERE raw_file_id = ?1 ORDER BY id DESC LIMIT 1",
+                [raw_file_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(invoice_id)
     }
 
     pub fn delete_agent_session(&self, session_id: i64) -> Result<(), AppError> {

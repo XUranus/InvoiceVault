@@ -310,6 +310,10 @@ export async function rawFileHasInvoices(rawFileId: number): Promise<boolean> {
   return invoke<boolean>("raw_file_has_invoices", { rawFileId });
 }
 
+export async function getInvoiceIdByRawFile(rawFileId: number): Promise<number | null> {
+  return invoke<number | null>("get_invoice_id_by_raw_file", { rawFileId });
+}
+
 export async function deleteAllEvents(): Promise<number> {
   return invoke<number>("delete_all_events");
 }

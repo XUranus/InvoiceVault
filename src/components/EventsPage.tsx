@@ -1,6 +1,6 @@
 import React from "react";
 import type { EventListResult, EventRow } from "../types";
-import { listEvents, deleteAllEvents } from "../api";
+import { listEvents, deleteAllEvents, getInvoiceIdByRawFile } from "../api";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
@@ -22,13 +22,20 @@ const STATUS_LABELS: Record<string, string> = {
   running: "进行中",
 };
 
+type ImportEventMetadata = {
+  source_paths?: string[];
+  raw_file_ids?: number[];
+  invoice_ids?: number[];
+};
+
 export function EventsPage({ onNavigateToInvoice }: Props) {
   const [result, setResult] = React.useState<EventListResult | null>(null);
   const [typeFilter, setTypeFilter] = React.useState<string | null>(null);
   const [page, setPage] = React.useState(1);
+  const [eventError, setEventError] = React.useState<string | null>(null);
   const [clearDialogOpen, setClearDialogOpen] = React.useState(false);
   const [clearing, setClearing] = React.useState(false);
-  const pageSize = 20;
+  const pageSize = 10;
 
   const fetchEvents = React.useCallback(() => {
     listEvents(page, pageSize, typeFilter ?? undefined)
@@ -58,9 +65,33 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
     }
   };
 
-  const handleReferenceClick = (ev: EventRow) => {
+  const handleReferenceClick = async (ev: EventRow, metadata: ImportEventMetadata) => {
+    setEventError(null);
     if (ev.reference_type === "invoice" && ev.reference_id && onNavigateToInvoice) {
       onNavigateToInvoice(ev.reference_id);
+      return;
+    }
+
+    const metadataInvoiceId = metadata.invoice_ids?.[0];
+    if (metadataInvoiceId && onNavigateToInvoice) {
+      onNavigateToInvoice(metadataInvoiceId);
+      return;
+    }
+
+    const rawFileId = metadata.raw_file_ids?.[0];
+    if (!rawFileId || !onNavigateToInvoice) {
+      return;
+    }
+
+    try {
+      const invoiceId = await getInvoiceIdByRawFile(rawFileId);
+      if (invoiceId) {
+        onNavigateToInvoice(invoiceId);
+      } else {
+        setEventError("该导入事件还没有可打开的发票详情，请等待识别完成后再试。");
+      }
+    } catch (err) {
+      setEventError(String(err));
     }
   };
 
@@ -79,15 +110,24 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
   const statusLabel = (s: string) => STATUS_LABELS[s] ?? s;
   const statusClass = (s: string) => `event-badge-status event-status-${s}`;
 
-  const parseSourcePaths = (metadataJson: string | null): string[] => {
-    if (!metadataJson) return [];
+  const parseImportMetadata = (metadataJson: string | null): ImportEventMetadata => {
+    if (!metadataJson) return {};
     try {
       const meta = JSON.parse(metadataJson);
-      return meta.source_paths ?? [];
+      return {
+        source_paths: Array.isArray(meta.source_paths) ? meta.source_paths : [],
+        raw_file_ids: Array.isArray(meta.raw_file_ids) ? meta.raw_file_ids : [],
+        invoice_ids: Array.isArray(meta.invoice_ids) ? meta.invoice_ids : [],
+      };
     } catch {
-      return [];
+      return {};
     }
   };
+
+  const canNavigateToInvoice = (ev: EventRow, metadata: ImportEventMetadata): boolean =>
+    (ev.reference_type === "invoice" && Boolean(ev.reference_id)) ||
+    Boolean(metadata.invoice_ids?.length) ||
+    Boolean(metadata.raw_file_ids?.length);
 
   return (
     <div className="page">
@@ -120,6 +160,13 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
         ))}
       </div>
 
+      {eventError ? (
+        <div className="alert alert-warn">
+          {eventError}
+          <button className="alert-dismiss" onClick={() => setEventError(null)}>×</button>
+        </div>
+      ) : null}
+
       {result === null ? (
         <p className="muted">加载中...</p>
       ) : result.events.length === 0 ? (
@@ -129,38 +176,70 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
         </div>
       ) : (
         <>
-          <div className="event-list">
-            {result.events.map((ev) => (
-              <div
-                key={ev.id}
-                className={`event-card ${ev.reference_type === "invoice" ? "event-card-clickable" : ""}`}
-                onClick={() => handleReferenceClick(ev)}
-              >
-                <div className="event-card-header">
-                  <span className={`event-type-badge event-type-${ev.event_type}`}>
-                    {typeLabel(ev.event_type)}
-                  </span>
-                  <span className={statusClass(ev.status)}>
-                    {statusLabel(ev.status)}
-                  </span>
-                  <span className="event-time">{ev.created_at}</span>
-                </div>
-                <div className="event-card-body">
-                  <strong>{ev.title}</strong>
-                  {ev.description ? <span className="event-desc">{ev.description}</span> : null}
-                </div>
-                {ev.reference_type === "invoice" && ev.reference_id ? (
-                  <div className="event-card-footer">
-                    <span className="event-ref">
-                      发票 #{ev.reference_id} — 点击查看详情
+          <div className="event-table-wrap">
+            <table className="event-table">
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>状态</th>
+                  <th>标题</th>
+                  <th>详情</th>
+                  <th>关联</th>
+                  <th>时间</th>
+                </tr>
+              </thead>
+              <tbody>
+            {result.events.map((ev) => {
+              const metadata = parseImportMetadata(ev.metadata_json);
+              const navigable = canNavigateToInvoice(ev, metadata);
+              const referenceId = ev.reference_type === "invoice"
+                ? ev.reference_id
+                : metadata.invoice_ids?.[0] ?? null;
+              return (
+                <tr
+                  key={ev.id}
+                  className={navigable ? "event-row-clickable" : ""}
+                  onClick={() => handleReferenceClick(ev, metadata)}
+                >
+                  <td>
+                    <span className={`event-type-badge event-type-${ev.event_type}`}>
+                      {typeLabel(ev.event_type)}
                     </span>
-                  </div>
-                ) : null}
-                {ev.event_type === "import" && ev.metadata_json ? (
-                  <SourcePaths paths={parseSourcePaths(ev.metadata_json)} onOpen={openFolder} />
-                ) : null}
-              </div>
-            ))}
+                  </td>
+                  <td>
+                    <span className={statusClass(ev.status)}>
+                      {statusLabel(ev.status)}
+                    </span>
+                  </td>
+                  <td className="event-table-title">{ev.title}</td>
+                  <td className="event-table-desc">
+                    {ev.description ? <span>{ev.description}</span> : <span className="muted">-</span>}
+                    {ev.event_type === "import" && ev.metadata_json ? (
+                      <SourcePaths paths={metadata.source_paths ?? []} onOpen={openFolder} />
+                    ) : null}
+                  </td>
+                  <td>
+                  {navigable ? (
+                      <button
+                        className="event-ref-button"
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleReferenceClick(ev, metadata);
+                        }}
+                      >
+                        {referenceId ? `发票 #${referenceId}` : "导入发票"}
+                      </button>
+                    ) : (
+                      <span className="muted">-</span>
+                    )}
+                  </td>
+                  <td className="event-time">{ev.created_at}</td>
+                </tr>
+              );
+            })}
+              </tbody>
+            </table>
           </div>
 
           {result.total_pages > 1 ? (
@@ -204,7 +283,6 @@ export function EventsPage({ onNavigateToInvoice }: Props) {
 function SourcePaths({ paths, onOpen }: { paths: string[]; onOpen: (path: string) => void }) {
   if (paths.length === 0) return null;
   return (
-    <div className="event-card-footer">
       <div className="event-source-paths">
         {paths.map((p, i) => (
           <span
@@ -220,6 +298,5 @@ function SourcePaths({ paths, onOpen }: { paths: string[]; onOpen: (path: string
           </span>
         ))}
       </div>
-    </div>
   );
 }

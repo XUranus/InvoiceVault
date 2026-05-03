@@ -25,11 +25,14 @@ const DUPLICATE_STATUS_META: Record<string, StatusMeta> = {
 };
 
 const IMPORT_STATUS_META: Record<string, StatusMeta> = {
-  pending: { label: "等待中", tone: "warning" },
-  processing: { label: "处理中", tone: "info" },
-  completed: { label: "已完成", tone: "success" },
+  importing: { label: "导入中", tone: "info" },
+  pending: { label: "导入中", tone: "info" },
+  processing: { label: "导入中", tone: "info" },
+  imported: { label: "已导入", tone: "success" },
+  completed: { label: "已导入", tone: "success" },
+  recognizing: { label: "识别中", tone: "info" },
   duplicate: { label: "重复", tone: "warning" },
-  failed: { label: "失败", tone: "danger" },
+  failed: { label: "导入失败", tone: "danger" },
   recognized: { label: "已识别", tone: "success" },
 };
 

@@ -262,7 +262,7 @@ export function SettingsPage({
   };
 
   return (
-    <div className="page">
+    <div className="page settings-page">
       <h2 className="page-title">设置</h2>
 
       {error ? <div className="alert alert-error">{error}</div> : null}

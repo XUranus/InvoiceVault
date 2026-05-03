@@ -7,6 +7,7 @@ export type AppHealth = {
 export type ImportJob = {
   id: number;
   raw_file_id: number | null;
+  invoice_id: number | null;
   source_path: string;
   original_name: string | null;
   current_name: string | null;
@@ -36,6 +37,7 @@ export type LlmConnectionTestResult = {
 export type Invoice = {
   id: number;
   raw_file_id: number;
+  raw_file_mime: string | null;
   invoice_type: string | null;
   invoice_code: string | null;
   invoice_number: string | null;

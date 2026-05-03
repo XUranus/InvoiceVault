@@ -18,6 +18,7 @@ pub struct ImportRequest {
 pub struct ImportJobSummary {
     pub id: i64,
     pub raw_file_id: Option<i64>,
+    pub invoice_id: Option<i64>,
     pub source_path: String,
     pub original_name: Option<String>,
     pub current_name: Option<String>,
@@ -83,6 +84,13 @@ pub fn list_import_jobs(
         "SELECT
             ij.id,
             ij.raw_file_id,
+            (
+                SELECT inv.id
+                FROM invoices inv
+                WHERE inv.raw_file_id = ij.raw_file_id
+                ORDER BY inv.id DESC
+                LIMIT 1
+            ) AS invoice_id,
             ij.source_path,
             rf.original_name,
             rf.current_name,
@@ -120,25 +128,27 @@ fn import_one(
     source_path: PathBuf,
 ) -> Result<ImportJobSummary, ImportError> {
     let source_path_text = source_path.to_string_lossy().into_owned();
+    let job_id = insert_import_job(conn, None, &source_path_text, "importing", None)?;
 
     match inspect_file(&source_path) {
         Ok(raw_file) => {
             if let Some(raw_file_id) = find_raw_file_by_hash(conn, &raw_file.sha256)? {
-                let job_id = insert_import_job(
-                    conn,
-                    Some(raw_file_id),
-                    &source_path_text,
-                    "duplicate",
-                    None,
-                )?;
+                update_import_job_status(conn, job_id, Some(raw_file_id), "duplicate", None)?;
                 return load_import_job(conn, job_id);
             }
 
-            let stored_raw_file = store_original_file(raw_dir, raw_file)?;
+            let stored_raw_file = match store_original_file(raw_dir, raw_file) {
+                Ok(stored_raw_file) => stored_raw_file,
+                Err(err) => {
+                    error!("Import failed for {source_path_text}: {err}");
+                    let error_message = err.to_string();
+                    update_import_job_status(conn, job_id, None, "failed", Some(&error_message))?;
+                    return load_import_job(conn, job_id);
+                }
+            };
             let tx = conn.transaction()?;
             let raw_file_id = insert_raw_file(&tx, &stored_raw_file)?;
-            let job_id =
-                insert_import_job(&tx, Some(raw_file_id), &source_path_text, "completed", None)?;
+            update_import_job_status(&tx, job_id, Some(raw_file_id), "imported", None)?;
             tx.commit()?;
             load_import_job(conn, job_id)
         }
@@ -146,8 +156,7 @@ fn import_one(
             error!("Import failed for {source_path_text}: {err}");
             let status = "failed";
             let error_message = err.to_string();
-            let job_id =
-                insert_import_job(conn, None, &source_path_text, status, Some(&error_message))?;
+            update_import_job_status(conn, job_id, None, status, Some(&error_message))?;
             load_import_job(conn, job_id)
         }
     }
@@ -221,11 +230,56 @@ fn insert_import_job(
     Ok(conn.last_insert_rowid())
 }
 
+pub fn update_import_job_status(
+    conn: &Connection,
+    job_id: i64,
+    raw_file_id: Option<i64>,
+    status: &str,
+    error_message: Option<&str>,
+) -> Result<(), ImportError> {
+    let now = current_timestamp();
+    conn.execute(
+        "UPDATE import_jobs
+         SET raw_file_id = COALESCE(?1, raw_file_id),
+             status = ?2,
+             error_message = ?3,
+             updated_at = ?4
+         WHERE id = ?5",
+        params![raw_file_id, status, error_message, now, job_id],
+    )?;
+    Ok(())
+}
+
+pub fn update_import_job_status_by_raw_file(
+    conn: &Connection,
+    raw_file_id: i64,
+    status: &str,
+    error_message: Option<&str>,
+) -> Result<(), ImportError> {
+    let now = current_timestamp();
+    conn.execute(
+        "UPDATE import_jobs
+         SET status = ?1,
+             error_message = ?2,
+             updated_at = ?3
+         WHERE raw_file_id = ?4",
+        params![status, error_message, now, raw_file_id],
+    )?;
+    Ok(())
+}
+
 fn load_import_job(conn: &Connection, job_id: i64) -> Result<ImportJobSummary, ImportError> {
     conn.query_row(
         "SELECT
             ij.id,
             ij.raw_file_id,
+            (
+                SELECT inv.id
+                FROM invoices inv
+                WHERE inv.raw_file_id = ij.raw_file_id
+                ORDER BY inv.id DESC
+                LIMIT 1
+            ) AS invoice_id,
             ij.source_path,
             rf.original_name,
             rf.current_name,
@@ -249,16 +303,17 @@ fn row_to_import_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportJobSumma
     Ok(ImportJobSummary {
         id: row.get(0)?,
         raw_file_id: row.get(1)?,
-        source_path: row.get(2)?,
-        original_name: row.get(3)?,
-        current_name: row.get(4)?,
-        status: row.get(5)?,
-        sha256: row.get(6)?,
-        storage_path: row.get(7)?,
-        mime_type: row.get(8)?,
-        error_message: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        invoice_id: row.get(2)?,
+        source_path: row.get(3)?,
+        original_name: row.get(4)?,
+        current_name: row.get(5)?,
+        status: row.get(6)?,
+        sha256: row.get(7)?,
+        storage_path: row.get(8)?,
+        mime_type: row.get(9)?,
+        error_message: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -297,7 +352,7 @@ mod tests {
         )
         .expect("second import");
 
-        assert_eq!(first[0].status, "completed");
+        assert_eq!(first[0].status, "imported");
         assert_eq!(second[0].status, "duplicate");
         assert_eq!(first[0].raw_file_id, second[0].raw_file_id);
         assert_eq!(first[0].original_name.as_deref(), Some("receipt.jpg"));
@@ -328,7 +383,7 @@ mod tests {
             .expect("import sample receipts");
 
         assert_eq!(jobs.len(), 2);
-        assert!(jobs.iter().all(|job| job.status == "completed"));
+        assert!(jobs.iter().all(|job| job.status == "imported"));
         assert!(jobs.iter().all(|job| job.storage_path.is_some()));
     }
 }

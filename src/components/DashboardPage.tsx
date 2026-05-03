@@ -93,7 +93,7 @@ export function DashboardPage({ error, refreshKey }: Props) {
 
   React.useEffect(() => {
     setOperationsError(null);
-    Promise.all([getRecognitionQueueStatus(), listImportJobs(1, 6)])
+    Promise.all([getRecognitionQueueStatus(), listImportJobs(1, 3)])
       .then(([queue, jobs]) => {
         setQueueStatus(queue);
         setRecentJobs(jobs.jobs);
@@ -168,7 +168,7 @@ export function DashboardPage({ error, refreshKey }: Props) {
             <div className="dashboard-work-card">
               <span className="dashboard-work-label">最近导入失败</span>
               <span className="dashboard-work-value">{failedRecentJobs}</span>
-              <span className="dashboard-work-meta">最近 {recentJobs.length} 条导入任务</span>
+              <span className="dashboard-work-meta">最近 {recentJobs.length} 次导入</span>
             </div>
             <div className="dashboard-work-card">
               <span className="dashboard-work-label">本月新增</span>
@@ -219,22 +219,39 @@ export function DashboardPage({ error, refreshKey }: Props) {
                 </div>
               </div>
               {recentJobs.length > 0 ? (
-                <div className="dashboard-job-list">
-                  {recentJobs.map((job) => {
-                    const meta = importStatusMeta(job.status);
-                    return (
-                      <div key={job.id} className="dashboard-job-row">
-                        <div className="dashboard-job-main">
-                          <span className="dashboard-job-title">{jobTitle(job)}</span>
-                          <span className="dashboard-job-meta">
-                            {formatJobTime(job.created_at)}
-                            {job.error_message ? ` · ${job.error_message}` : ""}
-                          </span>
-                        </div>
-                        <span className={`mini-tag ${toneClass(meta.tone)}`}>{meta.label}</span>
-                      </div>
-                    );
-                  })}
+                <div className="dashboard-job-table-wrap">
+                  <table className="dashboard-job-table">
+                    <thead>
+                      <tr>
+                        <th>文件</th>
+                        <th>时间</th>
+                        <th>状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentJobs.map((job) => {
+                        const meta = importStatusMeta(job.status);
+                        return (
+                          <tr key={job.id}>
+                            <td>
+                              <span className="dashboard-job-title" title={jobTitle(job)}>
+                                {jobTitle(job)}
+                              </span>
+                              {job.error_message ? (
+                                <span className="dashboard-job-meta" title={job.error_message}>
+                                  {job.error_message}
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="dashboard-job-time">{formatJobTime(job.created_at)}</td>
+                            <td>
+                              <span className={`mini-tag ${toneClass(meta.tone)}`}>{meta.label}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               ) : (
                 <p className="dashboard-empty">导入发票后这里会显示最近任务。</p>
