@@ -924,6 +924,14 @@ fn export_logs(
 }
 
 #[tauri::command]
+fn export_backup(
+    state: State<'_, AppState>,
+    output_path: String,
+) -> Result<ExportLogsResult, String> {
+    state.export_backup(&output_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn cleanup_storage(state: State<'_, AppState>) -> Result<CleanupStorageResult, String> {
     state.cleanup_storage().map_err(|e| e.to_string())
 }
@@ -1074,6 +1082,7 @@ pub fn run() {
             delete_all_events,
             delete_all_notifications,
             export_logs,
+            export_backup,
             cleanup_storage,
             check_external_dependencies
         ])

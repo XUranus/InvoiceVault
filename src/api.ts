@@ -437,6 +437,10 @@ export async function cleanupStorage(): Promise<CleanupStorageResult> {
   return invoke<CleanupStorageResult>("cleanup_storage");
 }
 
+export async function exportBackup(outputPath: string): Promise<ExportLogsResult> {
+  return invoke<ExportLogsResult>("export_backup", { outputPath });
+}
+
 export async function checkExternalDependencies(): Promise<ExternalDependencyStatus[]> {
   return invoke<ExternalDependencyStatus[]>("check_external_dependencies");
 }

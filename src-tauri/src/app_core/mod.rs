@@ -1126,6 +1126,48 @@ impl AppState {
         })
     }
 
+    pub fn export_backup(&self, output_path: &str) -> Result<ExportLogsResult, AppError> {
+        info!("Creating full backup at {}", output_path);
+        let output_path = Path::new(output_path);
+        let file = std::fs::File::create(output_path)?;
+        let mut zip_writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        let base = &self.paths.app_data_dir;
+        add_dir_to_zip(&mut zip_writer, base, base, options)?;
+
+        let finished = zip_writer
+            .finish()
+            .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        let metadata = finished.metadata()?;
+        let file_size = metadata.len();
+
+        info!("Backup complete: {} bytes", file_size);
+
+        // Record event
+        let db = self.db.lock().expect("db lock");
+        let _ = event::create_event(
+            &db,
+            "export",
+            "基础备份",
+            &format!(
+                "基础备份已导出至 {}，大小 {} 字节",
+                output_path.display(),
+                file_size
+            ),
+            "completed",
+            None,
+            None,
+            None,
+        );
+
+        Ok(ExportLogsResult {
+            file_path: output_path.to_string_lossy().into_owned(),
+            byte_size: file_size,
+        })
+    }
+
     pub fn cleanup_storage(&self) -> Result<CleanupStorageResult, AppError> {
         info!("Starting storage cleanup");
         let db = self.db.lock().expect("db lock");
@@ -2368,6 +2410,37 @@ fn open_path_with_system(path: &Path) -> Result<(), AppError> {
     };
 
     command.spawn()?;
+    Ok(())
+}
+
+fn add_dir_to_zip(
+    zip_writer: &mut zip::ZipWriter<std::fs::File>,
+    base: &Path,
+    dir: &Path,
+    options: zip::write::SimpleFileOptions,
+) -> Result<(), AppError> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            let relative = path
+                .strip_prefix(base)
+                .unwrap_or(&path);
+            let name = relative.to_string_lossy().replace('\\', "/");
+            zip_writer
+                .start_file(name, options)
+                .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            let bytes = std::fs::read(&path)?;
+            zip_writer
+                .write_all(&bytes)
+                .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        } else if path.is_dir() {
+            add_dir_to_zip(zip_writer, base, &path, options)?;
+        }
+    }
     Ok(())
 }
 

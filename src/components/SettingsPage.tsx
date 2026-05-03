@@ -19,6 +19,7 @@ import {
   getRecognitionQueueStatus,
   setRecognitionConcurrency,
   exportLogs,
+  exportBackup,
   cleanupStorage,
   checkExternalDependencies,
   getBadgeConfig,
@@ -79,6 +80,10 @@ export function SettingsPage({
   const [exporting, setExporting] = React.useState(false);
   const [exportResult, setExportResult] = React.useState<ExportLogsResult | null>(null);
   const [exportError, setExportError] = React.useState<string | null>(null);
+
+  const [backingUp, setBackingUp] = React.useState(false);
+  const [backupResult, setBackupResult] = React.useState<ExportLogsResult | null>(null);
+  const [backupError, setBackupError] = React.useState<string | null>(null);
 
   const [cleanupDialogOpen, setCleanupDialogOpen] = React.useState(false);
   const [cleaning, setCleaning] = React.useState(false);
@@ -245,6 +250,28 @@ export function SettingsPage({
       setExportError(String(err));
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleBackup = async () => {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const filePath = await save({
+        title: "选择备份保存位置",
+        defaultPath: "invoicevault-backup.zip",
+        filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }],
+      });
+      if (!filePath) return;
+
+      setBackingUp(true);
+      setBackupResult(null);
+      setBackupError(null);
+      const result = await exportBackup(filePath);
+      setBackupResult(result);
+    } catch (err) {
+      setBackupError(String(err));
+    } finally {
+      setBackingUp(false);
     }
   };
 
@@ -705,6 +732,31 @@ export function SettingsPage({
           ) : null}
           {exportError ? (
             <div className="alert alert-error" style={{ marginTop: 12 }}>{exportError}</div>
+          ) : null}
+        </div>
+
+        <div className="section-sub" style={{ marginTop: 20 }}>
+          <h4>基础备份</h4>
+          <p className="section-desc">
+            将全部用户数据（数据库、配置、日志、文件归档）打包压缩为 ZIP 文件。
+          </p>
+          <button className="btn-primary" onClick={handleBackup} disabled={backingUp}>
+            {backingUp ? "备份中..." : "基础备份"}
+          </button>
+          {backupResult ? (
+            <div className="test-result" style={{ marginTop: 12 }}>
+              <div className="test-result-row">
+                <span>文件路径</span>
+                <strong className="mono" style={{ wordBreak: "break-all" }}>{backupResult.file_path}</strong>
+              </div>
+              <div className="test-result-row">
+                <span>文件大小</span>
+                <strong>{formatFileSize(backupResult.byte_size)}</strong>
+              </div>
+            </div>
+          ) : null}
+          {backupError ? (
+            <div className="alert alert-error" style={{ marginTop: 12 }}>{backupError}</div>
           ) : null}
         </div>
 
