@@ -5304,3 +5304,56 @@ textarea:focus,
 [data-theme="dark"] .drop-icon {
   color: var(--color-text-muted);
 }
+
+/* ---- Native transparent window support ---- */
+:root {
+  --window-tint:
+    radial-gradient(circle at 18% 0%, rgba(40, 120, 217, 0.13), transparent 32%),
+    radial-gradient(circle at 86% 12%, rgba(45, 164, 78, 0.09), transparent 26%),
+    linear-gradient(135deg, rgba(247, 248, 251, 0.92), rgba(231, 235, 241, 0.88));
+  --glass-bg: rgba(255, 255, 255, 0.84);
+  --glass-bg-strong: rgba(255, 255, 255, 0.92);
+  --color-surface: rgba(255, 255, 255, 0.9);
+  --color-surface-elevated: rgba(255, 255, 255, 0.96);
+  --color-surface-subtle: rgba(246, 248, 251, 0.88);
+  --color-input-bg: rgba(255, 255, 255, 0.92);
+  --color-input-bg-subtle: rgba(246, 248, 251, 0.88);
+}
+
+[data-theme="dark"] {
+  --window-tint:
+    radial-gradient(circle at 18% 0%, rgba(104, 173, 255, 0.12), transparent 30%),
+    radial-gradient(circle at 82% 12%, rgba(93, 213, 132, 0.06), transparent 26%),
+    linear-gradient(135deg, rgba(23, 27, 33, 0.94), rgba(13, 16, 20, 0.91));
+  --glass-bg: rgba(32, 36, 43, 0.9);
+  --glass-bg-strong: rgba(42, 47, 56, 0.95);
+  --color-surface: rgba(32, 36, 43, 0.94);
+  --color-surface-elevated: rgba(42, 47, 56, 0.97);
+  --color-surface-subtle: rgba(43, 49, 59, 0.9);
+  --color-input-bg: rgba(23, 27, 33, 0.96);
+  --color-input-bg-subtle: rgba(38, 44, 54, 0.92);
+}
+
+html,
+body,
+#root {
+  background: transparent !important;
+}
+
+body,
+[data-theme="dark"] body {
+  background: transparent !important;
+}
+
+.app-layout {
+  background: var(--window-tint);
+}
+
+.app-main,
+.agent-chat {
+  background: transparent;
+}
+
+[data-theme="dark"] .agent-chat {
+  background: transparent;
+}

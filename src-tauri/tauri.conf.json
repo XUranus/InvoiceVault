@@ -16,7 +16,8 @@
         "width": 860,
         "height": 560,
         "minWidth": 860,
-        "minHeight": 560
+        "minHeight": 560,
+        "transparent": true
       }
     ],
     "security": {

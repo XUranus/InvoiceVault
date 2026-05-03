@@ -43,7 +43,7 @@ use std::{path::Path, process::Command};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WindowEvent,
+    AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent,
 };
 use tracing::{error, info};
 
@@ -980,6 +980,7 @@ pub fn run() {
             let window = app
                 .get_webview_window(MAIN_WINDOW_LABEL)
                 .expect("main window");
+            apply_window_material(&window);
             let state_path = app
                 .path()
                 .app_data_dir()
@@ -1088,6 +1089,37 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run InvoiceVault");
+}
+
+fn apply_window_material(_window: &WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::window::{Effect, EffectState, EffectsBuilder};
+
+        if let Err(err) = _window.set_effects(
+            EffectsBuilder::new()
+                .effects([Effect::Sidebar, Effect::WindowBackground])
+                .state(EffectState::FollowsWindowActiveState)
+                .radius(10.0)
+                .build(),
+        ) {
+            tracing::warn!("failed to apply macOS window vibrancy: {err}");
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use tauri::window::{Color, Effect, EffectsBuilder};
+
+        if let Err(err) = _window.set_effects(
+            EffectsBuilder::new()
+                .effect(Effect::Mica)
+                .color(Color(16, 20, 26, 170))
+                .build(),
+        ) {
+            tracing::warn!("failed to apply Windows Mica effect: {err}");
+        }
+    }
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
