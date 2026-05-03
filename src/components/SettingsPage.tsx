@@ -81,6 +81,7 @@ export function SettingsPage() {
   const [dependencyStatuses, setDependencyStatuses] = React.useState<ExternalDependencyStatus[]>([]);
   const [checkingDependencies, setCheckingDependencies] = React.useState(false);
   const [badgeConfig, setBadgeConfigState] = React.useState<BadgeConfig>({ groups: [] });
+  const [badgeOptionDrafts, setBadgeOptionDrafts] = React.useState<Record<number, string>>({});
   const [savingBadgeConfig, setSavingBadgeConfig] = React.useState(false);
   const [badgeConfigMessage, setBadgeConfigMessage] = React.useState<string | null>(null);
 
@@ -297,25 +298,14 @@ export function SettingsPage() {
     setBadgeConfigMessage(null);
   };
 
-  const updateBadgeOption = (groupIndex: number, optionIndex: number, value: string) => {
-    setBadgeConfigState((prev) => ({
-      groups: prev.groups.map((group, idx) =>
-        idx === groupIndex
-          ? {
-              ...group,
-              options: group.options.map((option, optIdx) =>
-                optIdx === optionIndex ? value : option,
-              ),
-            }
-          : group,
-      ),
-    }));
+  const updateBadgeOptionDraft = (groupIndex: number, value: string) => {
+    setBadgeOptionDrafts((prev) => ({ ...prev, [groupIndex]: value }));
     setBadgeConfigMessage(null);
   };
 
   const addBadgeGroup = () => {
     setBadgeConfigState((prev) => ({
-      groups: [...prev.groups, { name: "", options: [""] }],
+      groups: [...prev.groups, { name: "", options: [] }],
     }));
     setBadgeConfigMessage(null);
   };
@@ -324,15 +314,35 @@ export function SettingsPage() {
     setBadgeConfigState((prev) => ({
       groups: prev.groups.filter((_, idx) => idx !== index),
     }));
+    setBadgeOptionDrafts((prev) => {
+      const next: Record<number, string> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        const draftIndex = Number(key);
+        if (draftIndex < index) {
+          next[draftIndex] = value;
+        } else if (draftIndex > index) {
+          next[draftIndex - 1] = value;
+        }
+      });
+      return next;
+    });
     setBadgeConfigMessage(null);
   };
 
-  const addBadgeOption = (groupIndex: number) => {
+  const addBadgeOption = (groupIndex: number, rawValue: string) => {
+    const value = rawValue.trim();
+    if (!value) return;
+    const group = badgeConfig.groups[groupIndex];
+    if (group?.options.some((option) => option.trim() === value)) {
+      setBadgeConfigMessage("Badge 已存在");
+      return;
+    }
     setBadgeConfigState((prev) => ({
       groups: prev.groups.map((group, idx) =>
-        idx === groupIndex ? { ...group, options: [...group.options, ""] } : group,
+        idx === groupIndex ? { ...group, options: [...group.options, value] } : group,
       ),
     }));
+    setBadgeOptionDrafts((prev) => ({ ...prev, [groupIndex]: "" }));
     setBadgeConfigMessage(null);
   };
 
@@ -347,11 +357,26 @@ export function SettingsPage() {
     setBadgeConfigMessage(null);
   };
 
+  const handleBadgeOptionKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>,
+    groupIndex: number,
+  ) => {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    addBadgeOption(groupIndex, badgeOptionDrafts[groupIndex] ?? "");
+  };
+
   const saveBadgeConfig = async () => {
     setSavingBadgeConfig(true);
     setBadgeConfigMessage(null);
+    const normalizedBadgeConfig: BadgeConfig = {
+      groups: badgeConfig.groups.map((group) => ({
+        name: group.name.trim(),
+        options: group.options.map((option) => option.trim()).filter(Boolean),
+      })),
+    };
     try {
-      await setBadgeConfig(badgeConfig);
+      await setBadgeConfig(normalizedBadgeConfig);
       const latest = await getBadgeConfig();
       setBadgeConfigState(latest);
       setBadgeConfigMessage("已保存 Badge 配置");
@@ -610,39 +635,48 @@ export function SettingsPage() {
                   />
                 </label>
                 <button
-                  className="btn-danger btn-small"
+                  className="btn-danger btn-small badge-group-remove"
                   type="button"
                   onClick={() => removeBadgeGroup(groupIndex)}
+                  aria-label={`删除分组 ${group.name || groupIndex + 1}`}
+                  title="删除分组"
                 >
-                  删除分组
+                  删除
                 </button>
               </div>
               <div className="badge-option-editor">
-                {group.options.map((option, optionIndex) => (
-                  <div className="badge-option-row" key={optionIndex}>
-                    <input
-                      value={option}
-                      onChange={(e) =>
-                        updateBadgeOption(groupIndex, optionIndex, e.target.value)
-                      }
-                      placeholder="例如：京东"
-                    />
-                    <button
-                      className="btn-small"
-                      type="button"
-                      onClick={() => removeBadgeOption(groupIndex, optionIndex)}
-                    >
-                      删除
-                    </button>
-                  </div>
-                ))}
-                <button
-                  className="btn-small"
-                  type="button"
-                  onClick={() => addBadgeOption(groupIndex)}
-                >
-                  添加选项
-                </button>
+                <div className="badge-option-input-row">
+                  <input
+                    className="badge-option-input"
+                    value={badgeOptionDrafts[groupIndex] ?? ""}
+                    onChange={(e) => updateBadgeOptionDraft(groupIndex, e.target.value)}
+                    onKeyDown={(e) => handleBadgeOptionKeyDown(e, groupIndex)}
+                    placeholder="输入 Badge 名称，按 Enter 添加"
+                  />
+                </div>
+                <div className="badge-chip-list">
+                  {group.options.map((option, optionIndex) => {
+                    const label = option.trim();
+                    if (!label) return null;
+                    return (
+                      <span className="badge-chip" key={`${label}-${optionIndex}`}>
+                        <span className="badge-chip-label">{label}</span>
+                        <button
+                          className="badge-chip-remove"
+                          type="button"
+                          aria-label={`删除 ${label}`}
+                          title="删除"
+                          onClick={() => removeBadgeOption(groupIndex, optionIndex)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                  {group.options.every((option) => !option.trim()) ? (
+                    <span className="muted badge-chip-empty">暂无 Badge</span>
+                  ) : null}
+                </div>
               </div>
             </div>
           ))}

@@ -2059,7 +2059,7 @@ textarea:focus {
 
 .badge-config-card-header {
   display: grid;
-  grid-template-columns: minmax(180px, 320px) auto;
+  grid-template-columns: minmax(220px, 420px) auto;
   gap: 12px;
   align-items: end;
   margin-bottom: 12px;
@@ -2069,9 +2069,106 @@ textarea:focus {
   margin: 0;
 }
 
+.badge-config-card-header .form-field input,
+.badge-option-input {
+  width: 100%;
+  min-height: 38px;
+}
+
+.badge-group-remove {
+  width: auto;
+  min-width: 56px !important;
+  padding-inline: 12px !important;
+  white-space: nowrap;
+}
+
 .badge-option-editor {
   display: grid;
   gap: 8px;
+}
+
+.badge-option-input-row {
+  display: grid;
+  width: min(420px, 100%);
+}
+
+.badge-option-input {
+  min-width: 0;
+}
+
+.badge-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 32px;
+  align-items: center;
+}
+
+.badge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  min-height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-badge-blue-bg);
+  color: var(--color-badge-blue-text);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px 4px 10px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.badge-chip:hover,
+.badge-chip:focus-within {
+  border-color: var(--color-border-strong);
+  background: var(--color-selected-bg);
+}
+
+.badge-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge-chip-remove {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  background: rgba(31, 41, 55, 0.12);
+  color: currentColor;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.92);
+  transition: opacity 120ms ease, transform 120ms ease, background 120ms ease;
+}
+
+.badge-chip:hover .badge-chip-remove,
+.badge-chip:focus-within .badge-chip-remove {
+  opacity: 0.72;
+  transform: scale(1);
+}
+
+.badge-chip-remove:hover,
+.badge-chip-remove:focus-visible {
+  opacity: 1;
+  background: rgba(217, 45, 32, 0.14);
+  color: var(--color-error-text);
+}
+
+.badge-chip-empty {
+  align-self: center;
 }
 
 .badge-option-row {
@@ -4967,4 +5064,186 @@ textarea:focus,
 .sidebar-footer {
   background: transparent;
   box-shadow: none;
+}
+
+/* ---- Dark mode contrast pass ---- */
+[data-theme="dark"] {
+  --color-bg: #111418;
+  --color-surface: rgba(32, 36, 43, 0.86);
+  --color-surface-solid: #20242b;
+  --color-surface-elevated: rgba(42, 47, 56, 0.94);
+  --color-surface-subtle: rgba(43, 49, 59, 0.82);
+  --color-border: rgba(231, 236, 245, 0.14);
+  --color-border-strong: rgba(231, 236, 245, 0.24);
+  --color-separator: rgba(231, 236, 245, 0.1);
+  --color-text: #f4f7fb;
+  --color-text-secondary: #d0d8e4;
+  --color-text-muted: #a6b1c0;
+  --color-primary: #68adff;
+  --color-primary-hover: #86bdff;
+  --color-primary-bg: rgba(104, 173, 255, 0.18);
+  --color-primary-text: #b8d9ff;
+  --color-on-primary: #06192e;
+  --color-error-bg: rgba(255, 112, 104, 0.16);
+  --color-error-text: #ffc0bb;
+  --color-warn-bg: rgba(247, 198, 93, 0.16);
+  --color-warn-text: #ffe0a3;
+  --color-badge-neutral-bg: rgba(174, 184, 199, 0.16);
+  --color-badge-neutral-text: #d3dae5;
+  --color-badge-blue-bg: rgba(104, 173, 255, 0.18);
+  --color-badge-blue-text: #c7e1ff;
+  --color-badge-green-bg: rgba(93, 213, 132, 0.18);
+  --color-badge-green-text: #bff3cc;
+  --color-badge-orange-bg: rgba(247, 198, 93, 0.18);
+  --color-badge-orange-text: #ffe1a6;
+  --color-badge-red-bg: rgba(255, 112, 104, 0.18);
+  --color-badge-red-text: #ffc6c1;
+  --color-tag-blue-bg: var(--color-badge-blue-bg);
+  --color-tag-blue-text: var(--color-badge-blue-text);
+  --color-input-bg: rgba(23, 27, 33, 0.92);
+  --color-input-bg-subtle: rgba(38, 44, 54, 0.86);
+  --color-hover-bg: rgba(104, 173, 255, 0.12);
+  --color-selected-bg: rgba(104, 173, 255, 0.16);
+  --color-chart-grid: rgba(231, 236, 245, 0.12);
+  --color-chart-axis: #b7c0ce;
+  --color-chart-tooltip-bg: rgba(32, 36, 43, 0.96);
+  --color-chart-tooltip-border: rgba(231, 236, 245, 0.18);
+  --color-chart-tooltip-text: #f4f7fb;
+  --glass-bg: rgba(32, 36, 43, 0.78);
+  --glass-bg-strong: rgba(42, 47, 56, 0.88);
+  --glass-border: rgba(231, 236, 245, 0.11);
+  --shadow-card: 0 12px 30px rgba(0, 0, 0, 0.28);
+  --shadow-card-hover: 0 16px 38px rgba(0, 0, 0, 0.34);
+  --bg-main: var(--color-bg);
+  --bg-card: var(--color-surface);
+  --text-primary: var(--color-text);
+  --text-secondary: var(--color-text-secondary);
+  --text-muted: var(--color-text-muted);
+  --border-light: var(--color-border);
+  --accent: var(--color-primary);
+  --accent-soft: var(--color-primary-bg);
+}
+
+[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at 16% 0%, rgba(104, 173, 255, 0.13), transparent 30%),
+    radial-gradient(circle at 82% 12%, rgba(93, 213, 132, 0.07), transparent 26%),
+    linear-gradient(135deg, #171b21 0%, #111418 52%, #0d1014 100%);
+}
+
+[data-theme="dark"] .sidebar {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .sidebar-logo,
+[data-theme="dark"] .nav-item-active,
+[data-theme="dark"] .dashboard-work-value,
+[data-theme="dark"] .dashboard-summary-value,
+[data-theme="dark"] .stat-value,
+[data-theme="dark"] .invoice-table-company strong,
+[data-theme="dark"] .invoice-card-main strong,
+[data-theme="dark"] .event-table-title,
+[data-theme="dark"] .notification-title,
+[data-theme="dark"] .chat-tool-field-value {
+  color: var(--color-text);
+}
+
+[data-theme="dark"] .nav-item {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .nav-item:hover {
+  color: var(--color-text);
+}
+
+[data-theme="dark"] .nav-item-active {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent),
+    rgba(104, 173, 255, 0.13);
+  border-color: rgba(104, 173, 255, 0.16);
+}
+
+[data-theme="dark"] .section,
+[data-theme="dark"] .import-zone,
+[data-theme="dark"] .dashboard-panel,
+[data-theme="dark"] .dashboard-work-card,
+[data-theme="dark"] .stat-card,
+[data-theme="dark"] .chart-container,
+[data-theme="dark"] .invoice-card,
+[data-theme="dark"] .invoice-table-wrap,
+[data-theme="dark"] .event-table-wrap,
+[data-theme="dark"] .notification-table-wrap,
+[data-theme="dark"] .job-card,
+[data-theme="dark"] .watch-dir-card,
+[data-theme="dark"] .badge-config-card,
+[data-theme="dark"] .dependency-card,
+[data-theme="dark"] .error-boundary-card,
+[data-theme="dark"] .export-panel,
+[data-theme="dark"] .agent-artifact-card,
+[data-theme="dark"] .event-card,
+[data-theme="dark"] .notification-card {
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+}
+
+[data-theme="dark"] .invoice-table th,
+[data-theme="dark"] .event-table th,
+[data-theme="dark"] .notification-table th,
+[data-theme="dark"] .import-history-table th,
+[data-theme="dark"] .dashboard-job-table th,
+[data-theme="dark"] .items-table th {
+  background: rgba(47, 54, 65, 0.9);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea,
+[data-theme="dark"] .control-input,
+[data-theme="dark"] .form-field input,
+[data-theme="dark"] .edit-field input,
+[data-theme="dark"] .semantic-search-bar input,
+[data-theme="dark"] .import-textarea,
+[data-theme="dark"] .items-table input,
+[data-theme="dark"] .items-table-editable input,
+[data-theme="dark"] .chat-input-bar textarea {
+  color: var(--color-text);
+  background: var(--color-input-bg);
+  border-color: rgba(231, 236, 245, 0.16);
+}
+
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: #7f8a99;
+}
+
+[data-theme="dark"] .btn-secondary,
+[data-theme="dark"] .btn-small,
+[data-theme="dark"] .small-button,
+[data-theme="dark"] .back-btn,
+[data-theme="dark"] .edit-btn,
+[data-theme="dark"] .page-btn,
+[data-theme="dark"] .sort-btn,
+[data-theme="dark"] .badge-option,
+[data-theme="dark"] .example-question-btn,
+[data-theme="dark"] .agent-artifact-actions button {
+  background: rgba(43, 49, 59, 0.86);
+  border-color: rgba(231, 236, 245, 0.14);
+  color: var(--color-text);
+}
+
+[data-theme="dark"] .btn-primary,
+[data-theme="dark"] .chat-message-user .chat-bubble {
+  background: linear-gradient(180deg, #78b7ff, var(--color-primary));
+  color: var(--color-on-primary);
+}
+
+[data-theme="dark"] .badge-chip {
+  background: rgba(104, 173, 255, 0.18);
+  border-color: rgba(104, 173, 255, 0.2);
+  color: var(--color-badge-blue-text);
+}
+
+[data-theme="dark"] .badge-chip-remove {
+  background: rgba(255, 255, 255, 0.1);
 }
