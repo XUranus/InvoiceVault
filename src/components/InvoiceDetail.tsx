@@ -292,6 +292,9 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               <Field label="价税合计" value={detail.total_amount} />
               <Field label="类别" value={detail.category} />
               <Field label="备注" value={detail.remarks} />
+              {parseExtraFields(detail.extra_fields).map(([label, value]) => (
+                <Field key={label} label={label} value={value} />
+              ))}
             </div>
           )}
 
@@ -386,6 +389,60 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
       ) : null}
     </div>
   );
+}
+
+function parseExtraFields(value: string | null): Array<[string, string]> {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return [];
+    }
+    return Object.entries(parsed)
+      .map(([key, raw]) => [formatExtraFieldLabel(key), formatExtraFieldValue(raw)] as [string, string])
+      .filter(([, text]) => text.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function formatExtraFieldLabel(key: string): string {
+  const labels: Record<string, string> = {
+    passenger_name: "乘车人/乘机人",
+    train_number: "车次",
+    flight_number: "航班号",
+    departure: "出发地",
+    arrival: "到达地",
+    departure_time: "出发时间",
+    arrival_time: "到达时间",
+    toll_entry: "通行费入口",
+    toll_exit: "通行费出口",
+    license_plate: "车牌号",
+    vehicle_type: "车辆类型",
+    vehicle_model: "车辆型号",
+    vin: "车辆识别代号",
+    engine_number: "发动机号",
+    tax_payment_certificate_number: "缴款书号码",
+    receipt_code: "票据代码",
+    receipt_number: "票据号码",
+  };
+  return labels[key] ?? key;
+}
+
+function formatExtraFieldValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map(formatExtraFieldValue).filter(Boolean).join("、");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, raw]) => `${formatExtraFieldLabel(key)}: ${formatExtraFieldValue(raw)}`)
+      .filter((text) => !text.endsWith(": "))
+      .join("；");
+  }
+  return "";
 }
 
 function Field({ label, value }: { label: string; value: string | null }) {

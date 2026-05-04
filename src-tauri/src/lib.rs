@@ -176,6 +176,20 @@ fn get_invoice_detail(
 }
 
 #[tauri::command]
+fn mark_invoice_viewed(state: State<'_, AppState>, invoice_id: i64) -> Result<bool, String> {
+    state
+        .mark_invoice_viewed(invoice_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn count_unviewed_invoices(state: State<'_, AppState>) -> Result<i64, String> {
+    state
+        .count_unviewed_invoices()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn open_invoice_raw_file_in_browser(
     state: State<'_, AppState>,
     invoice_id: i64,
@@ -1027,6 +1041,8 @@ pub fn run() {
             list_invoices,
             search_invoices,
             get_invoice_detail,
+            mark_invoice_viewed,
+            count_unviewed_invoices,
             open_invoice_raw_file_in_browser,
             update_invoice,
             update_invoice_items,

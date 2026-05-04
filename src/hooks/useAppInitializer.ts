@@ -20,9 +20,6 @@ export function useAppInitializer() {
   const setIsDraggingFiles = useAppStore((s) => s.setIsDraggingFiles);
   const setError = useAppStore((s) => s.setError);
   const setImportBadgeCount = useAppStore((s) => s.setImportBadgeCount);
-  const incrementInvoiceBadgeCount = useAppStore(
-    (s) => s.incrementInvoiceBadgeCount,
-  );
   const refreshInvoices = useAppStore((s) => s.refreshInvoices);
   const triggerImportRefresh = useRefreshStore(
     (s) => s.triggerImportRefresh,
@@ -94,11 +91,6 @@ export function useAppInitializer() {
         triggerImportRefresh();
         refreshInvoices();
         triggerDashboardRefresh();
-        const count =
-          event.payload.imported_count ??
-          event.payload.jobs?.length ??
-          0;
-        incrementInvoiceBadgeCount(count);
       },
     );
     return () => {
@@ -108,7 +100,6 @@ export function useAppInitializer() {
     triggerImportRefresh,
     refreshInvoices,
     triggerDashboardRefresh,
-    incrementInvoiceBadgeCount,
   ]);
 
   // Recognition queue polling

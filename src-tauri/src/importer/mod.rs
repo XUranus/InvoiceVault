@@ -268,6 +268,34 @@ pub fn update_import_job_status_by_raw_file(
     Ok(())
 }
 
+pub fn recover_interrupted_import_jobs(conn: &Connection) -> Result<usize, ImportError> {
+    let now = current_timestamp();
+    let message = "上次运行中断，任务已停止。请重新导入或重新识别。";
+    let changed = conn.execute(
+        "UPDATE import_jobs
+         SET status = CASE
+                 WHEN raw_file_id IS NOT NULL
+                   AND EXISTS (
+                     SELECT 1 FROM invoices inv WHERE inv.raw_file_id = import_jobs.raw_file_id
+                   )
+                 THEN 'imported'
+                 ELSE 'failed'
+             END,
+             error_message = CASE
+                 WHEN raw_file_id IS NOT NULL
+                   AND EXISTS (
+                     SELECT 1 FROM invoices inv WHERE inv.raw_file_id = import_jobs.raw_file_id
+                   )
+                 THEN NULL
+                 ELSE ?1
+             END,
+             updated_at = ?2
+         WHERE status IN ('importing', 'pending', 'processing', 'recognizing')",
+        params![message, now],
+    )?;
+    Ok(changed)
+}
+
 fn load_import_job(conn: &Connection, job_id: i64) -> Result<ImportJobSummary, ImportError> {
     conn.query_row(
         "SELECT
@@ -385,5 +413,45 @@ mod tests {
         assert_eq!(jobs.len(), 2);
         assert!(jobs.iter().all(|job| job.status == "imported"));
         assert!(jobs.iter().all(|job| job.storage_path.is_some()));
+    }
+
+    #[test]
+    fn recovers_interrupted_import_jobs() {
+        let mut conn = Connection::open_in_memory().expect("open sqlite");
+        run_migrations(&mut conn).expect("migrate");
+
+        let importing_id = insert_import_job(&conn, None, "/tmp/a.pdf", "importing", None)
+            .expect("insert importing job");
+
+        let raw_file_id = {
+            conn.execute(
+                "INSERT INTO raw_files (
+                    sha256, md5, original_name, current_name, extension, mime_type, byte_size, storage_path
+                 ) VALUES ('hash', NULL, 'b.pdf', 'b.pdf', 'pdf', 'application/pdf', 10, '/tmp/b.pdf')",
+                [],
+            )
+            .expect("insert raw file");
+            conn.last_insert_rowid()
+        };
+        let recognizing_id =
+            insert_import_job(&conn, Some(raw_file_id), "/tmp/b.pdf", "recognizing", None)
+                .expect("insert recognizing job");
+        conn.execute(
+            "INSERT INTO invoices (raw_file_id, currency, status, duplicate_status)
+             VALUES (?1, 'CNY', 'recognized', 'unknown')",
+            [raw_file_id],
+        )
+        .expect("insert invoice");
+
+        let changed = recover_interrupted_import_jobs(&conn).expect("recover jobs");
+        assert_eq!(changed, 2);
+
+        let importing = load_import_job(&conn, importing_id).expect("load importing");
+        let recognizing = load_import_job(&conn, recognizing_id).expect("load recognizing");
+
+        assert_eq!(importing.status, "failed");
+        assert!(importing.error_message.is_some());
+        assert_eq!(recognizing.status, "imported");
+        assert!(recognizing.error_message.is_none());
     }
 }

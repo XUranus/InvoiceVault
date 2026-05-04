@@ -40,15 +40,16 @@ use crate::{
     },
     extractor::invoice_to_embedding_text,
     extractor::{
-        batch_delete_invoices, batch_update_invoices, get_dashboard_stats, get_invoice_detail,
-        list_invoices, save_invoice_extraction, search_invoices, set_invoice_badge, update_invoice,
-        update_invoice_items, BadgeConfig, BadgeGroupConfig, BatchUpdateRequest, DashboardStats,
-        ExtractorError, InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
+        batch_delete_invoices, batch_update_invoices, count_unviewed_invoices, get_dashboard_stats,
+        get_invoice_detail, list_invoices, mark_invoice_viewed, save_invoice_extraction,
+        search_invoices, set_invoice_badge, update_invoice, update_invoice_items, BadgeConfig,
+        BadgeGroupConfig, BatchUpdateRequest, DashboardStats, ExtractorError,
+        InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
         InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest,
         UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
     },
     importer::{
-        import_files, list_import_jobs, update_import_job_status,
+        import_files, list_import_jobs, recover_interrupted_import_jobs, update_import_job_status,
         update_import_job_status_by_raw_file, ImportError, ImportJobListResult, ImportJobSummary,
     },
     llm::LlmProviderConfig,
@@ -226,6 +227,10 @@ impl AppState {
         let paths = create_app_paths(&app_data_dir)?;
         let mut db = Connection::open(&paths.database_path)?;
         run_migrations(&mut db)?;
+        let recovered_jobs = recover_interrupted_import_jobs(&db)?;
+        if recovered_jobs > 0 {
+            warn!("Recovered {recovered_jobs} interrupted import jobs");
+        }
         let db = Arc::new(Mutex::new(db));
 
         let chroma_config = ChromaConfig::default();
@@ -575,6 +580,16 @@ impl AppState {
             &self.paths.thumbnails_dir,
             invoice_id,
         )?)
+    }
+
+    pub fn mark_invoice_viewed(&self, invoice_id: i64) -> Result<bool, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(mark_invoice_viewed(&db, invoice_id)?)
+    }
+
+    pub fn count_unviewed_invoices(&self) -> Result<i64, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(count_unviewed_invoices(&db)?)
     }
 
     pub fn raw_file_path_for_invoice(&self, invoice_id: i64) -> Result<PathBuf, AppError> {
@@ -1573,10 +1588,7 @@ fn make_tool_executor(
                     .get("category")
                     .and_then(|v| v.as_str())
                     .map(String::from),
-                tag: args
-                    .get("tag")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                tag: args.get("tag").and_then(|v| v.as_str()).map(String::from),
                 status: args
                     .get("status")
                     .and_then(|v| v.as_str())
@@ -2430,9 +2442,7 @@ fn add_dir_to_zip(
         let entry = entry?;
         let path = entry.path();
         if path.is_file() {
-            let relative = path
-                .strip_prefix(base)
-                .unwrap_or(&path);
+            let relative = path.strip_prefix(base).unwrap_or(&path);
             let name = relative.to_string_lossy().replace('\\', "/");
             zip_writer
                 .start_file(name, options)

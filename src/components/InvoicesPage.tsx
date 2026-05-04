@@ -6,6 +6,7 @@ import {
   searchInvoicesSemantic,
   batchUpdateInvoices,
   batchDeleteInvoices,
+  markInvoiceViewed,
 } from "../api";
 import { InvoiceListControls } from "./InvoiceListControls";
 import { ExportButton } from "./ExportButton";
@@ -52,7 +53,6 @@ export function InvoicesPage() {
   const refreshInvoices = useAppStore((s) => s.refreshInvoices);
   const setError = useAppStore((s) => s.setError);
   const refreshKey = useRefreshStore((s) => s.invoicesKey);
-  const decrementInvoiceBadgeCount = useAppStore((s) => s.decrementInvoiceBadgeCount);
   const [view, setView] = React.useState<"list" | "detail">("list");
   const [viewMode, setViewMode] = React.useState<"cards" | "table">("table");
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
@@ -157,6 +157,7 @@ export function InvoicesPage() {
             duplicate_status: detail.duplicate_status,
             created_at: detail.created_at,
             updated_at: detail.updated_at,
+            viewed_at: detail.viewed_at,
             badges: detail.badges,
           });
         } catch {
@@ -251,7 +252,16 @@ export function InvoicesPage() {
   const handleSelectInvoice = (id: number) => {
     setSelectedId(id);
     setView("detail");
-    decrementInvoiceBadgeCount();
+    markInvoiceViewed(id)
+      .then((changed) => {
+        if (!changed) return;
+        setSearchResult((prev) =>
+          prev ? { ...prev, invoices: markInvoiceListViewed(prev.invoices, id) } : prev,
+        );
+        setSemanticInvoices((prev) => (prev ? markInvoiceListViewed(prev, id) : prev));
+        refreshInvoices();
+      })
+      .catch((err) => showError(String(err)));
   };
 
   React.useEffect(() => {
@@ -554,7 +564,7 @@ function InvoiceCardView({
     <div className="invoice-cards">
       {invoices.map((invoice, i) => (
         <article
-          className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""}`}
+          className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""} ${!invoice.viewed_at ? "invoice-card-unviewed" : ""}`}
           key={invoice.id}
           onClick={() => onSelectInvoice(invoice.id)}
         >
@@ -592,6 +602,9 @@ function InvoiceCardView({
             </div>
           </div>
           <div className="invoice-card-tags">
+            {!invoice.viewed_at ? (
+              <span className="mini-tag tag-unviewed">未查看</span>
+            ) : null}
             <span className={`mini-tag ${toneClass(invoiceStatusMeta(invoice.status).tone)}`}>
               {invoiceStatusMeta(invoice.status).label}
             </span>
@@ -734,17 +747,25 @@ function formatInvoiceCode(invoice: Invoice): string {
 
 function InvoiceTagBadges({ invoice }: { invoice: Invoice }) {
   const tags = buildInvoiceTags(invoice);
-  if (tags.length === 0) {
+  if (tags.length === 0 && invoice.viewed_at) {
     return <span className="muted">-</span>;
   }
   return (
     <div className="invoice-table-tags">
+      {!invoice.viewed_at ? <span className="mini-tag tag-unviewed">未查看</span> : null}
       {tags.map((tag) => (
         <span key={`${tag.label}-${tag.tone}`} className={`mini-tag ${toneClass(tag.tone)}`}>
           {tag.label}
         </span>
       ))}
     </div>
+  );
+}
+
+function markInvoiceListViewed(invoices: Invoice[], id: number): Invoice[] {
+  const viewedAt = new Date().toISOString();
+  return invoices.map((invoice) =>
+    invoice.id === id ? { ...invoice, viewed_at: invoice.viewed_at ?? viewedAt } : invoice,
   );
 }
 

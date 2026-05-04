@@ -67,6 +67,14 @@ export async function getInvoiceDetail(
   return invoke<InvoiceDetail>("get_invoice_detail", { invoiceId });
 }
 
+export async function markInvoiceViewed(invoiceId: number): Promise<boolean> {
+  return invoke<boolean>("mark_invoice_viewed", { invoiceId });
+}
+
+export async function countUnviewedInvoices(): Promise<number> {
+  return invoke<number>("count_unviewed_invoices");
+}
+
 export async function openInvoiceRawFileInBrowser(invoiceId: number): Promise<void> {
   return invoke<void>("open_invoice_raw_file_in_browser", { invoiceId });
 }

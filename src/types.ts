@@ -53,6 +53,7 @@ export type Invoice = {
   duplicate_status: string;
   created_at: string;
   updated_at: string;
+  viewed_at: string | null;
   badges: InvoiceBadgeSelection[];
 };
 
@@ -136,12 +137,14 @@ export type InvoiceDetail = {
   total_amount: string | null;
   category: string | null;
   remarks: string | null;
+  extra_fields: string | null;
   source_page_range: string | null;
   confidence: number | null;
   status: string;
   duplicate_status: string;
   created_at: string;
   updated_at: string;
+  viewed_at: string | null;
   items: InvoiceItemRow[];
   raw_file_name: string | null;
   raw_file_mime: string | null;

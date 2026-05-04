@@ -1045,6 +1045,12 @@ textarea:focus {
   color: var(--color-badge-neutral-text);
 }
 
+.tag-unviewed {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary-text);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+}
+
 /* ---- Invoice Cards ---- */
 .invoice-cards {
   display: flex;
@@ -1069,6 +1075,10 @@ textarea:focus {
 .invoice-card:hover {
   border-color: var(--color-primary);
   box-shadow: var(--shadow-card-hover);
+}
+
+.invoice-card-unviewed {
+  border-color: color-mix(in srgb, var(--color-primary) 26%, var(--glass-border));
 }
 
 .invoice-card-body {

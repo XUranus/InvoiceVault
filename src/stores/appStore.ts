@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { AppHealth, Invoice } from "../types";
-import { getAppHealth, searchInvoices } from "../api";
+import { countUnviewedInvoices, getAppHealth, searchInvoices } from "../api";
 
 type AppStore = {
   health: AppHealth | null;
@@ -21,8 +21,6 @@ type AppStore = {
   setUnreadNotificationCount: (n: number) => void;
   setImportBadgeCount: (n: number) => void;
   setInvoiceBadgeCount: (n: number) => void;
-  incrementInvoiceBadgeCount: (n: number) => void;
-  decrementInvoiceBadgeCount: () => void;
   initialize: () => Promise<void>;
   refreshInvoices: () => Promise<void>;
 };
@@ -52,12 +50,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ unreadNotificationCount }),
   setImportBadgeCount: (importBadgeCount) => set({ importBadgeCount }),
   setInvoiceBadgeCount: (invoiceBadgeCount) => set({ invoiceBadgeCount }),
-  incrementInvoiceBadgeCount: (n) =>
-    set((s) => ({ invoiceBadgeCount: s.invoiceBadgeCount + n })),
-  decrementInvoiceBadgeCount: () =>
-    set((s) => ({
-      invoiceBadgeCount: Math.max(0, s.invoiceBadgeCount - 1),
-    })),
 
   initialize: async () => {
     try {
@@ -67,8 +59,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ error: String(err) });
     }
     try {
-      const result = await searchInvoices({ page: 1, page_size: 100 });
-      set({ invoices: result.invoices });
+      const [result, invoiceBadgeCount] = await Promise.all([
+        searchInvoices({ page: 1, page_size: 100 }),
+        countUnviewedInvoices(),
+      ]);
+      set({ invoices: result.invoices, invoiceBadgeCount });
     } catch (err) {
       set({ error: String(err) });
     }
@@ -76,8 +71,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   refreshInvoices: async () => {
     try {
-      const result = await searchInvoices({ page: 1, page_size: 100 });
-      set({ invoices: result.invoices });
+      const [result, invoiceBadgeCount] = await Promise.all([
+        searchInvoices({ page: 1, page_size: 100 }),
+        countUnviewedInvoices(),
+      ]);
+      set({ invoices: result.invoices, invoiceBadgeCount });
     } catch (err) {
       set({ error: String(err) });
     }

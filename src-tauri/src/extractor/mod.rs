@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 #[derive(Debug, Deserialize)]
 pub struct SaveInvoiceExtractionRequest {
@@ -34,6 +35,7 @@ pub struct InvoiceSummary {
     pub duplicate_status: String,
     pub created_at: String,
     pub updated_at: String,
+    pub viewed_at: Option<String>,
     pub badges: Vec<InvoiceBadgeSelection>,
 }
 
@@ -93,7 +95,7 @@ pub fn search_invoices(
             invoice_type, invoice_code, invoice_number,
             issue_date, seller_name, buyer_name, currency, total_amount,
             category, source_page_range, confidence, status, duplicate_status,
-            created_at, updated_at
+            created_at, updated_at, viewed_at
         FROM invoices
         WHERE 1=1 {where_clause}
         {sort_clause}
@@ -298,12 +300,14 @@ pub struct InvoiceDetail {
     pub total_amount: Option<String>,
     pub category: Option<String>,
     pub remarks: Option<String>,
+    pub extra_fields: Option<String>,
     pub source_page_range: Option<String>,
     pub confidence: Option<f64>,
     pub status: String,
     pub duplicate_status: String,
     pub created_at: String,
     pub updated_at: String,
+    pub viewed_at: Option<String>,
     pub items: Vec<InvoiceItemRow>,
     pub raw_file_name: Option<String>,
     pub raw_file_mime: Option<String>,
@@ -375,8 +379,8 @@ pub fn get_invoice_detail(
             id, raw_file_id, invoice_type, invoice_code, invoice_number,
             issue_date, seller_name, seller_tax_id, buyer_name, buyer_tax_id,
             currency, amount_without_tax, tax_amount, total_amount,
-            category, remarks, source_page_range, confidence, status,
-            duplicate_status, created_at, updated_at
+            category, remarks, extra_fields, source_page_range, confidence, status,
+            duplicate_status, created_at, updated_at, viewed_at
         FROM invoices WHERE id = ?1",
         [invoice_id],
         |row| {
@@ -399,16 +403,18 @@ pub fn get_invoice_detail(
                 total_amount: row.get(13)?,
                 category: row.get(14)?,
                 remarks: row.get(15)?,
-                source_page_range: row.get(16)?,
-                confidence: row.get(17)?,
+                extra_fields: row.get(16)?,
+                source_page_range: row.get(17)?,
+                confidence: row.get(18)?,
                 status: row
-                    .get::<_, Option<String>>(18)?
+                    .get::<_, Option<String>>(19)?
                     .unwrap_or_else(|| "pending_confirmation".into()),
                 duplicate_status: row
-                    .get::<_, Option<String>>(19)?
+                    .get::<_, Option<String>>(20)?
                     .unwrap_or_else(|| "unknown".into()),
-                created_at: row.get(20)?,
-                updated_at: row.get(21)?,
+                created_at: row.get(21)?,
+                updated_at: row.get(22)?,
+                viewed_at: row.get(23)?,
                 items: Vec::new(),
                 raw_file_name: None,
                 raw_file_mime: None,
@@ -877,6 +883,8 @@ struct InvoiceExtraction {
     #[serde(default)]
     remarks: Option<String>,
     #[serde(default)]
+    extra_fields: Map<String, Value>,
+    #[serde(default)]
     confidence: Option<f64>,
     #[serde(default)]
     needs_review: Option<bool>,
@@ -971,7 +979,8 @@ pub fn list_invoices(conn: &Connection) -> Result<Vec<InvoiceSummary>, Extractor
             status,
             duplicate_status,
             created_at,
-            updated_at
+            updated_at,
+            viewed_at
         FROM invoices
         ORDER BY id DESC
         LIMIT 100",
@@ -1007,6 +1016,7 @@ fn normalize_extraction(extraction: &mut InvoiceExtraction) -> Result<(), Extrac
     extraction.currency = clean_optional(extraction.currency.take()).or_else(|| Some("CNY".into()));
     extraction.category = clean_optional(extraction.category.take());
     extraction.remarks = clean_optional(extraction.remarks.take());
+    normalize_extra_fields(&mut extraction.extra_fields);
 
     if let Some(issue_date) = extraction.issue_date.as_deref() {
         NaiveDate::parse_from_str(issue_date, "%Y-%m-%d")
@@ -1065,11 +1075,12 @@ fn insert_invoice(
             total_amount,
             category,
             remarks,
+            extra_fields,
             source_page_range,
             confidence,
             status,
             duplicate_status
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 'unknown')",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, 'unknown')",
         params![
             raw_file_id,
             extraction.invoice_type,
@@ -1086,6 +1097,7 @@ fn insert_invoice(
             extraction.total_amount,
             extraction.category,
             extraction.remarks,
+            extra_fields_json(extraction),
             source_page_range,
             extraction.confidence,
             status,
@@ -1093,6 +1105,26 @@ fn insert_invoice(
     )?;
 
     Ok(conn.last_insert_rowid())
+}
+
+fn normalize_extra_fields(fields: &mut Map<String, Value>) {
+    fields.retain(|key, value| {
+        if key.trim().is_empty() {
+            return false;
+        }
+        match value {
+            Value::Null => false,
+            Value::String(s) => !s.trim().is_empty(),
+            Value::Array(items) => !items.is_empty(),
+            Value::Object(map) => !map.is_empty(),
+            _ => true,
+        }
+    });
+}
+
+fn extra_fields_json(extraction: &InvoiceExtraction) -> Option<String> {
+    (!extraction.extra_fields.is_empty())
+        .then(|| Value::Object(extraction.extra_fields.clone()).to_string())
 }
 
 fn insert_invoice_items(
@@ -1185,7 +1217,8 @@ fn load_invoice_summary(
             status,
             duplicate_status,
             created_at,
-            updated_at
+            updated_at,
+            viewed_at
         FROM invoices
         WHERE id = ?1",
         [invoice_id],
@@ -1216,8 +1249,29 @@ fn row_to_invoice_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceSu
         duplicate_status: row.get(15)?,
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
+        viewed_at: row.get(18)?,
         badges: Vec::new(),
     })
+}
+
+pub fn mark_invoice_viewed(conn: &Connection, invoice_id: i64) -> Result<bool, ExtractorError> {
+    let changed = conn.execute(
+        "UPDATE invoices
+        SET viewed_at = COALESCE(viewed_at, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?1 AND viewed_at IS NULL",
+        [invoice_id],
+    )?;
+    Ok(changed > 0)
+}
+
+pub fn count_unviewed_invoices(conn: &Connection) -> Result<i64, ExtractorError> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM invoices WHERE viewed_at IS NULL",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(ExtractorError::from)
 }
 
 fn attach_badges_to_summaries(
@@ -1614,7 +1668,7 @@ pub fn batch_update_invoices(
             invoice_type, invoice_code, invoice_number, issue_date,
             seller_name, buyer_name, currency, total_amount, category,
             source_page_range, confidence, status, duplicate_status,
-            created_at, updated_at
+            created_at, updated_at, viewed_at
         FROM invoices WHERE id IN ({}) ORDER BY id",
         ids_str
     ))?;

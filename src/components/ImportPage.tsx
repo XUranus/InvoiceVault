@@ -55,6 +55,15 @@ export function ImportPage() {
     fetchJobs(1);
   }, [refreshKey, fetchJobs]);
 
+  React.useEffect(() => {
+    if (!result?.jobs.some(isActiveImportJob)) return;
+
+    const timer = window.setInterval(() => {
+      fetchJobs(page);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [fetchJobs, page, result?.jobs]);
+
   const doImport = React.useCallback(
     async (paths: string[]) => {
       setIsImporting(true);
@@ -150,16 +159,12 @@ export function ImportPage() {
 
   const allJobs = result?.jobs ?? [];
   const visibleJobs = [...optimisticJobs, ...allJobs];
-  const activeJobs = allJobs.filter((j) =>
-    ["importing", "pending", "processing", "recognizing"].includes(j.status),
-  );
+  const activeJobs = allJobs.filter(isActiveImportJob);
   const visibleActiveJobs = [
     ...optimisticJobs,
     ...activeJobs,
   ];
-  const completedJobs = allJobs.filter(
-    (j) => !["importing", "pending", "processing", "recognizing"].includes(j.status),
-  );
+  const completedJobs = allJobs.filter((j) => !isActiveImportJob(j));
 
   return (
     <div className="page">
@@ -413,8 +418,7 @@ function JobRow({
   isRecognized: boolean;
 }) {
   const meta = importStatusMeta(job.status);
-  const isBusy = ["importing", "pending", "processing", "recognizing"].includes(job.status) ||
-    recognizingJobId === job.id;
+  const isBusy = isActiveImportJob(job) || recognizingJobId === job.id;
   const fileTypeLabel = formatFileType(job.mime_type, job.original_name ?? job.source_path);
   const timeLabel = formatImportTime(job.updated_at || job.created_at);
 
@@ -556,6 +560,10 @@ function CopyableText({
       {copiedField === field ? <span className="copy-hint">已复制</span> : null}
     </>
   );
+}
+
+function isActiveImportJob(job: ImportJob): boolean {
+  return ["importing", "pending", "processing", "recognizing"].includes(job.status);
 }
 
 function canRecognizeJob(job: ImportJob) {

@@ -293,7 +293,14 @@ fn invoice_recognition_prompt() -> &'static str {
 
 如果图片不是发票，输出 {"is_invoice": false, "confidence": 0, "needs_review": true, "warnings": ["not an invoice"]}。
 
-如果图片是发票，按下面字段输出。无法识别的字段用 null，金额用数字，日期必须使用 YYYY-MM-DD：
+如果图片是发票或可报销票据，按下面字段输出。无法识别的字段用 null，金额用数字，日期必须使用 YYYY-MM-DD。
+支持并尽量准确区分这些类型：
+- 增值税电子普通发票、增值税电子专用发票、全电发票、增值税普通发票、增值税专用发票
+- 通行费发票、出租车发票、火车票/铁路电子客票、机票行程单
+- 定额发票、卷式发票、机动车销售统一发票、二手车销售统一发票
+- 海关进口增值税专用缴款书、财政电子票据、非税收入票据、普通收据
+
+特殊票据没有标准购销方时，尽量把承运方/收款方放入 seller，把乘客/付款方放入 buyer。特殊字段放入 extra_fields，不要塞进 remarks。
 {
   "is_invoice": true,
   "invoice_type": "string|null",
@@ -320,6 +327,25 @@ fn invoice_recognition_prompt() -> &'static str {
     }
   ],
   "remarks": "string|null",
+  "extra_fields": {
+    "passenger_name": "string|null",
+    "train_number": "string|null",
+    "flight_number": "string|null",
+    "departure": "string|null",
+    "arrival": "string|null",
+    "departure_time": "string|null",
+    "arrival_time": "string|null",
+    "toll_entry": "string|null",
+    "toll_exit": "string|null",
+    "license_plate": "string|null",
+    "vehicle_type": "string|null",
+    "vehicle_model": "string|null",
+    "vin": "string|null",
+    "engine_number": "string|null",
+    "tax_payment_certificate_number": "string|null",
+    "receipt_code": "string|null",
+    "receipt_number": "string|null"
+  },
   "confidence": 0.0,
   "needs_review": true,
   "warnings": ["string"]
