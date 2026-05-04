@@ -1360,6 +1360,75 @@ textarea:focus {
   accent-color: var(--color-primary);
 }
 
+.invoice-tag-filter {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0 6px;
+  min-width: 0;
+}
+
+.invoice-tag-filter-label {
+  color: var(--color-text-muted);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 28px;
+}
+
+.invoice-tag-filter-list {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.invoice-tag-filter-chip,
+.invoice-tag-filter-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--glass-bg-strong);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  max-width: 220px;
+  padding: 4px 10px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.invoice-tag-filter-chip span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invoice-tag-filter-chip:hover,
+.invoice-tag-filter-clear:hover {
+  background: var(--color-hover-bg);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.invoice-tag-filter-chip.active {
+  background: var(--color-primary-bg);
+  border-color: rgba(40, 120, 217, 0.34);
+  color: var(--color-primary-text);
+}
+
+.invoice-tag-filter-count {
+  color: inherit;
+  font-size: 11px;
+  opacity: 0.68;
+}
+
 /* ---- Batch Action Bar ---- */
 .batch-bar {
   display: flex;

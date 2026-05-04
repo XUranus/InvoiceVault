@@ -76,6 +76,7 @@ export type InvoiceSearchParams = {
   amount_min?: string;
   amount_max?: string;
   category?: string;
+  tag?: string;
   status?: string;
   duplicate_status?: string;
   sort_by?: string;

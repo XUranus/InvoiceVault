@@ -1573,6 +1573,10 @@ fn make_tool_executor(
                     .get("category")
                     .and_then(|v| v.as_str())
                     .map(String::from),
+                tag: args
+                    .get("tag")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
                 status: args
                     .get("status")
                     .and_then(|v| v.as_str())

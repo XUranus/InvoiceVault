@@ -42,6 +42,11 @@ const BATCH_CATEGORY_OPTIONS = [
   { value: "其他", label: "其他" },
 ];
 
+type InvoiceTagOption = {
+  label: string;
+  count: number;
+};
+
 export function InvoicesPage() {
   const invoices = useAppStore((s) => s.invoices);
   const refreshInvoices = useAppStore((s) => s.refreshInvoices);
@@ -62,6 +67,7 @@ export function InvoicesPage() {
     page: 1,
     page_size: 20,
   });
+  const [tagOptions, setTagOptions] = React.useState<InvoiceTagOption[]>([]);
   const [loading, setLoading] = React.useState(false);
 
   // Semantic search state
@@ -103,6 +109,20 @@ export function InvoicesPage() {
   React.useEffect(() => {
     doSearch(params);
   }, [params, doSearch, refreshKey]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    searchInvoices({ page: 1, page_size: 500 })
+      .then((result) => {
+        if (!cancelled) setTagOptions(buildTagOptions(result.invoices));
+      })
+      .catch(() => {
+        if (!cancelled) setTagOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
 
   const handleSemanticSearch = async () => {
     if (!semanticQuery.trim()) {
@@ -256,6 +276,11 @@ export function InvoicesPage() {
     setParams((prev) => ({ ...prev, ...p, page: 1 }));
   };
 
+  const handleTagFilterChange = (tag: string | undefined) => {
+    setSearchMode("keyword");
+    setParams((prev) => ({ ...prev, tag, page: 1 }));
+  };
+
   const handleSort = (sortBy: string) => {
     setParams((prev) => ({
       ...prev,
@@ -398,14 +423,21 @@ export function InvoicesPage() {
           </button>
         </div>
       ) : (
-        <InvoiceListControls
-          params={params}
-          onFilterChange={handleFilterChange}
-          onSort={handleSort}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          onPageChange={(page) => setParams((prev) => ({ ...prev, page }))}
-        />
+        <>
+          <InvoiceListControls
+            params={params}
+            onFilterChange={handleFilterChange}
+            onSort={handleSort}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={(page) => setParams((prev) => ({ ...prev, page }))}
+          />
+          <InvoiceTagFilter
+            tags={tagOptions}
+            selectedTag={params.tag}
+            onChange={handleTagFilterChange}
+          />
+        </>
       )}
 
       {/* Select all */}
@@ -461,6 +493,46 @@ export function InvoicesPage() {
         onConfirm={handleBatchDelete}
         onCancel={() => setDeleteDialogOpen(false)}
       />
+    </div>
+  );
+}
+
+function InvoiceTagFilter({
+  tags,
+  selectedTag,
+  onChange,
+}: {
+  tags: InvoiceTagOption[];
+  selectedTag: string | undefined;
+  onChange: (tag: string | undefined) => void;
+}) {
+  if (tags.length === 0) return null;
+
+  return (
+    <div className="invoice-tag-filter" aria-label="按标签筛选发票">
+      <span className="invoice-tag-filter-label">标签</span>
+      <div className="invoice-tag-filter-list">
+        {selectedTag ? (
+          <button
+            className="invoice-tag-filter-clear"
+            type="button"
+            onClick={() => onChange(undefined)}
+          >
+            全部
+          </button>
+        ) : null}
+        {tags.map((tag) => (
+          <button
+            key={tag.label}
+            className={`invoice-tag-filter-chip ${selectedTag === tag.label ? "active" : ""}`}
+            type="button"
+            onClick={() => onChange(selectedTag === tag.label ? undefined : tag.label)}
+          >
+            <span>{tag.label}</span>
+            <span className="invoice-tag-filter-count">{tag.count}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -699,6 +771,20 @@ function buildInvoiceTags(invoice: Invoice): Array<{ label: string; tone: "succe
   }
 
   return tags;
+}
+
+function buildTagOptions(invoices: Invoice[]): InvoiceTagOption[] {
+  const counts = new Map<string, number>();
+  for (const invoice of invoices) {
+    const labels = new Set(buildInvoiceTags(invoice).map((tag) => tag.label));
+    for (const label of labels) {
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "zh-CN"))
+    .slice(0, 30);
 }
 
 function fileTypeTag(mimeType: string | null): { label: string; tone: "neutral" | "info" } | null {

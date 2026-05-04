@@ -165,11 +165,6 @@ export function ImportPage() {
     <div className="page">
       <div className="page-header">
         <h2 className="page-title" style={{ margin: 0 }}>导入发票</h2>
-        <div className="page-header-actions">
-          <button className="btn-primary" onClick={handlePickFiles} disabled={isImporting}>
-            {isImporting ? "导入中..." : "选择文件"}
-          </button>
-        </div>
       </div>
 
       <div className="import-zone">

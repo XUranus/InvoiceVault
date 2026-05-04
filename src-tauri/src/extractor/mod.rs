@@ -49,6 +49,7 @@ pub struct InvoiceSearchParams {
     pub amount_min: Option<String>,
     pub amount_max: Option<String>,
     pub category: Option<String>,
+    pub tag: Option<String>,
     pub status: Option<String>,
     pub duplicate_status: Option<String>,
     pub sort_by: Option<String>,
@@ -199,6 +200,43 @@ fn build_search_where(
     if let Some(ref c) = params.category {
         clauses.push(format!("category LIKE ?{}", values.len() + 1));
         values.push(Box::new(format!("%{c}%")));
+    }
+
+    if let Some(ref tag) = params.tag {
+        let trimmed = tag.trim();
+        if !trimmed.is_empty() {
+            let n = values.len() + 1;
+            clauses.push(format!(
+                "(category = ?{n}
+                    OR invoice_type = ?{n}
+                    OR (?{n} = '专票' AND invoice_type LIKE '%专用%')
+                    OR (?{n} = '普票' AND invoice_type LIKE '%普通%')
+                    OR (?{n} = 'PDF' AND EXISTS (
+                        SELECT 1 FROM raw_files rf
+                        WHERE rf.id = invoices.raw_file_id
+                            AND rf.mime_type = 'application/pdf'
+                    ))
+                    OR (?{n} = '图片' AND EXISTS (
+                        SELECT 1 FROM raw_files rf
+                        WHERE rf.id = invoices.raw_file_id
+                            AND rf.mime_type LIKE 'image/%'
+                    ))
+                    OR (?{n} = '文件' AND EXISTS (
+                        SELECT 1 FROM raw_files rf
+                        WHERE rf.id = invoices.raw_file_id
+                            AND rf.mime_type IS NOT NULL
+                            AND rf.mime_type != 'application/pdf'
+                            AND rf.mime_type NOT LIKE 'image/%'
+                    ))
+                    OR EXISTS (
+                        SELECT 1 FROM invoice_badges badge
+                        WHERE badge.invoice_id = invoices.id
+                            AND (badge.value = ?{n}
+                                OR badge.group_name || ': ' || badge.value = ?{n})
+                    ))"
+            ));
+            values.push(Box::new(trimmed.to_owned()));
+        }
     }
 
     if let Some(ref s) = params.status {
