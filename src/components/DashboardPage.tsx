@@ -4,11 +4,17 @@ import type {
   ImportJob,
   RecognitionQueueStatus,
 } from "../types";
-import { getDashboardStats, getRecognitionQueueStatus, listImportJobs } from "../api";
+import {
+  getDashboardStats,
+  getInvoiceIdByRawFile,
+  getRecognitionQueueStatus,
+  listImportJobs,
+} from "../api";
 import { importStatusMeta, toneClass } from "../status";
 import { DashboardStats } from "./DashboardStats";
 import { useAppStore } from "../stores/appStore";
 import { useRefreshStore } from "../stores/refreshStore";
+import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 
 type DateRange = "all" | "this_month" | "last_month" | "last_3m" | "custom";
 
@@ -46,9 +52,9 @@ const DATE_OPTIONS: { value: DateRange; label: string }[] = [
 
 function formatAmount(value: number): string {
   if (value >= 10000) {
-    return (value / 10000).toFixed(1) + " 万";
+    return (value / 10000).toFixed(1) + " 万元";
   }
-  return value.toFixed(2);
+  return value.toFixed(2) + " 元";
 }
 
 function formatJobTime(value: string): string {
@@ -67,9 +73,16 @@ function queueTotal(queueStatus: RecognitionQueueStatus | null): number {
   return queueStatus ? queueStatus.pending + queueStatus.running : 0;
 }
 
+function canOpenImportedJob(job: ImportJob): boolean {
+  return ["imported", "completed", "recognized"].includes(job.status) && (
+    Boolean(job.invoice_id) || Boolean(job.raw_file_id)
+  );
+}
+
 export function DashboardPage() {
   const error = useAppStore((s) => s.error);
   const refreshKey = useRefreshStore((s) => s.dashboardKey);
+  const navigateToInvoice = useNavigateToInvoice();
   const [stats, setStats] = React.useState<DashboardStatsType | null>(null);
   const [statsError, setStatsError] = React.useState<string | null>(null);
   const [queueStatus, setQueueStatus] = React.useState<RecognitionQueueStatus | null>(null);
@@ -92,10 +105,10 @@ export function DashboardPage() {
 
   React.useEffect(() => {
     setOperationsError(null);
-    Promise.all([getRecognitionQueueStatus(), listImportJobs(1, 3)])
+    Promise.all([getRecognitionQueueStatus(), listImportJobs(1, 5)])
       .then(([queue, jobs]) => {
         setQueueStatus(queue);
-        setRecentJobs(jobs.jobs);
+        setRecentJobs(jobs.jobs.slice(0, 5));
       })
       .catch((err) => {
         setQueueStatus(null);
@@ -105,7 +118,25 @@ export function DashboardPage() {
   }, [refreshKey]);
 
   const failedRecentJobs = recentJobs.filter((job) => job.status === "failed").length;
-  const latestJob = recentJobs[0];
+
+  const handleOpenImportedJob = async (job: ImportJob) => {
+    if (!canOpenImportedJob(job)) return;
+    if (job.invoice_id) {
+      navigateToInvoice(job.invoice_id);
+      return;
+    }
+    if (!job.raw_file_id) return;
+    try {
+      const invoiceId = await getInvoiceIdByRawFile(job.raw_file_id);
+      if (invoiceId) {
+        navigateToInvoice(invoiceId);
+      } else {
+        setOperationsError("该导入任务还没有生成发票详情。");
+      }
+    } catch (err) {
+      setOperationsError(String(err));
+    }
+  };
 
   return (
     <div className="page">
@@ -173,7 +204,7 @@ export function DashboardPage() {
               <span className="dashboard-work-label">本月新增</span>
               <span className="dashboard-work-value">{stats.this_month_count}</span>
               <span className="dashboard-work-meta">
-                {stats.currency} {formatAmount(stats.this_month_amount)}
+                {formatAmount(stats.this_month_amount)}
               </span>
             </div>
           </div>
@@ -193,7 +224,7 @@ export function DashboardPage() {
                 </div>
                 <div>
                   <span className="dashboard-summary-value">
-                    {stats.currency} {formatAmount(stats.total_amount)}
+                    {formatAmount(stats.total_amount)}
                   </span>
                   <span className="dashboard-summary-label">金额合计</span>
                 </div>
@@ -214,24 +245,22 @@ export function DashboardPage() {
               <div className="dashboard-panel-header">
                 <div>
                   <h3>最近导入</h3>
-                  <p>{latestJob ? jobTitle(latestJob) : "暂无导入任务"}</p>
                 </div>
               </div>
               {recentJobs.length > 0 ? (
                 <div className="dashboard-job-table-wrap">
                   <table className="dashboard-job-table">
-                    <thead>
-                      <tr>
-                        <th>文件</th>
-                        <th>时间</th>
-                        <th>状态</th>
-                      </tr>
-                    </thead>
                     <tbody>
                       {recentJobs.map((job) => {
                         const meta = importStatusMeta(job.status);
+                        const canOpen = canOpenImportedJob(job);
                         return (
-                          <tr key={job.id}>
+                          <tr
+                            key={job.id}
+                            className={canOpen ? "dashboard-job-row-clickable" : ""}
+                            onClick={() => handleOpenImportedJob(job)}
+                            title={canOpen ? "打开发票详情" : undefined}
+                          >
                             <td>
                               <span className="dashboard-job-title" title={jobTitle(job)}>
                                 {jobTitle(job)}
