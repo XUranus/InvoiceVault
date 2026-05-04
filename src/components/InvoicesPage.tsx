@@ -722,7 +722,7 @@ function InvoiceCodeCell({ invoice }: { invoice: Invoice }) {
 
 function formatInvoiceAmount(invoice: Invoice): string {
   if (!invoice.total_amount) return "金额未识别";
-  return `${invoice.currency || "¥"} ${invoice.total_amount}`;
+  return `${invoice.total_amount} 元`;
 }
 
 function formatInvoiceCode(invoice: Invoice): string {

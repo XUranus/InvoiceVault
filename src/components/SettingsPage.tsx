@@ -29,6 +29,7 @@ import { WatchDirManager } from "./WatchDirManager";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useAppStore } from "../stores/appStore";
 import { useLlmStore } from "../stores/llmStore";
+import { APP_CONFIG } from "../appConfig";
 
 export function SettingsPage() {
   const health = useAppStore((s) => s.health);
@@ -84,6 +85,7 @@ export function SettingsPage() {
   const [badgeOptionDrafts, setBadgeOptionDrafts] = React.useState<Record<number, string>>({});
   const [savingBadgeConfig, setSavingBadgeConfig] = React.useState(false);
   const [badgeConfigMessage, setBadgeConfigMessage] = React.useState<string | null>(null);
+  const [developerCopied, setDeveloperCopied] = React.useState(false);
 
   // Gate all auto-save effects until async config load completes.
   // Without this, the initial render fires auto-save with default state
@@ -286,6 +288,33 @@ export function SettingsPage() {
       await open(path);
     } catch {
       // ignore if shell plugin not available
+    }
+  };
+
+  const openParentFolder = (path: string) => {
+    const normalized = path.replace(/\\/g, "/");
+    const parent = normalized.includes("/")
+      ? normalized.slice(0, normalized.lastIndexOf("/"))
+      : path;
+    openFolder(parent || path);
+  };
+
+  const openExternalLink = async (url: string) => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-shell");
+      await open(url);
+    } catch {
+      // ignore if shell plugin not available
+    }
+  };
+
+  const copyDeveloperEmail = async () => {
+    try {
+      await navigator.clipboard.writeText("xuranus42@qq.com");
+      setDeveloperCopied(true);
+      window.setTimeout(() => setDeveloperCopied(false), 1600);
+    } catch {
+      // ignore if clipboard is unavailable
     }
   };
 
@@ -700,36 +729,6 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {health ? (
-        <div className="section">
-          <h3>系统信息</h3>
-          <dl className="info-grid">
-            <dt>数据目录</dt>
-            <dd>
-              <a
-                className="path-link"
-                onClick={() => openFolder(health.app_data_dir)}
-                title="点击打开文件夹"
-              >
-                {health.app_data_dir}
-              </a>
-            </dd>
-            <dt>数据库</dt>
-            <dd>
-              <a
-                className="path-link"
-                onClick={() => openFolder(health.database_path)}
-                title="点击打开文件夹"
-              >
-                {health.database_path}
-              </a>
-            </dd>
-            <dt>迁移版本</dt>
-            <dd>{health.migration_version}</dd>
-          </dl>
-        </div>
-      ) : null}
-
       <div className="section">
         <h3>数据管理</h3>
 
@@ -829,6 +828,63 @@ export function SettingsPage() {
       />
 
       <WatchDirManager />
+
+      {health ? (
+        <div className="section">
+          <h3>系统信息</h3>
+          <dl className="info-grid">
+            <dt>应用</dt>
+            <dd>InvoiceVault : v{APP_CONFIG.version}</dd>
+            <dt>数据目录</dt>
+            <dd>
+              <button
+                className="path-link path-button"
+                type="button"
+                onClick={() => openFolder(health.app_data_dir)}
+                title="点击打开文件夹"
+              >
+                {health.app_data_dir}
+              </button>
+            </dd>
+            <dt>数据库</dt>
+            <dd>
+              <button
+                className="path-link path-button"
+                type="button"
+                onClick={() => openParentFolder(health.database_path)}
+                title="点击打开所在目录"
+              >
+                {health.database_path}
+              </button>
+            </dd>
+            <dt>迁移版本</dt>
+            <dd>{health.migration_version}</dd>
+            <dt>开发者</dt>
+            <dd>
+              <button
+                className="path-link path-button"
+                type="button"
+                onClick={copyDeveloperEmail}
+                title="点击复制邮箱"
+              >
+                xuranus42@qq.com
+              </button>
+              {developerCopied ? <span className="copy-hint">已复制</span> : null}
+            </dd>
+            <dt>GitHub</dt>
+            <dd>
+              <button
+                className="path-link path-button"
+                type="button"
+                onClick={() => openExternalLink("https://github.com/XUranus/InvoiceVault")}
+                title="打开 GitHub 仓库"
+              >
+                https://github.com/XUranus/InvoiceVault
+              </button>
+            </dd>
+          </dl>
+        </div>
+      ) : null}
     </div>
   );
 }

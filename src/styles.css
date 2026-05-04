@@ -570,6 +570,14 @@ textarea:focus {
   color: var(--color-primary-hover);
 }
 
+.path-button {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
 /* ---- Empty State ---- */
 .empty-state {
   text-align: center;
