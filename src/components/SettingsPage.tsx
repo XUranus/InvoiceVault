@@ -6,6 +6,7 @@ import type {
   EmbeddingTestResult,
   ExternalDependencyStatus,
   BadgeConfig,
+  PriceConfig,
 } from "../types";
 import {
   testLlmConnection,
@@ -23,6 +24,8 @@ import {
   checkExternalDependencies,
   getBadgeConfig,
   setBadgeConfig,
+  getPriceConfig,
+  setPriceConfig,
 } from "../api";
 import type { ExportLogsResult, CleanupStorageResult } from "../types";
 import { WatchDirManager } from "./WatchDirManager";
@@ -38,9 +41,11 @@ export function SettingsPage() {
     llmBaseUrl,
     llmModel,
     llmApiKey,
+    llmAuditEnabled,
     setLlmBaseUrl,
     setLlmModel,
     setLlmApiKey,
+    setLlmAuditEnabled,
   } = useLlmStore();
   const theme = useAppStore((s) => s.theme);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
@@ -86,6 +91,12 @@ export function SettingsPage() {
   const [savingBadgeConfig, setSavingBadgeConfig] = React.useState(false);
   const [badgeConfigMessage, setBadgeConfigMessage] = React.useState<string | null>(null);
   const [developerCopied, setDeveloperCopied] = React.useState(false);
+  const [priceConfig, setPriceConfigState] = React.useState<PriceConfig>({
+    llm_input_price_per_1k: 0.0008,
+    llm_output_price_per_1k: 0.002,
+    embedding_input_price_per_1k: 0.0007,
+    embedding_output_price_per_1k: 0.0007,
+  });
 
   // Gate all auto-save effects until async config load completes.
   // Without this, the initial render fires auto-save with default state
@@ -93,6 +104,7 @@ export function SettingsPage() {
   const configLoaded = React.useRef(false);
   const lastSavedChroma = React.useRef<string>("");
   const lastSavedEmb = React.useRef<string>("");
+  const lastSavedPrice = React.useRef<string>("");
 
   React.useEffect(() => {
     let cancelled = false;
@@ -121,6 +133,13 @@ export function SettingsPage() {
       getBadgeConfig()
         .then((cfg) => {
           if (!cancelled) setBadgeConfigState(cfg);
+        })
+        .catch(() => {}),
+      getPriceConfig()
+        .then((cfg) => {
+          if (cancelled) return;
+          setPriceConfigState(cfg);
+          lastSavedPrice.current = JSON.stringify(cfg);
         })
         .catch(() => {}),
     ]).finally(() => {
@@ -153,10 +172,11 @@ export function SettingsPage() {
         base_url: llmBaseUrl,
         api_key: llmApiKey,
         model: llmModel,
+        audit_enabled: llmAuditEnabled,
       }).catch(() => {});
     }, 600);
     return () => clearTimeout(timer);
-  }, [llmBaseUrl, llmModel, llmApiKey]);
+  }, [llmBaseUrl, llmModel, llmApiKey, llmAuditEnabled]);
 
   // Auto-save chroma config on change
   React.useEffect(() => {
@@ -175,6 +195,15 @@ export function SettingsPage() {
     lastSavedEmb.current = current;
     setEmbeddingConfig(embConfig).catch(() => {});
   }, [embConfig]);
+
+  // Auto-save price config on change
+  React.useEffect(() => {
+    if (!configLoaded.current) return;
+    const current = JSON.stringify(priceConfig);
+    if (current === lastSavedPrice.current) return;
+    lastSavedPrice.current = current;
+    setPriceConfig(priceConfig).catch(() => {});
+  }, [priceConfig]);
 
   // Test embedding when config changes (debounced)
   React.useEffect(() => {
@@ -200,6 +229,7 @@ export function SettingsPage() {
         api_key: llmApiKey,
         model: llmModel,
         timeout_seconds: 30,
+        audit_enabled: llmAuditEnabled,
       });
       setLlmTestResult(result);
     } catch (err) {
@@ -461,6 +491,20 @@ export function SettingsPage() {
           </label>
         </div>
 
+        <label className="settings-toggle-card">
+          <input
+            type="checkbox"
+            checked={llmAuditEnabled}
+            onChange={(e) => setLlmAuditEnabled(e.target.checked)}
+          />
+          <span>
+            <strong>LLM 审计日志</strong>
+            <small>
+              开启后归档带时间戳的 LLM request / response，JSONL 文件保存到 app data 下的 llm_audit 目录。
+            </small>
+          </span>
+        </label>
+
         <button className="btn-primary" onClick={handleTestLlm} disabled={isTestingLlm}>
           {isTestingLlm ? "测试中..." : "测试连接"}
         </button>
@@ -580,6 +624,75 @@ export function SettingsPage() {
               setRecognitionConcurrency(v).catch(() => {});
             }}
           />
+        </div>
+      </div>
+
+      <div className="section">
+        <h3>LLM 价格配置</h3>
+        <p className="section-desc">
+          配置每千 token 的价格（¥），用于仪表盘用量费用预估。默认为 qwen-plus 官方价格。
+        </p>
+        <div className="form-grid">
+          <label className="form-field">
+            <span>LLM 输入价格 (¥/千token)</span>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={priceConfig.llm_input_price_per_1k}
+              onChange={(e) =>
+                setPriceConfigState((prev) => ({
+                  ...prev,
+                  llm_input_price_per_1k: Number(e.target.value) || 0,
+                }))
+              }
+            />
+          </label>
+          <label className="form-field">
+            <span>LLM 输出价格 (¥/千token)</span>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={priceConfig.llm_output_price_per_1k}
+              onChange={(e) =>
+                setPriceConfigState((prev) => ({
+                  ...prev,
+                  llm_output_price_per_1k: Number(e.target.value) || 0,
+                }))
+              }
+            />
+          </label>
+          <label className="form-field">
+            <span>Embedding 输入价格 (¥/千token)</span>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={priceConfig.embedding_input_price_per_1k}
+              onChange={(e) =>
+                setPriceConfigState((prev) => ({
+                  ...prev,
+                  embedding_input_price_per_1k: Number(e.target.value) || 0,
+                }))
+              }
+            />
+          </label>
+          <label className="form-field">
+            <span>Embedding 输出价格 (¥/千token)</span>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={priceConfig.embedding_output_price_per_1k}
+              onChange={(e) =>
+                setPriceConfigState((prev) => ({
+                  ...prev,
+                  embedding_output_price_per_1k: Number(e.target.value) || 0,
+                }))
+              }
+            />
+          </label>
         </div>
       </div>
 

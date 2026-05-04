@@ -20,7 +20,7 @@ use crate::{
     event,
     extractor::{save_invoice_extraction, SaveInvoiceExtractionRequest},
     importer::{import_files, ImportJobSummary},
-    llm::{recognize_invoice_image, LlmProviderConfig},
+    llm::{recognize_invoice_image, LlmAuditConfig, LlmProviderConfig},
     storage::StorageError,
 };
 
@@ -94,6 +94,7 @@ pub struct WatcherManager {
     db: Arc<Mutex<Connection>>,
     raw_dir: PathBuf,
     thumbnails_dir: PathBuf,
+    llm_audit_dir: PathBuf,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     handles: Mutex<HashMap<i64, WatchHandle>>,
     app_handle: AppHandle,
@@ -104,6 +105,7 @@ impl WatcherManager {
         db: Arc<Mutex<Connection>>,
         raw_dir: PathBuf,
         thumbnails_dir: PathBuf,
+        llm_audit_dir: PathBuf,
         llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
         app_handle: AppHandle,
     ) -> Result<Self, WatcherError> {
@@ -111,6 +113,7 @@ impl WatcherManager {
             db,
             raw_dir,
             thumbnails_dir,
+            llm_audit_dir,
             llm_config,
             handles: Mutex::new(HashMap::new()),
             app_handle,
@@ -386,6 +389,7 @@ impl WatcherManager {
         let db = Arc::clone(&self.db);
         let raw_dir = self.raw_dir.clone();
         let thumbnails_dir = self.thumbnails_dir.clone();
+        let llm_audit_dir = self.llm_audit_dir.clone();
         let llm_config = Arc::clone(&self.llm_config);
         let app_handle = self.app_handle.clone();
 
@@ -396,6 +400,7 @@ impl WatcherManager {
                     db,
                     raw_dir,
                     thumbnails_dir,
+                    llm_audit_dir,
                     llm_config,
                     app_handle,
                     id,
@@ -437,6 +442,7 @@ fn watch_loop(
     db: Arc<Mutex<Connection>>,
     raw_dir: PathBuf,
     thumbnails_dir: PathBuf,
+    llm_audit_dir: PathBuf,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     app_handle: AppHandle,
     watch_id: i64,
@@ -486,6 +492,7 @@ fn watch_loop(
                     &db,
                     &raw_dir,
                     &thumbnails_dir,
+                    &llm_audit_dir,
                     &llm_config,
                     &app_handle,
                     watch_id,
@@ -514,6 +521,7 @@ fn watch_loop(
                         &db,
                         &raw_dir,
                         &thumbnails_dir,
+                        &llm_audit_dir,
                         &llm_config,
                         &app_handle,
                         watch_id,
@@ -545,6 +553,7 @@ fn process_pending(
     db: &Arc<Mutex<Connection>>,
     raw_dir: &Path,
     thumbnails_dir: &Path,
+    llm_audit_dir: &Path,
     llm_config: &Arc<Mutex<Option<LlmProviderConfig>>>,
     app_handle: &AppHandle,
     watch_id: i64,
@@ -606,10 +615,20 @@ fn process_pending(
         if let Some(config) = llm_config.lock().ok().and_then(|c| c.clone()) {
             let db = Arc::clone(db);
             let thumbnails_dir = thumbnails_dir.to_path_buf();
+            let audit = config.audit_enabled.then(|| LlmAuditConfig {
+                dir: llm_audit_dir.to_path_buf(),
+            });
 
             tauri::async_runtime::spawn(async move {
                 for raw_file_id in raw_file_ids {
-                    recognize_raw_file_async(&db, &thumbnails_dir, raw_file_id, &config).await;
+                    recognize_raw_file_async(
+                        &db,
+                        &thumbnails_dir,
+                        raw_file_id,
+                        &config,
+                        audit.as_ref(),
+                    )
+                    .await;
                 }
             });
         }
@@ -621,6 +640,7 @@ async fn recognize_raw_file_async(
     thumbnails_dir: &Path,
     raw_file_id: i64,
     config: &LlmProviderConfig,
+    audit: Option<&LlmAuditConfig>,
 ) {
     let (storage_path, mime_type) = match db.lock() {
         Ok(conn) => {
@@ -668,13 +688,14 @@ async fn recognize_raw_file_async(
         };
 
     for (page_range, image_path, mime) in recognition_inputs {
-        let recognition = match recognize_invoice_image(config.clone(), &image_path, &mime).await {
-            Ok(r) => r,
-            Err(e) => {
-                error!("Watcher: recognition failed for raw_file {raw_file_id}: {e}");
-                continue;
-            }
-        };
+        let recognition =
+            match recognize_invoice_image(config.clone(), &image_path, &mime, audit).await {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Watcher: recognition failed for raw_file {raw_file_id}: {e}");
+                    continue;
+                }
+            };
 
         let invoice = match db.lock() {
             Ok(mut conn) => save_invoice_extraction(

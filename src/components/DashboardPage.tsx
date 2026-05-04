@@ -3,12 +3,16 @@ import type {
   DashboardStats as DashboardStatsType,
   ImportJob,
   RecognitionQueueStatus,
+  LlmUsageStats,
+  PriceConfig,
 } from "../types";
 import {
   getDashboardStats,
   getInvoiceIdByRawFile,
   getRecognitionQueueStatus,
   listImportJobs,
+  getLlmUsage,
+  getPriceConfig,
 } from "../api";
 import { importStatusMeta, toneClass } from "../status";
 import { DashboardStats } from "./DashboardStats";
@@ -79,6 +83,17 @@ function canOpenImportedJob(job: ImportJob): boolean {
   );
 }
 
+function estimateCost(usage: LlmUsageStats, price: PriceConfig): number {
+  const llmInputCost = (usage.total_prompt_tokens / 1000) * price.llm_input_price_per_1k;
+  const llmOutputCost = (usage.total_completion_tokens / 1000) * price.llm_output_price_per_1k;
+  return llmInputCost + llmOutputCost;
+}
+
+function formatCost(cost: number): string {
+  if (cost < 0.01) return "< ¥0.01";
+  return `¥${cost.toFixed(2)}`;
+}
+
 export function DashboardPage() {
   const error = useAppStore((s) => s.error);
   const refreshKey = useRefreshStore((s) => s.dashboardKey);
@@ -91,6 +106,8 @@ export function DashboardPage() {
   const [dateRange, setDateRange] = React.useState<DateRange>("all");
   const [customFrom, setCustomFrom] = React.useState("");
   const [customTo, setCustomTo] = React.useState("");
+  const [usage, setUsage] = React.useState<LlmUsageStats | null>(null);
+  const [priceConfig, setPriceConfig] = React.useState<PriceConfig | null>(null);
 
   React.useEffect(() => {
     const params = dateRangeToParams(dateRange, customFrom, customTo);
@@ -115,6 +132,15 @@ export function DashboardPage() {
         setRecentJobs([]);
         setOperationsError(String(err));
       });
+  }, [refreshKey]);
+
+  React.useEffect(() => {
+    Promise.all([getLlmUsage(), getPriceConfig()])
+      .then(([u, p]) => {
+        setUsage(u);
+        setPriceConfig(p);
+      })
+      .catch(() => {});
   }, [refreshKey]);
 
   const failedRecentJobs = recentJobs.filter((job) => job.status === "failed").length;
@@ -205,6 +231,16 @@ export function DashboardPage() {
               <span className="dashboard-work-value">{stats.this_month_count}</span>
               <span className="dashboard-work-meta">
                 {formatAmount(stats.this_month_amount)}
+              </span>
+            </div>
+            <div className="dashboard-work-card">
+              <span className="dashboard-work-label">LLM 用量</span>
+              <span className="dashboard-work-value">
+                {usage ? usage.total_tokens.toLocaleString() : "--"}
+              </span>
+              <span className="dashboard-work-meta">
+                调用 {usage?.total_calls ?? 0} 次 | 预估{" "}
+                {usage && priceConfig ? formatCost(estimateCost(usage, priceConfig)) : "--"}
               </span>
             </div>
           </div>

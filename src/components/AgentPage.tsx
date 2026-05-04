@@ -40,7 +40,7 @@ type StreamUiState = {
 };
 
 export function AgentPage() {
-  const { llmBaseUrl, llmModel, llmApiKey } = useLlmStore();
+  const { llmBaseUrl, llmModel, llmApiKey, llmAuditEnabled } = useLlmStore();
   const setError = useAppStore((s) => s.setError);
   const [sessions, setSessions] = React.useState<AgentSession[]>([]);
   const [activeSessionId, setActiveSessionId] = React.useState<number | null>(null);
@@ -63,8 +63,9 @@ export function AgentPage() {
       api_key: llmApiKey,
       model: llmModel,
       timeout_seconds: 60,
+      audit_enabled: llmAuditEnabled,
     }),
-    [llmBaseUrl, llmModel, llmApiKey],
+    [llmBaseUrl, llmModel, llmApiKey, llmAuditEnabled],
   );
 
   React.useEffect(() => {

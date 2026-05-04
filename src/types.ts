@@ -503,3 +503,21 @@ export type ExternalDependencyStatus = {
   version: string | null;
   error: string | null;
 };
+
+export type LlmUsageStats = {
+  total_calls: number;
+  llm_calls: number;
+  embedding_calls: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  this_month_calls: number;
+  this_month_tokens: number;
+};
+
+export type PriceConfig = {
+  llm_input_price_per_1k: number;
+  llm_output_price_per_1k: number;
+  embedding_input_price_per_1k: number;
+  embedding_output_price_per_1k: number;
+};

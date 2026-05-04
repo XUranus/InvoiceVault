@@ -12,7 +12,7 @@ use tracing::{error, info, warn};
 
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
     agent::{
@@ -52,7 +52,7 @@ use crate::{
         import_files, list_import_jobs, recover_interrupted_import_jobs, update_import_job_status,
         update_import_job_status_by_raw_file, ImportError, ImportJobListResult, ImportJobSummary,
     },
-    llm::LlmProviderConfig,
+    llm::{LlmAuditConfig, LlmProviderConfig},
     storage::{run_migrations, StorageError},
     watcher::{
         AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus, WatcherError, WatcherManager,
@@ -98,6 +98,7 @@ pub struct AppPaths {
     pub raw_dir: PathBuf,
     pub thumbnails_dir: PathBuf,
     pub logs_dir: PathBuf,
+    pub llm_audit_dir: PathBuf,
     pub agent_uploads_dir: PathBuf,
 }
 
@@ -205,6 +206,25 @@ fn sanitize_badge_config(config: BadgeConfig) -> BadgeConfig {
     BadgeConfig { groups }
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct PriceConfig {
+    pub llm_input_price_per_1k: f64,
+    pub llm_output_price_per_1k: f64,
+    pub embedding_input_price_per_1k: f64,
+    pub embedding_output_price_per_1k: f64,
+}
+
+impl Default for PriceConfig {
+    fn default() -> Self {
+        Self {
+            llm_input_price_per_1k: 0.0008,
+            llm_output_price_per_1k: 0.002,
+            embedding_input_price_per_1k: 0.0007,
+            embedding_output_price_per_1k: 0.0007,
+        }
+    }
+}
+
 pub struct AppState {
     paths: AppPaths,
     db: Arc<Mutex<Connection>>,
@@ -212,6 +232,7 @@ pub struct AppState {
     chroma_config: Mutex<ChromaConfig>,
     embedding_config: Mutex<EmbeddingConfig>,
     badge_config: Mutex<BadgeConfig>,
+    price_config: Mutex<PriceConfig>,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     recognition_pending: Arc<Mutex<i64>>,
     recognition_running: Arc<Mutex<i64>>,
@@ -255,10 +276,14 @@ impl AppState {
         let badge_config = Self::load_config_raw::<BadgeConfig>(&app_data_dir, "badge_config.json")
             .unwrap_or_default();
 
+        let price_config = Self::load_config_raw::<PriceConfig>(&app_data_dir, "price_config.json")
+            .unwrap_or_default();
+
         let watcher_manager = WatcherManager::new(
             Arc::clone(&db),
             paths.raw_dir.clone(),
             paths.thumbnails_dir.clone(),
+            paths.llm_audit_dir.clone(),
             Arc::clone(&llm_config),
             app.clone(),
         )?;
@@ -270,6 +295,7 @@ impl AppState {
             chroma_config: Mutex::new(chroma_config),
             embedding_config: Mutex::new(embedding_config),
             badge_config: Mutex::new(badge_config),
+            price_config: Mutex::new(price_config),
             llm_config,
             recognition_pending: Arc::new(Mutex::new(0)),
             recognition_running: Arc::new(Mutex::new(0)),
@@ -298,7 +324,7 @@ impl AppState {
         })
     }
 
-    pub fn import_files(&self, paths: Vec<String>) -> Result<Vec<ImportJobSummary>, AppError> {
+    pub fn import_files(&self, paths: Vec<String>, app: &AppHandle) -> Result<Vec<ImportJobSummary>, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let source_paths: Vec<String> = paths.iter().map(|p| p.clone()).collect();
         info!("Importing {} files", paths.len());
@@ -341,7 +367,13 @@ impl AppState {
             if !cfg.api_key.is_empty() {
                 for job in &jobs {
                     if job.status == "imported" && job.raw_file_id.is_some() {
-                        self.spawn_recognition_task(job.id, job.raw_file_id.unwrap(), cfg.clone());
+                        self.spawn_recognition_task(
+                            job.id,
+                            job.raw_file_id.unwrap(),
+                            cfg.clone(),
+                            self.llm_audit_config(&cfg),
+                            app.clone(),
+                        );
                     }
                 }
             }
@@ -350,7 +382,14 @@ impl AppState {
         Ok(jobs)
     }
 
-    fn spawn_recognition_task(&self, job_id: i64, raw_file_id: i64, config: LlmProviderConfig) {
+    fn spawn_recognition_task(
+        &self,
+        job_id: i64,
+        raw_file_id: i64,
+        config: LlmProviderConfig,
+        audit: Option<LlmAuditConfig>,
+        app: AppHandle,
+    ) {
         let db = Arc::clone(&self.db);
         let thumbnails_dir = self.paths.thumbnails_dir.clone();
         let pending = Arc::clone(&self.recognition_pending);
@@ -448,10 +487,14 @@ impl AppState {
                 for (source_page_range, image_path, _thumbnail_path, mime_type) in
                     &recognition_inputs
                 {
-                    let recognition =
-                        crate::llm::recognize_invoice_image(config.clone(), image_path, mime_type)
-                            .await
-                            .map_err(|e| e.to_string())?;
+                    let recognition = crate::llm::recognize_invoice_image(
+                        config.clone(),
+                        image_path,
+                        mime_type,
+                        audit.as_ref(),
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
                     let mut conn = db.lock().map_err(|e| e.to_string())?;
                     let invoice = crate::extractor::save_invoice_extraction(
                         &mut conn,
@@ -485,6 +528,14 @@ impl AppState {
                         Some("invoice"),
                         Some(invoice.id),
                     );
+                    let _ = crate::extractor::insert_usage_log(
+                        &conn,
+                        "llm_recognition",
+                        &recognition.model,
+                        recognition.prompt_tokens,
+                        recognition.completion_tokens,
+                        recognition.total_tokens,
+                    );
                 }
                 Ok(())
             }
@@ -499,12 +550,39 @@ impl AppState {
                 let message = import_failure_message(&e);
                 error!("Auto recognition failed: {message}");
                 if let Ok(db) = db.lock() {
-                    let _ = update_import_job_status(&db, job_id, None, "failed", Some(&message));
+                    // Record event and notification first (before cleanup)
                     let _ = event::notify_error(&db, "自动识别失败", &message);
+                    // Keep import_job as failed with error message, detach from raw_file
+                    // so we can delete the raw_file without breaking the history record.
+                    let _ = db.execute(
+                        "UPDATE import_jobs SET status = 'failed', error_message = ?1, raw_file_id = NULL WHERE id = ?2",
+                        rusqlite::params![message, job_id],
+                    );
+                    // Delete the stored file from disk
+                    let storage_path: Option<String> = db
+                        .query_row(
+                            "SELECT storage_path FROM raw_files WHERE id = ?1",
+                            [raw_file_id],
+                            |row| row.get(0),
+                        )
+                        .ok();
+                    if let Some(path) = storage_path {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    // Clean up thumbnail directory
+                    let _ = std::fs::remove_dir_all(
+                        thumbnails_dir.join("previews").join(raw_file_id.to_string()),
+                    );
+                    // Delete dependent DB records, then the raw_file itself
+                    let _ = db.execute("DELETE FROM extraction_runs WHERE raw_file_id = ?1", [raw_file_id]);
+                    let _ = db.execute("DELETE FROM invoices WHERE raw_file_id = ?1", [raw_file_id]);
+                    let _ = db.execute("DELETE FROM raw_files WHERE id = ?1", [raw_file_id]);
                 }
             } else if let Ok(db) = db.lock() {
                 let _ = update_import_job_status(&db, job_id, None, "imported", None);
             }
+
+            let _ = app.emit("recognition-complete", ());
         });
     }
 
@@ -539,18 +617,26 @@ impl AppState {
                 };
                 if let Some(detail) = detail {
                     let text = invoice_to_embedding_text(&detail);
-                    if let Ok(embedding) = generate_embedding(&emb_config, &text).await {
+                    if let Ok(result) = generate_embedding(&emb_config, &text).await {
                         if let Ok(db) = db_arc.lock() {
-                            let _ = chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
+                            let _ = chroma::upsert_embedding(&db, invoice_id, &result.embedding, &text);
                             let _ = db.execute(
                                 "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
                                 [invoice_id],
                             );
-                            if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
+                            if let Ok(similar) = chroma::query_similar(&db, &result.embedding, 5) {
                                 let _ = crate::dedupe::detect_semantic_duplicates(
                                     &db, invoice_id, &similar,
                                 );
                             }
+                            let _ = crate::extractor::insert_usage_log(
+                                &db,
+                                "embedding",
+                                &emb_config.model,
+                                result.prompt_tokens,
+                                result.total_tokens.saturating_sub(result.prompt_tokens),
+                                result.total_tokens,
+                            );
                         }
                     }
                 }
@@ -627,18 +713,26 @@ impl AppState {
                 };
                 if let Some(detail) = detail {
                     let text = invoice_to_embedding_text(&detail);
-                    if let Ok(embedding) = generate_embedding(&emb_config, &text).await {
+                    if let Ok(result) = generate_embedding(&emb_config, &text).await {
                         if let Ok(db) = db_arc.lock() {
-                            let _ = chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
+                            let _ = chroma::upsert_embedding(&db, invoice_id, &result.embedding, &text);
                             let _ = db.execute(
                                 "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
                                 [invoice_id],
                             );
-                            if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
+                            if let Ok(similar) = chroma::query_similar(&db, &result.embedding, 5) {
                                 let _ = crate::dedupe::detect_semantic_duplicates(
                                     &db, invoice_id, &similar,
                                 );
                             }
+                            let _ = crate::extractor::insert_usage_log(
+                                &db,
+                                "embedding",
+                                &emb_config.model,
+                                result.prompt_tokens,
+                                result.total_tokens.saturating_sub(result.prompt_tokens),
+                                result.total_tokens,
+                            );
                         }
                     }
                 }
@@ -801,6 +895,37 @@ impl AppState {
         self.badge_config.lock().expect("lock").clone()
     }
 
+    pub fn set_price_config(&self, config: PriceConfig) -> Result<(), AppError> {
+        {
+            let mut cfg = self.price_config.lock().expect("lock");
+            *cfg = config.clone();
+        }
+        let path = self.paths.app_data_dir.join("price_config.json");
+        if let Ok(json) = serde_json::to_string_pretty(&config) {
+            if let Err(e) = std::fs::write(&path, json) {
+                error!("Failed to persist price config: {e}");
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_price_config(&self) -> PriceConfig {
+        self.price_config.lock().expect("lock").clone()
+    }
+
+    pub fn get_llm_usage(
+        &self,
+        date_from: Option<String>,
+        date_to: Option<String>,
+    ) -> Result<crate::extractor::LlmUsageStats, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(crate::extractor::get_llm_usage(
+            &db,
+            date_from.as_deref(),
+            date_to.as_deref(),
+        )?)
+    }
+
     pub fn set_invoice_badge(
         &self,
         invoice_id: i64,
@@ -826,6 +951,12 @@ impl AppState {
 
     pub fn get_llm_config(&self) -> Option<LlmProviderConfig> {
         self.llm_config.lock().expect("lock").clone()
+    }
+
+    pub fn llm_audit_config(&self, config: &LlmProviderConfig) -> Option<LlmAuditConfig> {
+        config.audit_enabled.then(|| LlmAuditConfig {
+            dir: self.paths.llm_audit_dir.clone(),
+        })
     }
 
     fn load_config_raw<T: serde::de::DeserializeOwned>(
@@ -855,9 +986,9 @@ impl AppState {
             return Err(AppError::Chroma(chroma::ChromaError::NotConfigured));
         }
         let emb_config = self.embedding_config.lock().expect("lock").clone();
-        let embedding = generate_embedding(&emb_config, &query).await?;
+        let result = generate_embedding(&emb_config, &query).await?;
         let db = self.db.lock().expect("database mutex poisoned");
-        Ok(chroma::query_similar(&db, &embedding, limit)?)
+        Ok(chroma::query_similar(&db, &result.embedding, limit)?)
     }
 
     pub fn raw_file_for_recognition(
@@ -954,6 +1085,25 @@ impl AppState {
     pub fn delete_all_notifications(&self) -> Result<usize, AppError> {
         let db = self.db.lock().expect("db lock");
         Ok(event::delete_all_notifications(&db)?)
+    }
+
+    pub fn record_usage_log(
+        &self,
+        operation: &str,
+        model: &str,
+        prompt_tokens: i64,
+        completion_tokens: i64,
+        total_tokens: i64,
+    ) -> Result<(), AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(crate::extractor::insert_usage_log(
+            &db,
+            operation,
+            model,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+        )?)
     }
 
     pub fn record_recognition_event(
@@ -1091,6 +1241,15 @@ impl AppState {
                     }
                 }
             }
+        }
+
+        if self.paths.llm_audit_dir.exists() {
+            add_dir_to_zip(
+                &mut zip_writer,
+                &self.paths.app_data_dir,
+                &self.paths.llm_audit_dir,
+                options,
+            )?;
         }
 
         // Add system info
@@ -1456,6 +1615,7 @@ impl AppState {
             attachment_ids,
             attachment_context,
             config,
+            self.llm_audit_config(config),
             executor,
         )
         .await?)
@@ -1482,6 +1642,7 @@ impl AppState {
             attachment_ids,
             attachment_context,
             config,
+            self.llm_audit_config(config),
             executor,
             stream_sink,
         )
@@ -1530,6 +1691,7 @@ impl AppState {
             request.confirmed,
             request.extra_params,
             config,
+            self.llm_audit_config(config),
             executor,
         )
         .await?)
@@ -1552,6 +1714,7 @@ impl AppState {
             request.confirmed,
             request.extra_params,
             config,
+            self.llm_audit_config(config),
             executor,
             stream_sink,
         )
@@ -2383,10 +2546,12 @@ fn create_app_paths(app_data_dir: &Path) -> Result<AppPaths, AppError> {
     let raw_dir = app_data_dir.join("raw");
     let thumbnails_dir = app_data_dir.join("thumbnails");
     let logs_dir = app_data_dir.join("logs");
+    let llm_audit_dir = app_data_dir.join("llm_audit");
     let agent_uploads_dir = app_data_dir.join("agent_uploads");
     fs::create_dir_all(&raw_dir)?;
     fs::create_dir_all(&thumbnails_dir)?;
     fs::create_dir_all(&logs_dir)?;
+    fs::create_dir_all(&llm_audit_dir)?;
     fs::create_dir_all(&agent_uploads_dir)?;
 
     Ok(AppPaths {
@@ -2395,6 +2560,7 @@ fn create_app_paths(app_data_dir: &Path) -> Result<AppPaths, AppError> {
         raw_dir,
         thumbnails_dir,
         logs_dir,
+        llm_audit_dir,
         agent_uploads_dir,
     })
 }

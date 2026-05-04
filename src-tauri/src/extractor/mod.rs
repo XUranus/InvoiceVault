@@ -1744,6 +1744,145 @@ pub fn batch_delete_invoices(conn: &Connection, ids: &[i64]) -> Result<usize, Ex
     Ok(count)
 }
 
+pub fn insert_usage_log(
+    conn: &Connection,
+    operation: &str,
+    model: &str,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    total_tokens: i64,
+) -> Result<(), ExtractorError> {
+    conn.execute(
+        "INSERT INTO usage_log (operation, model, prompt_tokens, completion_tokens, total_tokens)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![operation, model, prompt_tokens, completion_tokens, total_tokens],
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmUsageStats {
+    pub total_calls: i64,
+    pub llm_calls: i64,
+    pub embedding_calls: i64,
+    pub total_prompt_tokens: i64,
+    pub total_completion_tokens: i64,
+    pub total_tokens: i64,
+    pub this_month_calls: i64,
+    pub this_month_tokens: i64,
+}
+
+pub fn get_llm_usage(
+    conn: &Connection,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+) -> Result<LlmUsageStats, ExtractorError> {
+    let date_filter = |alias: &str| -> (String, Vec<String>) {
+        let mut clauses = vec![format!("{alias}.operation IS NOT NULL")];
+        let mut params = Vec::new();
+        if let Some(from) = date_from {
+            clauses.push(format!("{alias}.created_at >= ?{}", params.len() + 1));
+            params.push(from.to_owned());
+        }
+        if let Some(to) = date_to {
+            clauses.push(format!("{alias}.created_at <= ?{}", params.len() + 1));
+            params.push(format!("{to} 23:59:59"));
+        }
+        (format!("WHERE {}", clauses.join(" AND ")), params)
+    };
+
+    let (where_all, params_all) = date_filter("u");
+
+    let total_calls: i64 = conn.query_row(
+        &format!("SELECT COALESCE(COUNT(*), 0) FROM usage_log u {where_all}"),
+        rusqlite::params_from_iter(params_all.iter()),
+        |row| row.get(0),
+    )?;
+
+    let (where_llm, params_llm) = {
+        let mut clauses = vec!["operation = 'llm_recognition'".to_string()];
+        let mut params = Vec::new();
+        if let Some(from) = date_from {
+            clauses.push(format!("created_at >= ?{}", params.len() + 1));
+            params.push(from.to_owned());
+        }
+        if let Some(to) = date_to {
+            clauses.push(format!("created_at <= ?{}", params.len() + 1));
+            params.push(format!("{to} 23:59:59"));
+        }
+        (format!("WHERE {}", clauses.join(" AND ")), params)
+    };
+
+    let llm_calls: i64 = conn.query_row(
+        &format!("SELECT COALESCE(COUNT(*), 0) FROM usage_log {where_llm}"),
+        rusqlite::params_from_iter(params_llm.iter()),
+        |row| row.get(0),
+    )?;
+
+    let (where_emb, params_emb) = {
+        let mut clauses = vec!["operation = 'embedding'".to_string()];
+        let mut params = Vec::new();
+        if let Some(from) = date_from {
+            clauses.push(format!("created_at >= ?{}", params.len() + 1));
+            params.push(from.to_owned());
+        }
+        if let Some(to) = date_to {
+            clauses.push(format!("created_at <= ?{}", params.len() + 1));
+            params.push(format!("{to} 23:59:59"));
+        }
+        (format!("WHERE {}", clauses.join(" AND ")), params)
+    };
+
+    let embedding_calls: i64 = conn.query_row(
+        &format!("SELECT COALESCE(COUNT(*), 0) FROM usage_log {where_emb}"),
+        rusqlite::params_from_iter(params_emb.iter()),
+        |row| row.get(0),
+    )?;
+
+    let total_prompt_tokens: i64 = conn.query_row(
+        &format!("SELECT COALESCE(SUM(prompt_tokens), 0) FROM usage_log u {where_all}"),
+        rusqlite::params_from_iter(params_all.iter()),
+        |row| row.get(0),
+    )?;
+
+    let total_completion_tokens: i64 = conn.query_row(
+        &format!("SELECT COALESCE(SUM(completion_tokens), 0) FROM usage_log u {where_all}"),
+        rusqlite::params_from_iter(params_all.iter()),
+        |row| row.get(0),
+    )?;
+
+    let total_tokens: i64 = conn.query_row(
+        &format!("SELECT COALESCE(SUM(total_tokens), 0) FROM usage_log u {where_all}"),
+        rusqlite::params_from_iter(params_all.iter()),
+        |row| row.get(0),
+    )?;
+
+    // This month stats (always current month, independent of date filter)
+    let this_month_start = chrono::Local::now().format("%Y-%m-01").to_string();
+    let this_month_calls: i64 = conn.query_row(
+        "SELECT COALESCE(COUNT(*), 0) FROM usage_log WHERE created_at >= ?1",
+        [&this_month_start],
+        |row| row.get(0),
+    )?;
+
+    let this_month_tokens: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(total_tokens), 0) FROM usage_log WHERE created_at >= ?1",
+        [&this_month_start],
+        |row| row.get(0),
+    )?;
+
+    Ok(LlmUsageStats {
+        total_calls,
+        llm_calls,
+        embedding_calls,
+        total_prompt_tokens,
+        total_completion_tokens,
+        total_tokens,
+        this_month_calls,
+        this_month_tokens,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

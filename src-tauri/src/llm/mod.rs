@@ -1,13 +1,16 @@
 use std::{
     fs,
-    path::Path,
+    io::Write,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use chrono::{Local, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use serde_json::{json, Value};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmProviderConfig {
@@ -15,6 +18,13 @@ pub struct LlmProviderConfig {
     pub api_key: String,
     pub model: String,
     pub timeout_seconds: Option<u64>,
+    #[serde(default = "default_audit_enabled")]
+    pub audit_enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LlmAuditConfig {
+    pub dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -30,6 +40,9 @@ pub struct InvoiceRecognitionResult {
     pub duration_ms: u128,
     pub response_json: String,
     pub response_preview: String,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub total_tokens: i64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -54,6 +67,12 @@ pub enum LlmError {
     UnsupportedImageMimeType(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+fn default_audit_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize)]
@@ -101,6 +120,14 @@ struct ImageUrlContent {
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<ChatChoice>,
+    usage: Option<ApiUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiUsage {
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    total_tokens: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,6 +142,7 @@ struct ChatChoiceMessage {
 
 pub async fn test_llm_connection(
     config: LlmProviderConfig,
+    audit: Option<&LlmAuditConfig>,
 ) -> Result<LlmConnectionTestResult, LlmError> {
     let base_url = config.base_url.trim().trim_end_matches('/');
     let api_key = config.api_key.trim();
@@ -132,6 +160,7 @@ pub async fn test_llm_connection(
 
     let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(30).clamp(1, 300));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
+    let started_at = Utc::now();
     let started = Instant::now();
     let request = ChatCompletionRequest {
         model,
@@ -140,30 +169,83 @@ pub async fn test_llm_connection(
             content: "Reply with exactly: pong",
         }],
         temperature: 0.0,
-        max_tokens: 16,
+        max_tokens: 512,
     };
+    let endpoint = format!("{base_url}/chat/completions");
+    let request_json = serde_json::to_value(&request)?;
 
-    let response = client
-        .post(format!("{base_url}/chat/completions"))
+    let response = match client
+        .post(&endpoint)
         .headers(headers(api_key)?)
         .json(&request)
         .send()
-        .await?;
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            write_llm_audit_record(
+                audit,
+                LlmAuditRecord {
+                    started_at,
+                    operation: "connection_test",
+                    endpoint: &endpoint,
+                    model,
+                    duration_ms: started.elapsed().as_millis(),
+                    status: None,
+                    request: request_json,
+                    response: None,
+                    error: Some(err.to_string()),
+                },
+            );
+            return Err(err.into());
+        }
+    };
 
     let status = response.status();
+    let status_code = status.as_u16();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         error!(
             "LLM connection test returned HTTP {status}: {}",
             truncate(&body, 200)
         );
+        write_llm_audit_record(
+            audit,
+            LlmAuditRecord {
+                started_at,
+                operation: "connection_test",
+                endpoint: &endpoint,
+                model,
+                duration_ms: started.elapsed().as_millis(),
+                status: Some(status_code),
+                request: request_json,
+                response: Some(body_to_value(&body)),
+                error: Some(format!("HTTP {status_code}")),
+            },
+        );
         return Err(LlmError::ProviderStatus {
-            status: status.as_u16(),
+            status: status_code,
             body: truncate(&body, 500),
         });
     }
 
-    let response_body: ChatCompletionResponse = response.json().await?;
+    let body = response.text().await?;
+    write_llm_audit_record(
+        audit,
+        LlmAuditRecord {
+            started_at,
+            operation: "connection_test",
+            endpoint: &endpoint,
+            model,
+            duration_ms: started.elapsed().as_millis(),
+            status: Some(status_code),
+            request: request_json,
+            response: Some(body_to_value(&body)),
+            error: None,
+        },
+    );
+
+    let response_body: ChatCompletionResponse = serde_json::from_str(&body)?;
     let content = response_body
         .choices
         .first()
@@ -187,6 +269,7 @@ pub async fn recognize_invoice_image(
     config: LlmProviderConfig,
     image_path: &Path,
     mime_type: &str,
+    audit: Option<&LlmAuditConfig>,
 ) -> Result<InvoiceRecognitionResult, LlmError> {
     let base_url = config.base_url.trim().trim_end_matches('/');
     let api_key = config.api_key.trim();
@@ -211,6 +294,7 @@ pub async fn recognize_invoice_image(
         .inspect_err(|e| error!("Failed to read image for recognition: {e}"))?;
     let image_len = image_bytes.len();
     let image_data_url = format!("data:{mime_type};base64,{}", STANDARD.encode(image_bytes));
+    let started_at = Utc::now();
     let started = Instant::now();
     info!("Sending recognition request, model={model}, {image_len} bytes");
     let request = VisionChatCompletionRequest {
@@ -231,25 +315,78 @@ pub async fn recognize_invoice_image(
         temperature: 0.0,
         max_tokens: 1800,
     };
+    let endpoint = format!("{base_url}/chat/completions");
+    let request_json = serde_json::to_value(&request)?;
 
-    let response = client
-        .post(format!("{base_url}/chat/completions"))
+    let response = match client
+        .post(&endpoint)
         .headers(headers(api_key)?)
         .json(&request)
         .send()
-        .await?;
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            write_llm_audit_record(
+                audit,
+                LlmAuditRecord {
+                    started_at,
+                    operation: "invoice_recognition",
+                    endpoint: &endpoint,
+                    model,
+                    duration_ms: started.elapsed().as_millis(),
+                    status: None,
+                    request: request_json,
+                    response: None,
+                    error: Some(err.to_string()),
+                },
+            );
+            return Err(err.into());
+        }
+    };
 
     let status = response.status();
+    let status_code = status.as_u16();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         error!("LLM recognition HTTP {status}: {}", truncate(&body, 200));
+        write_llm_audit_record(
+            audit,
+            LlmAuditRecord {
+                started_at,
+                operation: "invoice_recognition",
+                endpoint: &endpoint,
+                model,
+                duration_ms: started.elapsed().as_millis(),
+                status: Some(status_code),
+                request: request_json,
+                response: Some(body_to_value(&body)),
+                error: Some(format!("HTTP {status_code}")),
+            },
+        );
         return Err(LlmError::ProviderStatus {
-            status: status.as_u16(),
+            status: status_code,
             body: truncate(&body, 500),
         });
     }
 
-    let response_body: ChatCompletionResponse = response.json().await?;
+    let body = response.text().await?;
+    write_llm_audit_record(
+        audit,
+        LlmAuditRecord {
+            started_at,
+            operation: "invoice_recognition",
+            endpoint: &endpoint,
+            model,
+            duration_ms: started.elapsed().as_millis(),
+            status: Some(status_code),
+            request: request_json,
+            response: Some(body_to_value(&body)),
+            error: None,
+        },
+    );
+
+    let response_body: ChatCompletionResponse = serde_json::from_str(&body)?;
     let content = response_body
         .choices
         .first()
@@ -263,8 +400,12 @@ pub async fn recognize_invoice_image(
     let response_json = extract_json_object(content)
         .inspect_err(|e| error!("Failed to extract JSON from recognition response: {e}"))?;
 
+    let prompt_tokens = response_body.usage.as_ref().map_or(0, |u| u.prompt_tokens);
+    let completion_tokens = response_body.usage.as_ref().map_or(0, |u| u.completion_tokens);
+    let total_tokens = response_body.usage.as_ref().map_or(0, |u| u.total_tokens);
+
     info!(
-        "Recognition OK: model={model}, {}ms",
+        "Recognition OK: model={model}, {}ms, tokens={total_tokens}",
         started.elapsed().as_millis()
     );
     Ok(InvoiceRecognitionResult {
@@ -272,6 +413,9 @@ pub async fn recognize_invoice_image(
         duration_ms: started.elapsed().as_millis(),
         response_preview: truncate(content, 160),
         response_json,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
     })
 }
 
@@ -286,6 +430,61 @@ pub(crate) fn headers(api_key: &str) -> Result<HeaderMap, LlmError> {
 
 pub(crate) fn truncate(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
+}
+
+pub struct LlmAuditRecord<'a> {
+    pub started_at: chrono::DateTime<Utc>,
+    pub operation: &'a str,
+    pub endpoint: &'a str,
+    pub model: &'a str,
+    pub duration_ms: u128,
+    pub status: Option<u16>,
+    pub request: Value,
+    pub response: Option<Value>,
+    pub error: Option<String>,
+}
+
+pub fn write_llm_audit_record(audit: Option<&LlmAuditConfig>, record: LlmAuditRecord<'_>) {
+    let Some(audit) = audit else {
+        return;
+    };
+
+    if let Err(err) = write_llm_audit_record_inner(audit, record) {
+        warn!("failed to write LLM audit log: {err}");
+    }
+}
+
+fn write_llm_audit_record_inner(
+    audit: &LlmAuditConfig,
+    record: LlmAuditRecord<'_>,
+) -> std::io::Result<()> {
+    fs::create_dir_all(&audit.dir)?;
+    let filename = format!("llm-audit-{}.jsonl", Local::now().format("%Y-%m-%d"));
+    let path = audit.dir.join(filename);
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let line = json!({
+        "timestamp": Utc::now().to_rfc3339(),
+        "request_timestamp": record.started_at.to_rfc3339(),
+        "operation": record.operation,
+        "endpoint": record.endpoint,
+        "model": record.model,
+        "duration_ms": record.duration_ms,
+        "status": record.status,
+        "request": record.request,
+        "response": record.response,
+        "error": record.error,
+    });
+    serde_json::to_writer(&mut file, &line)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+    writeln!(file)?;
+    Ok(())
+}
+
+pub fn body_to_value(body: &str) -> Value {
+    serde_json::from_str(body).unwrap_or_else(|_| Value::String(body.to_owned()))
 }
 
 fn invoice_recognition_prompt() -> &'static str {
@@ -399,12 +598,16 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_provider_fields() {
-        let err = test_llm_connection(LlmProviderConfig {
-            base_url: String::new(),
-            api_key: "key".to_owned(),
-            model: "model".to_owned(),
-            timeout_seconds: Some(1),
-        })
+        let err = test_llm_connection(
+            LlmProviderConfig {
+                base_url: String::new(),
+                api_key: "key".to_owned(),
+                model: "model".to_owned(),
+                timeout_seconds: Some(1),
+                audit_enabled: true,
+            },
+            None,
+        )
         .await
         .expect_err("missing base url");
 
@@ -438,15 +641,63 @@ mod tests {
         assert!(matches!(err, LlmError::MissingJsonObject));
     }
 
+    #[test]
+    fn defaults_audit_enabled_for_legacy_config() {
+        let config: LlmProviderConfig = serde_json::from_str(
+            r#"{"base_url":"https://example.test/v1","api_key":"key","model":"model"}"#,
+        )
+        .expect("legacy config");
+
+        assert!(config.audit_enabled);
+    }
+
+    #[test]
+    fn writes_audit_record_as_jsonl() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let audit = LlmAuditConfig {
+            dir: temp_dir.path().to_path_buf(),
+        };
+        write_llm_audit_record(
+            Some(&audit),
+            LlmAuditRecord {
+                started_at: chrono::Utc::now(),
+                operation: "test",
+                endpoint: "https://example.test/v1/chat/completions",
+                model: "model",
+                duration_ms: 12,
+                status: Some(200),
+                request: serde_json::json!({"input":"ping"}),
+                response: Some(serde_json::json!({"output":"pong"})),
+                error: None,
+            },
+        );
+
+        let entries = std::fs::read_dir(temp_dir.path())
+            .expect("read audit dir")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("entries");
+        assert_eq!(entries.len(), 1);
+        let contents = std::fs::read_to_string(entries[0].path()).expect("audit file");
+        let value: serde_json::Value = serde_json::from_str(contents.trim()).expect("json line");
+        assert_eq!(value["operation"], "test");
+        assert_eq!(value["request"]["input"], "ping");
+        assert_eq!(value["response"]["output"], "pong");
+    }
+
     #[tokio::test]
     #[ignore]
     async fn live_llm_connection_from_env() {
-        let result = test_llm_connection(LlmProviderConfig {
-            base_url: std::env::var("RECEIPTIER_LLM_BASE_URL").expect("RECEIPTIER_LLM_BASE_URL"),
-            api_key: std::env::var("RECEIPTIER_LLM_API_KEY").expect("RECEIPTIER_LLM_API_KEY"),
-            model: std::env::var("RECEIPTIER_LLM_MODEL").expect("RECEIPTIER_LLM_MODEL"),
-            timeout_seconds: Some(30),
-        })
+        let result = test_llm_connection(
+            LlmProviderConfig {
+                base_url: std::env::var("RECEIPTIER_LLM_BASE_URL")
+                    .expect("RECEIPTIER_LLM_BASE_URL"),
+                api_key: std::env::var("RECEIPTIER_LLM_API_KEY").expect("RECEIPTIER_LLM_API_KEY"),
+                model: std::env::var("RECEIPTIER_LLM_MODEL").expect("RECEIPTIER_LLM_MODEL"),
+                timeout_seconds: Some(30),
+                audit_enabled: true,
+            },
+            None,
+        )
         .await
         .expect("live llm connection");
 
@@ -467,9 +718,11 @@ mod tests {
                 api_key: std::env::var("RECEIPTIER_LLM_API_KEY").expect("RECEIPTIER_LLM_API_KEY"),
                 model: std::env::var("RECEIPTIER_LLM_MODEL").expect("RECEIPTIER_LLM_MODEL"),
                 timeout_seconds: Some(120),
+                audit_enabled: true,
             },
             &sample_path,
             "image/jpeg",
+            None,
         )
         .await
         .expect("live invoice recognition");

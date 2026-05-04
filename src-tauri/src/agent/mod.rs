@@ -5,7 +5,10 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-use crate::llm::{headers, LlmError, LlmProviderConfig};
+use crate::llm::{
+    body_to_value, headers, write_llm_audit_record, LlmAuditConfig, LlmAuditRecord, LlmError,
+    LlmProviderConfig,
+};
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -427,17 +430,17 @@ struct ToolChatRequest<'a> {
     stream: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ToolChatResponse {
     choices: Vec<ToolChatChoice>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ToolChatChoice {
     message: ToolChatMessage,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ToolChatMessage {
     #[allow(dead_code)]
     role: Option<String>,
@@ -895,6 +898,7 @@ fn update_session_title(conn: &Connection, session_id: i64) -> Result<(), AgentE
 async fn send_chat_request(
     messages: Vec<LlmMessage>,
     config: &LlmProviderConfig,
+    audit: Option<&LlmAuditConfig>,
 ) -> Result<ToolChatResponse, AgentError> {
     let base_url = config.base_url.trim().trim_end_matches('/');
     let api_key = config.api_key.trim();
@@ -912,6 +916,8 @@ async fn send_chat_request(
 
     let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(60).clamp(1, 300));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
+    let started_at = chrono::Utc::now();
+    let started = std::time::Instant::now();
 
     let tools: Vec<ToolDef> = agent_tools()
         .into_iter()
@@ -934,29 +940,81 @@ async fn send_chat_request(
         max_tokens: 2000,
         stream: None,
     };
+    let endpoint = format!("{base_url}/chat/completions");
+    let request_json = serde_json::to_value(&request)?;
 
-    let response = client
-        .post(format!("{base_url}/chat/completions"))
+    let response = match client
+        .post(&endpoint)
         .headers(headers(api_key)?)
         .json(&request)
         .send()
-        .await?;
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            write_llm_audit_record(
+                audit,
+                LlmAuditRecord {
+                    started_at,
+                    operation: "agent_chat",
+                    endpoint: &endpoint,
+                    model,
+                    duration_ms: started.elapsed().as_millis(),
+                    status: None,
+                    request: request_json,
+                    response: None,
+                    error: Some(err.to_string()),
+                },
+            );
+            return Err(err.into());
+        }
+    };
 
     let status = response.status();
+    let status_code = status.as_u16();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         error!(
             "Agent: LLM HTTP {status}: {}",
             crate::llm::truncate(&body, 200)
         );
+        write_llm_audit_record(
+            audit,
+            LlmAuditRecord {
+                started_at,
+                operation: "agent_chat",
+                endpoint: &endpoint,
+                model,
+                duration_ms: started.elapsed().as_millis(),
+                status: Some(status_code),
+                request: request_json,
+                response: Some(body_to_value(&body)),
+                error: Some(format!("HTTP {status_code}")),
+            },
+        );
         return Err(LlmError::ProviderStatus {
-            status: status.as_u16(),
+            status: status_code,
             body: crate::llm::truncate(&body, 500),
         }
         .into());
     }
 
-    let body: ToolChatResponse = response.json().await?;
+    let body_text = response.text().await?;
+    write_llm_audit_record(
+        audit,
+        LlmAuditRecord {
+            started_at,
+            operation: "agent_chat",
+            endpoint: &endpoint,
+            model,
+            duration_ms: started.elapsed().as_millis(),
+            status: Some(status_code),
+            request: request_json,
+            response: Some(body_to_value(&body_text)),
+            error: None,
+        },
+    );
+    let body: ToolChatResponse = serde_json::from_str(&body_text)?;
     Ok(body)
 }
 
@@ -964,6 +1022,7 @@ async fn send_chat_request_stream(
     messages: Vec<LlmMessage>,
     config: &LlmProviderConfig,
     stream_sink: &AgentStreamSink,
+    audit: Option<&LlmAuditConfig>,
 ) -> Result<ToolChatResponse, AgentError> {
     let base_url = config.base_url.trim().trim_end_matches('/');
     let api_key = config.api_key.trim();
@@ -981,6 +1040,8 @@ async fn send_chat_request_stream(
 
     let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(60).clamp(1, 300));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
+    let started_at = chrono::Utc::now();
+    let started = std::time::Instant::now();
 
     let tools: Vec<ToolDef> = agent_tools()
         .into_iter()
@@ -1003,6 +1064,8 @@ async fn send_chat_request_stream(
         max_tokens: 2000,
         stream: Some(true),
     };
+    let endpoint = format!("{base_url}/chat/completions");
+    let request_json = serde_json::to_value(&request)?;
 
     let mut request_headers = headers(api_key)?;
     request_headers.insert(
@@ -1010,22 +1073,57 @@ async fn send_chat_request_stream(
         reqwest::header::HeaderValue::from_static("text/event-stream"),
     );
 
-    let mut response = client
-        .post(format!("{base_url}/chat/completions"))
+    let mut response = match client
+        .post(&endpoint)
         .headers(request_headers)
         .json(&request)
         .send()
-        .await?;
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            write_llm_audit_record(
+                audit,
+                LlmAuditRecord {
+                    started_at,
+                    operation: "agent_chat_stream",
+                    endpoint: &endpoint,
+                    model,
+                    duration_ms: started.elapsed().as_millis(),
+                    status: None,
+                    request: request_json,
+                    response: None,
+                    error: Some(err.to_string()),
+                },
+            );
+            return Err(err.into());
+        }
+    };
 
     let status = response.status();
+    let status_code = status.as_u16();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         error!(
             "Agent stream: LLM HTTP {status}: {}",
             crate::llm::truncate(&body, 200)
         );
+        write_llm_audit_record(
+            audit,
+            LlmAuditRecord {
+                started_at,
+                operation: "agent_chat_stream",
+                endpoint: &endpoint,
+                model,
+                duration_ms: started.elapsed().as_millis(),
+                status: Some(status_code),
+                request: request_json,
+                response: Some(body_to_value(&body)),
+                error: Some(format!("HTTP {status_code}")),
+            },
+        );
         return Err(LlmError::ProviderStatus {
-            status: status.as_u16(),
+            status: status_code,
             body: crate::llm::truncate(&body, 500),
         }
         .into());
@@ -1035,6 +1133,7 @@ async fn send_chat_request_stream(
     let mut content = String::new();
     let mut tool_calls: Vec<ToolCallAccumulator> = Vec::new();
     let mut done = false;
+    let mut stream_events: Vec<serde_json::Value> = Vec::new();
 
     while let Some(chunk) = response.chunk().await? {
         buffer.push_str(&String::from_utf8_lossy(&chunk));
@@ -1043,7 +1142,13 @@ async fn send_chat_request_stream(
         while let Some(index) = buffer.find("\n\n") {
             let event = buffer[..index].to_owned();
             buffer = buffer[index + 2..].to_owned();
-            if process_sse_event(&event, &mut content, &mut tool_calls, stream_sink)? {
+            if process_sse_event(
+                &event,
+                &mut content,
+                &mut tool_calls,
+                stream_sink,
+                &mut stream_events,
+            )? {
                 done = true;
                 break;
             }
@@ -1055,7 +1160,13 @@ async fn send_chat_request_stream(
     }
 
     if !buffer.trim().is_empty() {
-        let _ = process_sse_event(&buffer, &mut content, &mut tool_calls, stream_sink)?;
+        let _ = process_sse_event(
+            &buffer,
+            &mut content,
+            &mut tool_calls,
+            stream_sink,
+            &mut stream_events,
+        )?;
     }
 
     let tool_calls = tool_calls
@@ -1076,7 +1187,7 @@ async fn send_chat_request_stream(
         })
         .collect::<Vec<_>>();
 
-    Ok(ToolChatResponse {
+    let response = ToolChatResponse {
         choices: vec![ToolChatChoice {
             message: ToolChatMessage {
                 role: Some("assistant".to_owned()),
@@ -1092,7 +1203,25 @@ async fn send_chat_request_stream(
                 },
             },
         }],
-    })
+    };
+    write_llm_audit_record(
+        audit,
+        LlmAuditRecord {
+            started_at,
+            operation: "agent_chat_stream",
+            endpoint: &endpoint,
+            model,
+            duration_ms: started.elapsed().as_millis(),
+            status: Some(status_code),
+            request: request_json,
+            response: Some(serde_json::json!({
+                "stream_events": stream_events,
+                "assembled": response,
+            })),
+            error: None,
+        },
+    );
+    Ok(response)
 }
 
 fn process_sse_event(
@@ -1100,6 +1229,7 @@ fn process_sse_event(
     content: &mut String,
     tool_calls: &mut Vec<ToolCallAccumulator>,
     stream_sink: &AgentStreamSink,
+    audit_events: &mut Vec<serde_json::Value>,
 ) -> Result<bool, AgentError> {
     for raw_line in event.lines() {
         let line = raw_line.trim_start();
@@ -1114,6 +1244,7 @@ fn process_sse_event(
             return Ok(true);
         }
 
+        audit_events.push(body_to_value(data));
         let chunk: ToolChatStreamChunk = serde_json::from_str(data)?;
         for choice in chunk.choices {
             if let Some(delta) = choice.delta.content {
@@ -1169,6 +1300,7 @@ pub async fn run_agent_turn(
     attachment_ids: Vec<i64>,
     attachment_context: Option<String>,
     config: &LlmProviderConfig,
+    audit: Option<LlmAuditConfig>,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
 ) -> Result<AgentResponse, AgentError> {
     run_agent_turn_impl(
@@ -1178,6 +1310,7 @@ pub async fn run_agent_turn(
         attachment_ids,
         attachment_context,
         config,
+        audit,
         execute_tool,
         None,
     )
@@ -1191,6 +1324,7 @@ pub async fn run_agent_turn_stream(
     attachment_ids: Vec<i64>,
     attachment_context: Option<String>,
     config: &LlmProviderConfig,
+    audit: Option<LlmAuditConfig>,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
     stream_sink: AgentStreamSink,
 ) -> Result<AgentResponse, AgentError> {
@@ -1201,6 +1335,7 @@ pub async fn run_agent_turn_stream(
         attachment_ids,
         attachment_context,
         config,
+        audit,
         execute_tool,
         Some(stream_sink),
     )
@@ -1214,6 +1349,7 @@ async fn run_agent_turn_impl(
     attachment_ids: Vec<i64>,
     attachment_context: Option<String>,
     config: &LlmProviderConfig,
+    audit: Option<LlmAuditConfig>,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
     stream_sink: Option<AgentStreamSink>,
 ) -> Result<AgentResponse, AgentError> {
@@ -1261,6 +1397,7 @@ async fn run_agent_turn_impl(
         session_id,
         llm_messages,
         config,
+        audit.as_ref(),
         execute_tool,
         stream_sink,
     )
@@ -1280,6 +1417,7 @@ pub async fn continue_agent_turn(
     confirmed: bool,
     extra_params: Option<serde_json::Value>,
     config: &LlmProviderConfig,
+    audit: Option<LlmAuditConfig>,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
 ) -> Result<AgentResponse, AgentError> {
     continue_agent_turn_impl(
@@ -1288,6 +1426,7 @@ pub async fn continue_agent_turn(
         confirmed,
         extra_params,
         config,
+        audit,
         execute_tool,
         None,
     )
@@ -1300,6 +1439,7 @@ pub async fn continue_agent_turn_stream(
     confirmed: bool,
     extra_params: Option<serde_json::Value>,
     config: &LlmProviderConfig,
+    audit: Option<LlmAuditConfig>,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
     stream_sink: AgentStreamSink,
 ) -> Result<AgentResponse, AgentError> {
@@ -1309,6 +1449,7 @@ pub async fn continue_agent_turn_stream(
         confirmed,
         extra_params,
         config,
+        audit,
         execute_tool,
         Some(stream_sink),
     )
@@ -1321,6 +1462,7 @@ async fn continue_agent_turn_impl(
     confirmed: bool,
     extra_params: Option<serde_json::Value>,
     config: &LlmProviderConfig,
+    audit: Option<LlmAuditConfig>,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
     stream_sink: Option<AgentStreamSink>,
 ) -> Result<AgentResponse, AgentError> {
@@ -1369,6 +1511,7 @@ async fn continue_agent_turn_impl(
             session_id,
             llm_messages,
             config,
+            audit.as_ref(),
             execute_tool,
             stream_sink,
         )
@@ -1485,6 +1628,7 @@ async fn continue_agent_turn_impl(
         session_id,
         llm_messages,
         config,
+        audit.as_ref(),
         execute_tool,
         stream_sink,
     )
@@ -1502,6 +1646,7 @@ async fn run_agent_loop_from_inner(
     session_id: i64,
     mut llm_messages: Vec<LlmMessage>,
     config: &LlmProviderConfig,
+    audit: Option<&LlmAuditConfig>,
     execute_tool: Arc<dyn Fn(&str, &serde_json::Value) -> ToolExecResult + Send + Sync>,
     stream_sink: Option<AgentStreamSink>,
 ) -> Result<AgentResponse, AgentError> {
@@ -1510,8 +1655,10 @@ async fn run_agent_loop_from_inner(
 
     for _iteration in 0..MAX_ITERATIONS {
         let response = match &stream_sink {
-            Some(sink) => send_chat_request_stream(llm_messages.clone(), config, sink).await?,
-            None => send_chat_request(llm_messages.clone(), config).await?,
+            Some(sink) => {
+                send_chat_request_stream(llm_messages.clone(), config, sink, audit).await?
+            }
+            None => send_chat_request(llm_messages.clone(), config, audit).await?,
         };
         let choice = response
             .choices

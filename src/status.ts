@@ -32,7 +32,7 @@ const IMPORT_STATUS_META: Record<string, StatusMeta> = {
   completed: { label: "已导入", tone: "success" },
   recognizing: { label: "识别中", tone: "info" },
   duplicate: { label: "重复", tone: "warning" },
-  failed: { label: "导入失败", tone: "danger" },
+  failed: { label: "识别失败", tone: "danger" },
   recognized: { label: "已识别", tone: "success" },
 };
 

@@ -102,6 +102,18 @@ export function useAppInitializer() {
     triggerDashboardRefresh,
   ]);
 
+  // Background recognition completion listener
+  useEffect(() => {
+    const unlisten = listen("recognition-complete", () => {
+      refreshInvoices();
+      triggerImportRefresh();
+      triggerDashboardRefresh();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [refreshInvoices, triggerImportRefresh, triggerDashboardRefresh]);
+
   // Recognition queue polling
   useEffect(() => {
     const poll = () => {

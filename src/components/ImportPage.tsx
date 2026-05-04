@@ -16,7 +16,7 @@ import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 
 export function ImportPage() {
   const isDraggingFiles = useAppStore((s) => s.isDraggingFiles);
-  const { llmBaseUrl, llmModel, llmApiKey } = useLlmStore();
+  const { llmBaseUrl, llmModel, llmApiKey, llmAuditEnabled } = useLlmStore();
   const refreshKey = useRefreshStore((s) => s.importKey);
   const onInvoicesAdded = useAppStore((s) => s.refreshInvoices);
   const onNavigateToInvoice = useNavigateToInvoice();
@@ -123,6 +123,7 @@ export function ImportPage() {
           api_key: llmApiKey,
           model: llmModel,
           timeout_seconds: 90,
+          audit_enabled: llmAuditEnabled,
         },
       });
       onInvoicesAdded();
@@ -351,7 +352,7 @@ function ImportHistoryRow({
         onClick={() => onToggleExpand(expanded ? null : job.id)}
       >
         <td className="import-history-file-cell">
-          <strong>{job.original_name ?? job.source_path}</strong>
+          <strong>{jobDisplayName(job)}</strong>
         </td>
         <td className="import-history-time-cell">
           {formatImportTime(job.updated_at || job.created_at)}
@@ -431,7 +432,7 @@ function JobRow({
     >
       <div className="job-card-header">
         <div className="job-card-info">
-          <strong>{job.original_name ?? job.source_path}</strong>
+          <strong>{jobDisplayName(job)}</strong>
           <span className="job-meta">
             {timeLabel}
           </span>
@@ -560,6 +561,10 @@ function CopyableText({
       {copiedField === field ? <span className="copy-hint">已复制</span> : null}
     </>
   );
+}
+
+function jobDisplayName(job: ImportJob): string {
+  return job.original_name ?? job.source_path.split(/[\\/]/).pop() ?? job.source_path;
 }
 
 function isActiveImportJob(job: ImportJob): boolean {

@@ -42,11 +42,18 @@ impl From<reqwest::Error> for EmbeddingError {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct EmbeddingResult {
+    pub embedding: Vec<f32>,
+    pub prompt_tokens: i64,
+    pub total_tokens: i64,
+}
+
 /// Generate an embedding vector for the given text using an OpenAI-compatible /embeddings endpoint.
 pub async fn generate_embedding(
     config: &EmbeddingConfig,
     text: &str,
-) -> Result<Vec<f32>, EmbeddingError> {
+) -> Result<EmbeddingResult, EmbeddingError> {
     if !config.enabled || config.base_url.is_empty() {
         return Err(EmbeddingError::NotConfigured);
     }
@@ -92,11 +99,20 @@ pub async fn generate_embedding(
     }
 
     #[derive(Deserialize)]
+    struct EmbeddingUsage {
+        prompt_tokens: i64,
+        total_tokens: i64,
+    }
+
+    #[derive(Deserialize)]
     struct Response {
         data: Vec<EmbeddingData>,
+        usage: Option<EmbeddingUsage>,
     }
 
     let response: Response = resp.json().await?;
+    let prompt_tokens = response.usage.as_ref().map_or(0, |u| u.prompt_tokens);
+    let total_tokens = response.usage.as_ref().map_or(0, |u| u.total_tokens);
     let embedding = response
         .data
         .into_iter()
@@ -108,7 +124,11 @@ pub async fn generate_embedding(
         return Err(EmbeddingError::EmptyEmbedding);
     }
 
-    Ok(embedding)
+    Ok(EmbeddingResult {
+        embedding,
+        prompt_tokens,
+        total_tokens,
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,8 +142,8 @@ pub async fn test_embedding_connection(
     config: &EmbeddingConfig,
 ) -> Result<EmbeddingTestResult, EmbeddingError> {
     let start = std::time::Instant::now();
-    let embedding = generate_embedding(config, "test connection").await?;
-    let dimensions = embedding.len();
+    let result = generate_embedding(config, "test connection").await?;
+    let dimensions = result.embedding.len();
     let duration_ms = start.elapsed().as_millis() as u64;
     Ok(EmbeddingTestResult {
         model: config.model.clone(),

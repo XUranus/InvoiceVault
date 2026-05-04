@@ -38,6 +38,8 @@ import type {
   ExportLogsResult,
   CleanupStorageResult,
   ExternalDependencyStatus,
+  LlmUsageStats,
+  PriceConfig,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -128,6 +130,7 @@ export async function testLlmConnection(config: {
   api_key: string;
   model: string;
   timeout_seconds: number;
+  audit_enabled?: boolean;
 }): Promise<LlmConnectionTestResult> {
   return invoke<LlmConnectionTestResult>("test_llm_connection", { config });
 }
@@ -139,6 +142,7 @@ export async function recognizeRawFile(request: {
     api_key: string;
     model: string;
     timeout_seconds: number;
+    audit_enabled?: boolean;
   };
 }): Promise<RecognizeRawFileResult> {
   return invoke<RecognizeRawFileResult>("recognize_raw_file", { request });
@@ -263,7 +267,7 @@ export async function deleteAgentSession(
 export async function sendAgentMessage(
   sessionId: number,
   content: string,
-  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number; audit_enabled?: boolean },
   attachmentIds: number[] = [],
 ): Promise<AgentResponse> {
   return invoke<AgentResponse>("send_agent_message", {
@@ -278,7 +282,7 @@ export async function sendAgentMessageStream(
   streamId: string,
   sessionId: number,
   content: string,
-  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number; audit_enabled?: boolean },
   attachmentIds: number[] = [],
 ): Promise<AgentResponse> {
   return invoke<AgentResponse>("send_agent_message_stream", {
@@ -340,7 +344,7 @@ export async function confirmAgentAction(
   sessionId: number,
   confirmed: boolean,
   extraParams: Record<string, unknown> | null,
-  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number; audit_enabled?: boolean },
 ): Promise<AgentResponse> {
   return invoke<AgentResponse>("confirm_agent_action", {
     request: { session_id: sessionId, confirmed, extra_params: extraParams },
@@ -353,7 +357,7 @@ export async function confirmAgentActionStream(
   sessionId: number,
   confirmed: boolean,
   extraParams: Record<string, unknown> | null,
-  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number; audit_enabled?: boolean },
 ): Promise<AgentResponse> {
   return invoke<AgentResponse>("confirm_agent_action_stream", {
     streamId,
@@ -398,6 +402,7 @@ export async function setLlmConfig(config: {
   base_url: string;
   api_key: string;
   model: string;
+  audit_enabled: boolean;
 }): Promise<void> {
   return invoke<void>("set_llm_config", { config });
 }
@@ -407,6 +412,7 @@ export type LlmConfigResponse = {
   api_key: string;
   model: string;
   timeout_seconds?: number;
+  audit_enabled?: boolean;
 } | null;
 
 export async function getLlmConfig(): Promise<LlmConfigResponse> {
@@ -451,4 +457,19 @@ export async function exportBackup(outputPath: string): Promise<ExportLogsResult
 
 export async function checkExternalDependencies(): Promise<ExternalDependencyStatus[]> {
   return invoke<ExternalDependencyStatus[]>("check_external_dependencies");
+}
+
+export async function getLlmUsage(
+  dateFrom?: string,
+  dateTo?: string,
+): Promise<LlmUsageStats> {
+  return invoke<LlmUsageStats>("get_llm_usage", { dateFrom, dateTo });
+}
+
+export async function getPriceConfig(): Promise<PriceConfig> {
+  return invoke<PriceConfig>("get_price_config");
+}
+
+export async function setPriceConfig(config: PriceConfig): Promise<void> {
+  return invoke<void>("set_price_config", { config });
 }

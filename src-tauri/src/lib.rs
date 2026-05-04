@@ -123,11 +123,12 @@ fn app_health(state: State<'_, AppState>) -> Result<AppHealth, String> {
 
 #[tauri::command]
 fn import_files(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: ImportRequest,
 ) -> Result<Vec<ImportJobSummary>, String> {
     state
-        .import_files(request.paths)
+        .import_files(request.paths, &app)
         .map_err(|err| err.to_string())
 }
 
@@ -335,6 +336,9 @@ struct RecognizeRawFileResult {
     response_preview: String,
     page_count: usize,
     thumbnail_paths: Vec<String>,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    total_tokens: i64,
 }
 
 #[tauri::command]
@@ -398,7 +402,11 @@ async fn recognize_raw_file(
     let mut total_duration_ms = 0_u128;
     let mut response_previews = Vec::new();
     let mut thumbnail_paths = Vec::new();
+    let mut total_prompt_tokens: i64 = 0;
+    let mut total_completion_tokens: i64 = 0;
+    let mut total_total_tokens: i64 = 0;
     let mut model = request.config.model.clone();
+    let audit_config = state.llm_audit_config(&request.config);
 
     for input in recognition_inputs {
         thumbnail_paths.push(input.thumbnail_path.to_string_lossy().into_owned());
@@ -406,6 +414,7 @@ async fn recognize_raw_file(
             request.config.clone(),
             &input.image_path,
             &input.mime_type,
+            audit_config.as_ref(),
         )
         .await
         {
@@ -458,6 +467,16 @@ async fn recognize_raw_file(
             &rec_model,
             1,
         );
+        total_prompt_tokens += recognition.prompt_tokens;
+        total_completion_tokens += recognition.completion_tokens;
+        total_total_tokens += recognition.total_tokens;
+        let _ = state.record_usage_log(
+            "llm_recognition",
+            &rec_model,
+            recognition.prompt_tokens,
+            recognition.completion_tokens,
+            recognition.total_tokens,
+        );
         invoices.push(invoice);
     }
 
@@ -481,6 +500,9 @@ async fn recognize_raw_file(
         response_preview: response_previews.join("\n"),
         page_count,
         thumbnail_paths,
+        prompt_tokens: total_prompt_tokens,
+        completion_tokens: total_completion_tokens,
+        total_tokens: total_total_tokens,
     })
 }
 
@@ -504,8 +526,12 @@ fn get_dashboard_stats(
 }
 
 #[tauri::command]
-async fn test_llm_connection(config: LlmProviderConfig) -> Result<LlmConnectionTestResult, String> {
-    run_llm_connection_test(config)
+async fn test_llm_connection(
+    state: State<'_, AppState>,
+    config: LlmProviderConfig,
+) -> Result<LlmConnectionTestResult, String> {
+    let audit_config = state.llm_audit_config(&config);
+    run_llm_connection_test(config, audit_config.as_ref())
         .await
         .map_err(|err| err.to_string())
 }
@@ -960,6 +986,32 @@ fn delete_all_notifications(state: State<'_, AppState>) -> Result<usize, String>
     state.delete_all_notifications().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_llm_usage(
+    state: State<'_, AppState>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+) -> Result<extractor::LlmUsageStats, String> {
+    state
+        .get_llm_usage(date_from, date_to)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_price_config(state: State<'_, AppState>) -> Result<app_core::PriceConfig, String> {
+    Ok(state.get_price_config())
+}
+
+#[tauri::command]
+fn set_price_config(
+    state: State<'_, AppState>,
+    config: app_core::PriceConfig,
+) -> Result<(), String> {
+    state
+        .set_price_config(config)
+        .map_err(|e| e.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1101,6 +1153,9 @@ pub fn run() {
             export_logs,
             export_backup,
             cleanup_storage,
+            get_llm_usage,
+            get_price_config,
+            set_price_config,
             check_external_dependencies
         ])
         .run(tauri::generate_context!())
