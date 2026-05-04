@@ -564,7 +564,7 @@ function InvoiceCardView({
     <div className="invoice-cards">
       {invoices.map((invoice, i) => (
         <article
-          className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""} ${!invoice.viewed_at ? "invoice-card-unviewed" : ""}`}
+          className={`invoice-card ${selected.has(invoice.id) ? "invoice-card-selected" : ""}`}
           key={invoice.id}
           onClick={() => onSelectInvoice(invoice.id)}
         >
@@ -577,8 +577,11 @@ function InvoiceCardView({
           </label>
           <div className="invoice-card-body">
             <div className="invoice-card-main">
-              <strong>
-                {invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}
+              <strong className="invoice-title-line">
+                {!invoice.viewed_at ? <InvoiceUnreadDot /> : null}
+                <span className="invoice-title-text">
+                  {invoice.seller_name ?? invoice.invoice_type ?? "未命名发票"}
+                </span>
               </strong>
               <span className="invoice-card-amount">
                 {formatInvoiceAmount(invoice)}
@@ -602,9 +605,6 @@ function InvoiceCardView({
             </div>
           </div>
           <div className="invoice-card-tags">
-            {!invoice.viewed_at ? (
-              <span className="mini-tag tag-unviewed">未查看</span>
-            ) : null}
             <span className={`mini-tag ${toneClass(invoiceStatusMeta(invoice.status).tone)}`}>
               {invoiceStatusMeta(invoice.status).label}
             </span>
@@ -684,7 +684,10 @@ function InvoiceTableView({
                 />
               </td>
               <td className="invoice-table-company">
-                <strong>{invoice.seller_name ?? invoice.buyer_name ?? "未命名发票"}</strong>
+                <div className="invoice-table-name-line">
+                  {!invoice.viewed_at ? <InvoiceUnreadDot /> : null}
+                  <strong>{invoice.seller_name ?? invoice.buyer_name ?? "未命名发票"}</strong>
+                </div>
                 {invoice.buyer_name ? (
                   <span className="invoice-table-subtext">购买方：{invoice.buyer_name}</span>
                 ) : null}
@@ -747,12 +750,11 @@ function formatInvoiceCode(invoice: Invoice): string {
 
 function InvoiceTagBadges({ invoice }: { invoice: Invoice }) {
   const tags = buildInvoiceTags(invoice);
-  if (tags.length === 0 && invoice.viewed_at) {
+  if (tags.length === 0) {
     return <span className="muted">-</span>;
   }
   return (
     <div className="invoice-table-tags">
-      {!invoice.viewed_at ? <span className="mini-tag tag-unviewed">未查看</span> : null}
       {tags.map((tag) => (
         <span key={`${tag.label}-${tag.tone}`} className={`mini-tag ${toneClass(tag.tone)}`}>
           {tag.label}
@@ -760,6 +762,10 @@ function InvoiceTagBadges({ invoice }: { invoice: Invoice }) {
       ))}
     </div>
   );
+}
+
+function InvoiceUnreadDot() {
+  return <span className="invoice-unviewed-dot" title="未查看" aria-label="未查看" />;
 }
 
 function markInvoiceListViewed(invoices: Invoice[], id: number): Invoice[] {

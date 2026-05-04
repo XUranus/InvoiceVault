@@ -1045,12 +1045,6 @@ textarea:focus {
   color: var(--color-badge-neutral-text);
 }
 
-.tag-unviewed {
-  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
-  color: var(--color-primary-text);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
-}
-
 /* ---- Invoice Cards ---- */
 .invoice-cards {
   display: flex;
@@ -1077,10 +1071,6 @@ textarea:focus {
   box-shadow: var(--shadow-card-hover);
 }
 
-.invoice-card-unviewed {
-  border-color: color-mix(in srgb, var(--color-primary) 26%, var(--glass-border));
-}
-
 .invoice-card-body {
   min-width: 0;
   flex: 1;
@@ -1095,6 +1085,31 @@ textarea:focus {
 .invoice-card-main strong {
   font-size: 14px;
   overflow-wrap: anywhere;
+}
+
+.invoice-title-line,
+.invoice-table-name-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.invoice-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invoice-unviewed-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+  flex: 0 0 auto;
 }
 
 .invoice-card-amount {
@@ -1240,6 +1255,7 @@ textarea:focus {
 
 .invoice-table-company strong {
   display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
