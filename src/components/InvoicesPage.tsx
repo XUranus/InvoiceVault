@@ -14,6 +14,7 @@ import { InvoiceDetail } from "./InvoiceDetail";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useAppStore } from "../stores/appStore";
 import { useRefreshStore } from "../stores/refreshStore";
+import { FileText } from "lucide-react";
 import {
   duplicateStatusMeta,
   invoiceStatusMeta,
@@ -468,7 +469,7 @@ export function InvoicesPage() {
         <p className="muted">查询中...</p>
       ) : activeInvoices.length === 0 ? (
         <div className="empty-state">
-          <span className="empty-icon">🧾</span>
+          <FileText size={48} className="empty-icon" />
           <p>暂无发票记录</p>
           <span className="muted">导入发票文件并点击"识别"后，结构化数据将出现在这里</span>
         </div>

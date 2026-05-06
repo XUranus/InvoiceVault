@@ -675,9 +675,9 @@ textarea:focus {
 }
 
 .empty-icon {
-  font-size: 48px;
   display: block;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
+  color: var(--color-text-muted);
 }
 
 .empty-state p {
@@ -708,9 +708,9 @@ textarea:focus {
 }
 
 .drop-icon {
-  font-size: 32px;
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
+  color: var(--color-text-muted);
 }
 
 .drop-area p {
@@ -4346,9 +4346,9 @@ textarea:focus {
 }
 
 .error-boundary-icon {
-  font-size: 48px;
   display: block;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
+  color: var(--color-error);
 }
 
 .error-boundary-card h3 {

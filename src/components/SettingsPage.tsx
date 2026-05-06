@@ -32,6 +32,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { useAppStore } from "../stores/appStore";
 import { useLlmStore } from "../stores/llmStore";
 import { APP_CONFIG } from "../appConfig";
+import { Sun, Moon } from "lucide-react";
 
 export function SettingsPage() {
   const health = useAppStore((s) => s.health);
@@ -744,7 +745,7 @@ export function SettingsPage() {
           当前: {theme === "dark" ? "暗色主题" : "亮色主题"}
         </p>
         <button className="btn-primary" onClick={toggleTheme}>
-          {theme === "dark" ? "☀️ 切换到亮色主题" : "🌙 切换到暗色主题"}
+          {theme === "dark" ? <><Sun size={16} /> 切换到亮色主题</> : <><Moon size={16} /> 切换到暗色主题</>}
         </button>
       </div>
 

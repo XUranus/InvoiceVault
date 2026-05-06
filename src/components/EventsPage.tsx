@@ -1,6 +1,7 @@
 import React from "react";
 import type { EventListResult, EventRow } from "../types";
 import { listEvents, deleteAllEvents, getInvoiceIdByRawFile } from "../api";
+import { ClipboardList } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 
@@ -169,7 +170,7 @@ export function EventsPage() {
         <p className="muted">加载中...</p>
       ) : result.events.length === 0 ? (
         <div className="empty-state">
-          <span className="empty-icon">📋</span>
+          <ClipboardList size={48} className="empty-icon" />
           <p>暂无事件</p>
         </div>
       ) : (

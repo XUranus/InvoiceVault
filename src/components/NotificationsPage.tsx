@@ -7,6 +7,7 @@ import {
   dismissNotification,
   deleteAllNotifications,
 } from "../api";
+import { Bell } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 import { useAppStore } from "../stores/appStore";
@@ -108,7 +109,7 @@ export function NotificationsPage() {
 
       {notifications.length === 0 ? (
         <div className="empty-state">
-          <span className="empty-icon">🔔</span>
+          <Bell size={48} className="empty-icon" />
           <p>暂无通知</p>
         </div>
       ) : (

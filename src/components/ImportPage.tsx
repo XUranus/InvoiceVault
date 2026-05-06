@@ -13,6 +13,7 @@ import { importStatusMeta, toneClass } from "../status";
 import { useAppStore } from "../stores/appStore";
 import { useLlmStore } from "../stores/llmStore";
 import { useRefreshStore } from "../stores/refreshStore";
+import { Paperclip } from "lucide-react";
 import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 
 export function ImportPage() {
@@ -187,7 +188,7 @@ export function ImportPage() {
           onClick={handlePickFiles}
           onKeyDown={handleDropAreaKeyDown}
         >
-          <span className="drop-icon">📎</span>
+          <Paperclip size={32} className="drop-icon" />
           <p>{isDraggingFiles ? "松开以导入文件" : "拖入 PDF / PNG / JPG / JPEG 文件"}</p>
           <span className="drop-hint">也可以点击此区域选择文件</span>
         </div>
