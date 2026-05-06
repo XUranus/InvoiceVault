@@ -48,6 +48,8 @@ pub struct WatchDir {
     pub stable_wait_ms: i64,
     pub archive_after_import: bool,
     pub archive_path: Option<String>,
+    pub name_keywords: String,
+    pub max_file_age_days: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -66,6 +68,8 @@ pub struct AddWatchDirRequest {
     pub extensions: Option<String>,
     pub recursive: Option<bool>,
     pub stable_wait_ms: Option<i64>,
+    pub name_keywords: Option<String>,
+    pub max_file_age_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +80,8 @@ pub struct UpdateWatchDirRequest {
     pub stable_wait_ms: Option<i64>,
     pub archive_after_import: Option<bool>,
     pub archive_path: Option<String>,
+    pub name_keywords: Option<String>,
+    pub max_file_age_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -166,11 +172,13 @@ impl WatcherManager {
         let extensions = request.extensions.unwrap_or_default();
         let recursive = request.recursive.unwrap_or(true);
         let stable_wait_ms = request.stable_wait_ms.unwrap_or(2000);
+        let name_keywords = request.name_keywords.unwrap_or_default();
+        let max_file_age_days = request.max_file_age_days.unwrap_or(0);
 
         let db = self.db.lock().expect("db lock");
         db.execute(
-            "INSERT INTO watch_dirs (path, extensions, recursive, stable_wait_ms) VALUES (?1, ?2, ?3, ?4)",
-            params![request.path, extensions, recursive as i32, stable_wait_ms],
+            "INSERT INTO watch_dirs (path, extensions, recursive, stable_wait_ms, name_keywords, max_file_age_days) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![request.path, extensions, recursive as i32, stable_wait_ms, name_keywords, max_file_age_days],
         )?;
         let id = db.last_insert_rowid();
         drop(db);
@@ -194,7 +202,7 @@ impl WatcherManager {
     pub fn list_watch_dirs(&self) -> Result<Vec<WatchDirStatus>, WatcherError> {
         let db = self.db.lock().expect("db lock");
         let mut stmt = db.prepare(
-            "SELECT id, path, extensions, recursive, enabled, stable_wait_ms, archive_after_import, archive_path, created_at, updated_at
+            "SELECT id, path, extensions, recursive, enabled, stable_wait_ms, archive_after_import, archive_path, name_keywords, max_file_age_days, created_at, updated_at
             FROM watch_dirs ORDER BY id",
         )?;
         let dirs: Vec<WatchDir> = stmt
@@ -208,8 +216,10 @@ impl WatcherManager {
                     stable_wait_ms: row.get(5)?,
                     archive_after_import: row.get::<_, i32>(6)? != 0,
                     archive_path: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    name_keywords: row.get(8)?,
+                    max_file_age_days: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -267,6 +277,14 @@ impl WatcherManager {
         if let Some(ref archive_path) = request.archive_path {
             vals.push(Box::new(archive_path.clone()));
             sets.push(format!("archive_path = ?{}", vals.len()));
+        }
+        if let Some(ref name_keywords) = request.name_keywords {
+            vals.push(Box::new(name_keywords.clone()));
+            sets.push(format!("name_keywords = ?{}", vals.len()));
+        }
+        if let Some(max_file_age_days) = request.max_file_age_days {
+            vals.push(Box::new(max_file_age_days));
+            sets.push(format!("max_file_age_days = ?{}", vals.len()));
         }
 
         if sets.is_empty() {
@@ -333,7 +351,7 @@ impl WatcherManager {
     fn get_watch_dir(&self, id: i64) -> Result<WatchDir, WatcherError> {
         let db = self.db.lock().expect("db lock");
         let result = db.query_row(
-            "SELECT id, path, extensions, recursive, enabled, stable_wait_ms, archive_after_import, archive_path, created_at, updated_at
+            "SELECT id, path, extensions, recursive, enabled, stable_wait_ms, archive_after_import, archive_path, name_keywords, max_file_age_days, created_at, updated_at
             FROM watch_dirs WHERE id = ?1",
             [id],
             |row| {
@@ -346,8 +364,10 @@ impl WatcherManager {
                     stable_wait_ms: row.get(5)?,
                     archive_after_import: row.get::<_, i32>(6)? != 0,
                     archive_path: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    name_keywords: row.get(8)?,
+                    max_file_age_days: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             },
         )?;
@@ -377,6 +397,8 @@ impl WatcherManager {
         // Stop existing watcher for this ID first
         self.stop_watching(id);
 
+        let config = self.get_watch_dir(id)?;
+
         let stop_flag = Arc::new(AtomicBool::new(false));
         let handle = WatchHandle {
             stop_flag: stop_flag.clone(),
@@ -392,6 +414,8 @@ impl WatcherManager {
         let llm_audit_dir = self.llm_audit_dir.clone();
         let llm_config = Arc::clone(&self.llm_config);
         let app_handle = self.app_handle.clone();
+        let name_keywords = config.name_keywords;
+        let max_file_age_days = config.max_file_age_days;
 
         std::thread::Builder::new()
             .name(format!("watch-dir-{id}"))
@@ -408,6 +432,8 @@ impl WatcherManager {
                     recursive,
                     extensions,
                     stable_wait_ms,
+                    name_keywords,
+                    max_file_age_days,
                     stop_flag,
                 );
             })
@@ -450,6 +476,8 @@ fn watch_loop(
     recursive: bool,
     extensions: String,
     stable_wait_ms: u64,
+    name_keywords: String,
+    max_file_age_days: i64,
     stop_flag: Arc<AtomicBool>,
 ) {
     let (tx, rx) = mpsc::channel();
@@ -475,6 +503,12 @@ fn watch_loop(
     }
 
     let ext_filter: Vec<String> = extensions
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let kw_filter: Vec<String> = name_keywords
         .split(',')
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty())
@@ -509,7 +543,7 @@ fn watch_loop(
                     continue;
                 }
                 for p in event.paths {
-                    if p.is_file() && matches_filter(&p, &ext_filter) {
+                    if p.is_file() && matches_filter(&p, &ext_filter, &kw_filter, max_file_age_days) {
                         pending_paths.insert(p);
                     }
                 }
@@ -539,14 +573,52 @@ fn is_relevant_event(event: &Event) -> bool {
     matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_))
 }
 
-fn matches_filter(path: &Path, extensions: &[String]) -> bool {
-    if extensions.is_empty() {
-        return true;
+fn matches_filter(
+    path: &Path,
+    extensions: &[String],
+    keywords: &[String],
+    max_age_days: i64,
+) -> bool {
+    // Extension filter
+    if !extensions.is_empty() {
+        let ext_match = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| extensions.iter().any(|ext| ext.eq_ignore_ascii_case(e)))
+            .unwrap_or(false);
+        if !ext_match {
+            return false;
+        }
     }
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| extensions.iter().any(|ext| ext.eq_ignore_ascii_case(e)))
-        .unwrap_or(false)
+
+    // Keyword filter (filename must contain at least one keyword)
+    if !keywords.is_empty() {
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        let kw_match = keywords.iter().any(|kw| file_name.contains(kw));
+        if !kw_match {
+            return false;
+        }
+    }
+
+    // Age filter
+    if max_age_days > 0 {
+        if let Ok(metadata) = std::fs::metadata(path) {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(elapsed) = modified.elapsed() {
+                    let max_age = std::time::Duration::from_secs(max_age_days as u64 * 86400);
+                    if elapsed > max_age {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    true
 }
 
 fn process_pending(
@@ -635,7 +707,7 @@ fn process_pending(
     }
 }
 
-async fn recognize_raw_file_async(
+pub async fn recognize_raw_file_async(
     db: &Arc<Mutex<Connection>>,
     thumbnails_dir: &Path,
     raw_file_id: i64,

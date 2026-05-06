@@ -6,6 +6,8 @@ import type { WatcherImportEvent } from "../types";
 import {
   importFiles,
   getRecognitionQueueStatus,
+  syncAllEmailSources,
+  listEmailSources,
 } from "../api";
 import { useAppStore } from "../stores/appStore";
 import { useLlmStore } from "../stores/llmStore";
@@ -128,4 +130,50 @@ export function useAppInitializer() {
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
   }, [setImportBadgeCount]);
+
+  // Email sync polling (per-source configurable interval)
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        // Determine the minimum poll interval from enabled sources
+        const sources = await listEmailSources();
+        const enabledSources = sources.filter((s) => s.enabled);
+        if (enabledSources.length > 0) {
+          const results = await syncAllEmailSources();
+          const totalImported = results.reduce(
+            (sum, r) => sum + r.imported_count,
+            0,
+          );
+          if (totalImported > 0) {
+            triggerImportRefresh();
+            refreshInvoices();
+            triggerDashboardRefresh();
+          }
+        }
+        // Use the minimum interval among enabled sources, default 60s
+        const minInterval = enabledSources.length > 0
+          ? Math.min(...enabledSources.map((s) => s.poll_interval_seconds || 60))
+          : 60;
+        if (!stopped) {
+          timer = setTimeout(tick, Math.max(minInterval, 10) * 1000);
+        }
+      } catch {
+        if (!stopped) {
+          timer = setTimeout(tick, 60000);
+        }
+      }
+    };
+
+    // Start after a short delay to let the app initialize
+    timer = setTimeout(tick, 5000);
+
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [triggerImportRefresh, refreshInvoices, triggerDashboardRefresh]);
 }

@@ -8,6 +8,9 @@ const DashboardPage = React.lazy(
   () => import("./components/DashboardPage"),
 );
 const ImportPage = React.lazy(() => import("./components/ImportPage"));
+const DataSourcePage = React.lazy(
+  () => import("./components/DataSourcePage"),
+);
 const InvoicesPage = React.lazy(
   () => import("./components/InvoicesPage"),
 );
@@ -50,6 +53,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             element={
               <Suspense fallback={<PageFallback />}>
                 <ImportPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/import/sources"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <DataSourcePage />
               </Suspense>
             }
           />

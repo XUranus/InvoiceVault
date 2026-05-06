@@ -3,6 +3,7 @@ mod app_core;
 mod chroma;
 mod dedupe;
 mod document;
+mod email_manager;
 mod embedding;
 mod event;
 mod exporter;
@@ -576,6 +577,85 @@ fn toggle_watch_dir(
         .map_err(|err| err.to_string())
 }
 
+// --- Email Source Commands ---
+
+#[tauri::command]
+fn add_email_source(
+    state: State<'_, AppState>,
+    request: email_manager::AddEmailSourceRequest,
+) -> Result<email_manager::EmailSource, String> {
+    state
+        .add_email_source(request)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn update_email_source(
+    state: State<'_, AppState>,
+    id: i64,
+    request: email_manager::UpdateEmailSourceRequest,
+) -> Result<email_manager::EmailSource, String> {
+    state
+        .update_email_source(id, request)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn remove_email_source(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state.remove_email_source(id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_email_sources(state: State<'_, AppState>) -> Result<Vec<email_manager::EmailSource>, String> {
+    state.list_email_sources().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn toggle_email_source(
+    state: State<'_, AppState>,
+    id: i64,
+    enabled: bool,
+) -> Result<email_manager::EmailSource, String> {
+    state
+        .toggle_email_source(id, enabled)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn sync_email_source(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<email_manager::EmailSyncResult, String> {
+    state
+        .sync_email_source(id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn sync_all_email_sources(
+    state: State<'_, AppState>,
+) -> Result<Vec<email_manager::EmailSyncResult>, String> {
+    state
+        .sync_all_email_sources()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn test_email_connection(
+    state: State<'_, AppState>,
+    protocol: String,
+    host: String,
+    port: i64,
+    username: String,
+    password: String,
+    use_ssl: bool,
+    folder: String,
+) -> Result<email_manager::EmailTestResult, String> {
+    state
+        .test_email_connection(&protocol, &host, port, &username, &password, use_ssl, &folder)
+        .map_err(|err| err.to_string())
+}
+
 #[tauri::command]
 fn set_chroma_config(state: State<'_, AppState>, config: ChromaConfig) -> Result<(), String> {
     state
@@ -1111,6 +1191,14 @@ pub fn run() {
             list_watch_dirs,
             update_watch_dir,
             toggle_watch_dir,
+            add_email_source,
+            update_email_source,
+            remove_email_source,
+            list_email_sources,
+            toggle_email_source,
+            sync_email_source,
+            sync_all_email_sources,
+            test_email_connection,
             set_chroma_config,
             get_chroma_config,
             set_embedding_config,

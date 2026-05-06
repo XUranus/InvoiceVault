@@ -21,8 +21,11 @@ base64 = "0.22.1"
 chrono = { version = "0.4.42", features = ["serde"] }
 csv = "1.4"
 hex = "0.4.3"
+imap = "3.0.0-alpha.15"
+mailparse = "0.15"
 md-5 = "0.10.6"
 mime_guess = "2.0.5"
+native-tls = "0.2"
 reqwest = { version = "0.12.25", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 rust_xlsxwriter = "0.81"

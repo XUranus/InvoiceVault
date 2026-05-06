@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ImportJob, ImportJobListResult } from "../types";
 import {
@@ -20,6 +21,7 @@ export function ImportPage() {
   const refreshKey = useRefreshStore((s) => s.importKey);
   const onInvoicesAdded = useAppStore((s) => s.refreshInvoices);
   const onNavigateToInvoice = useNavigateToInvoice();
+  const navigate = useNavigate();
   const setError = useAppStore((s) => s.setError);
   const [isImporting, setIsImporting] = React.useState(false);
   const [recognizingJobId, setRecognizingJobId] = React.useState<number | null>(null);
@@ -171,6 +173,9 @@ export function ImportPage() {
     <div className="page">
       <div className="page-header">
         <h2 className="page-title" style={{ margin: 0 }}>导入发票</h2>
+        <button className="btn-small" onClick={() => navigate("/import/sources")}>
+          数据源
+        </button>
       </div>
 
       <div className="import-zone">

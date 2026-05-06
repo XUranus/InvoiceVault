@@ -42,6 +42,14 @@ const MIGRATIONS: &[(i64, &str)] = &[
         14,
         include_str!("../../migrations/0014_usage_log.sql"),
     ),
+    (
+        15,
+        include_str!("../../migrations/0015_email_sources.sql"),
+    ),
+    (
+        16,
+        include_str!("../../migrations/0016_pop3_support.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -98,6 +106,6 @@ mod tests {
             )
             .expect("read migration version");
 
-        assert_eq!(version, 14);
+        assert_eq!(version, 16);
     }
 }

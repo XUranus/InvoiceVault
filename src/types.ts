@@ -247,6 +247,8 @@ export type WatchDirConfig = {
   stable_wait_ms: number;
   archive_after_import: boolean;
   archive_path: string | null;
+  name_keywords: string;
+  max_file_age_days: number;
   created_at: string;
   updated_at: string;
 };
@@ -261,6 +263,8 @@ export type AddWatchDirRequest = {
   extensions?: string;
   recursive?: boolean;
   stable_wait_ms?: number;
+  name_keywords?: string;
+  max_file_age_days?: number;
 };
 
 export type UpdateWatchDirRequest = {
@@ -270,11 +274,78 @@ export type UpdateWatchDirRequest = {
   stable_wait_ms?: number;
   archive_after_import?: boolean;
   archive_path?: string | null;
+  name_keywords?: string;
+  max_file_age_days?: number;
 };
 
 export type WatcherImportEvent = {
   watch_dir_id: number;
   watch_dir_path: string;
+  imported_count: number;
+  jobs: ImportJob[];
+};
+
+export type EmailSource = {
+  id: number;
+  name: string;
+  protocol: string;
+  imap_host: string;
+  imap_port: number;
+  username: string;
+  password: string;
+  use_ssl: boolean;
+  folder: string;
+  name_keywords: string;
+  max_email_age_days: number;
+  enabled: boolean;
+  last_uid: number;
+  poll_interval_seconds: number;
+  processed_uidls: string;
+  last_sync_at: string | null;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AddEmailSourceRequest = {
+  name?: string;
+  protocol?: string;
+  imap_host: string;
+  imap_port?: number;
+  username: string;
+  password: string;
+  use_ssl?: boolean;
+  folder?: string;
+  name_keywords?: string;
+  max_email_age_days?: number;
+  poll_interval_seconds?: number;
+};
+
+export type UpdateEmailSourceRequest = {
+  name?: string;
+  protocol?: string;
+  imap_host?: string;
+  imap_port?: number;
+  username?: string;
+  password?: string;
+  use_ssl?: boolean;
+  folder?: string;
+  name_keywords?: string;
+  max_email_age_days?: number;
+  poll_interval_seconds?: number;
+  enabled?: boolean;
+};
+
+export type EmailTestResult = {
+  success: boolean;
+  message: string;
+  folder_count: number | null;
+};
+
+export type EmailSyncResult = {
+  source_id: number;
+  fetched_count: number;
   imported_count: number;
   jobs: ImportJob[];
 };

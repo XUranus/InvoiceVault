@@ -21,6 +21,11 @@ import type {
   WatchDirStatus,
   AddWatchDirRequest,
   UpdateWatchDirRequest,
+  EmailSource,
+  AddEmailSourceRequest,
+  UpdateEmailSourceRequest,
+  EmailTestResult,
+  EmailSyncResult,
   DashboardStats,
   ChromaConfig,
   EmbeddingConfig,
@@ -240,6 +245,56 @@ export async function toggleWatchDir(
   enabled: boolean,
 ): Promise<WatchDirStatus> {
   return invoke<WatchDirStatus>("toggle_watch_dir", { id, enabled });
+}
+
+// Email Source APIs
+
+export async function addEmailSource(
+  request: AddEmailSourceRequest,
+): Promise<EmailSource> {
+  return invoke<EmailSource>("add_email_source", { request });
+}
+
+export async function updateEmailSource(
+  id: number,
+  request: UpdateEmailSourceRequest,
+): Promise<EmailSource> {
+  return invoke<EmailSource>("update_email_source", { id, request });
+}
+
+export async function removeEmailSource(id: number): Promise<void> {
+  return invoke<void>("remove_email_source", { id });
+}
+
+export async function listEmailSources(): Promise<EmailSource[]> {
+  return invoke<EmailSource[]>("list_email_sources");
+}
+
+export async function toggleEmailSource(
+  id: number,
+  enabled: boolean,
+): Promise<EmailSource> {
+  return invoke<EmailSource>("toggle_email_source", { id, enabled });
+}
+
+export async function syncEmailSource(id: number): Promise<EmailSyncResult> {
+  return invoke<EmailSyncResult>("sync_email_source", { id });
+}
+
+export async function syncAllEmailSources(): Promise<EmailSyncResult[]> {
+  return invoke<EmailSyncResult[]>("sync_all_email_sources");
+}
+
+export async function testEmailConnection(config: {
+  protocol: string;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  use_ssl: boolean;
+  folder: string;
+}): Promise<EmailTestResult> {
+  return invoke<EmailTestResult>("test_email_connection", config);
 }
 
 // Agent APIs

@@ -28,6 +28,10 @@ use crate::{
         prepare_image_for_recognition, render_pdf_pages, DocumentError, PreparedImage,
         RenderedPdfPage,
     },
+    email_manager::{
+        AddEmailSourceRequest, EmailError, EmailManager, EmailSource, EmailSyncResult,
+        EmailTestResult, UpdateEmailSourceRequest,
+    },
     embedding::{
         generate_embedding, test_embedding_connection as run_embedding_test, EmbeddingConfig,
         EmbeddingError, EmbeddingTestResult,
@@ -79,6 +83,8 @@ pub enum AppError {
     Document(#[from] DocumentError),
     #[error("watcher error: {0}")]
     Watcher(#[from] WatcherError),
+    #[error("email error: {0}")]
+    Email(#[from] EmailError),
     #[error("chromadb error: {0}")]
     Chroma(#[from] ChromaError),
     #[error("embedding error: {0}")]
@@ -229,6 +235,7 @@ pub struct AppState {
     paths: AppPaths,
     db: Arc<Mutex<Connection>>,
     watcher_manager: WatcherManager,
+    email_manager: EmailManager,
     chroma_config: Mutex<ChromaConfig>,
     embedding_config: Mutex<EmbeddingConfig>,
     badge_config: Mutex<BadgeConfig>,
@@ -288,10 +295,19 @@ impl AppState {
             app.clone(),
         )?;
 
+        let email_manager = EmailManager::new(
+            Arc::clone(&db),
+            paths.raw_dir.clone(),
+            paths.thumbnails_dir.clone(),
+            Arc::clone(&llm_config),
+            app.clone(),
+        );
+
         let state = Self {
             paths,
             db,
             watcher_manager,
+            email_manager,
             chroma_config: Mutex::new(chroma_config),
             embedding_config: Mutex::new(embedding_config),
             badge_config: Mutex::new(badge_config),
@@ -803,6 +819,56 @@ impl AppState {
 
     pub fn toggle_watch_dir(&self, id: i64, enabled: bool) -> Result<WatchDirStatus, AppError> {
         Ok(self.watcher_manager.toggle_watch_dir(id, enabled)?)
+    }
+
+    // --- Email Sources ---
+
+    pub fn add_email_source(
+        &self,
+        request: AddEmailSourceRequest,
+    ) -> Result<EmailSource, AppError> {
+        Ok(self.email_manager.add_email_source(request)?)
+    }
+
+    pub fn update_email_source(
+        &self,
+        id: i64,
+        request: UpdateEmailSourceRequest,
+    ) -> Result<EmailSource, AppError> {
+        Ok(self.email_manager.update_email_source(id, request)?)
+    }
+
+    pub fn remove_email_source(&self, id: i64) -> Result<(), AppError> {
+        Ok(self.email_manager.remove_email_source(id)?)
+    }
+
+    pub fn list_email_sources(&self) -> Result<Vec<EmailSource>, AppError> {
+        Ok(self.email_manager.list_email_sources()?)
+    }
+
+    pub fn toggle_email_source(&self, id: i64, enabled: bool) -> Result<EmailSource, AppError> {
+        Ok(self.email_manager.toggle_email_source(id, enabled)?)
+    }
+
+    pub fn sync_email_source(&self, id: i64) -> Result<EmailSyncResult, AppError> {
+        Ok(self.email_manager.sync_email_source(id)?)
+    }
+
+    pub fn sync_all_email_sources(&self) -> Result<Vec<EmailSyncResult>, AppError> {
+        Ok(self.email_manager.sync_all_enabled()?)
+    }
+
+    pub fn test_email_connection(
+        &self,
+        protocol: &str,
+        host: &str,
+        port: i64,
+        username: &str,
+        password: &str,
+        use_ssl: bool,
+        folder: &str,
+    ) -> Result<EmailTestResult, AppError> {
+        Ok(self.email_manager.test_connection(protocol, host, port, username, password, use_ssl, folder)?)
     }
 
     pub fn get_dashboard_stats(

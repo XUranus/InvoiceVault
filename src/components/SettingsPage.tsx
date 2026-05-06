@@ -28,7 +28,6 @@ import {
   setPriceConfig,
 } from "../api";
 import type { ExportLogsResult, CleanupStorageResult } from "../types";
-import { WatchDirManager } from "./WatchDirManager";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useAppStore } from "../stores/appStore";
 import { useLlmStore } from "../stores/llmStore";
@@ -939,8 +938,6 @@ export function SettingsPage() {
         onConfirm={handleCleanupStorage}
         onCancel={() => setCleanupDialogOpen(false)}
       />
-
-      <WatchDirManager />
 
       {health ? (
         <div className="section">
