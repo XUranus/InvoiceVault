@@ -173,7 +173,7 @@ export function LineItemsEditor({ invoiceId, items, onSaved, onError }: Props) {
               </td>
               <td>
                 <button
-                  className="small-button"
+                  className="btn-small"
                   onClick={() => handleDelete(i)}
                 >
                   删除

@@ -83,8 +83,8 @@ function WatchDirEditModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{dir ? "编辑监听目录" : "添加监听目录"}</h3>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <h3 className="modal-title">{dir ? "编辑监听目录" : "添加监听目录"}</h3>
 
         <label className="form-label">目录路径</label>
         <div className="form-row">
@@ -253,8 +253,8 @@ function EmailSourceEditModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{source ? "编辑邮件源" : "添加邮件源"}</h3>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <h3 className="modal-title">{source ? "编辑邮件源" : "添加邮件源"}</h3>
 
         <label className="form-label">名称（可选，显示用）</label>
         <input

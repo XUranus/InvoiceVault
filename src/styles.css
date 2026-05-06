@@ -4334,6 +4334,8 @@ textarea:focus {
   padding: 28px;
   max-width: 480px;
   width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
 }
 
@@ -4626,7 +4628,6 @@ textarea {
 .btn-secondary,
 .btn-danger,
 .btn-small,
-.small-button,
 .back-btn,
 .edit-btn,
 .page-btn,
@@ -4652,7 +4653,6 @@ textarea {
 
 .btn-secondary,
 .btn-small,
-.small-button,
 .back-btn,
 .edit-btn,
 .page-btn,
@@ -4668,7 +4668,6 @@ textarea {
 
 .btn-secondary:hover,
 .btn-small:hover,
-.small-button:hover,
 .back-btn:hover,
 .edit-btn:hover,
 .page-btn:not(:disabled):hover,
@@ -5333,7 +5332,6 @@ textarea:focus,
 
 [data-theme="dark"] .btn-secondary,
 [data-theme="dark"] .btn-small,
-[data-theme="dark"] .small-button,
 [data-theme="dark"] .back-btn,
 [data-theme="dark"] .edit-btn,
 [data-theme="dark"] .page-btn,
@@ -5455,25 +5453,6 @@ body,
 }
 
 /* DataSourcePage modals and forms */
-.modal {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 24px;
-  max-width: 520px;
-  width: 90%;
-  max-height: 85vh;
-  overflow-y: auto;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
-}
-
-.modal h3 {
-  margin: 0 0 16px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
 .form-label {
   display: block;
   font-size: 12px;

@@ -116,7 +116,7 @@ export function ImportPanel({
                 </span>
                 {canRecognizeJob(job) ? (
                   <button
-                    className="small-button"
+                    className="btn-small"
                     type="button"
                     onClick={() => onRecognize(job)}
                     disabled={recognizingJobId !== null}

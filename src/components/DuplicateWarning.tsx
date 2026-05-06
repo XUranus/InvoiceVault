@@ -58,13 +58,13 @@ export function DuplicateWarning({ invoiceId, onError }: Props) {
           </div>
           <div className="dup-actions">
             <button
-              className="small-button"
+              className="btn-small"
               onClick={() => handleResolve(c.id, "confirm")}
             >
               确认重复
             </button>
             <button
-              className="small-button"
+              className="btn-small"
               onClick={() => handleResolve(c.id, "ignore")}
             >
               忽略

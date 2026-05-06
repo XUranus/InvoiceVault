@@ -101,7 +101,7 @@ export function ExportButton({ onError, invoiceIds }: Props) {
   return (
     <div className="export-group">
       <button
-        className="small-button"
+        className="btn-small"
         onClick={() => setShowPanel(!showPanel)}
       >
         {showPanel ? "收起选项" : "导出..."}
@@ -113,14 +113,14 @@ export function ExportButton({ onError, invoiceIds }: Props) {
           <div className="export-panel-row">
             <span className="export-panel-label">格式</span>
             <button
-              className="small-button"
+              className="btn-small"
               onClick={() => handleExport("csv")}
               disabled={exporting || columns.length === 0}
             >
               {exporting ? "导出中..." : "导出 CSV"}
             </button>
             <button
-              className="small-button"
+              className="btn-small"
               onClick={() => handleExport("xlsx")}
               disabled={exporting || columns.length === 0}
             >
