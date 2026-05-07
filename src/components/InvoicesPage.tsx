@@ -588,6 +588,11 @@ function InvoiceCardView({
                 {formatInvoiceAmount(invoice)}
               </span>
             </div>
+            {invoice.buyer_name && invoice.buyer_name !== invoice.seller_name ? (
+              <div className="invoice-card-buyer">
+                购买方：{invoice.buyer_name}
+              </div>
+            ) : null}
             <div className="invoice-card-meta">
               <span>{invoice.issue_date ?? "日期未识别"}</span>
               <span>
@@ -598,6 +603,9 @@ function InvoiceCardView({
               {invoice.source_page_range ? (
                 <span>第 {invoice.source_page_range} 页</span>
               ) : null}
+              {invoice.confidence != null ? (
+                <span>置信度 {(invoice.confidence * 100).toFixed(0)}%</span>
+              ) : null}
               {similarities ? (
                 <span className="similarity-badge">
                   相似度: {formatSimilarity(similarities[i]?.similarity)}
@@ -606,14 +614,21 @@ function InvoiceCardView({
             </div>
           </div>
           <div className="invoice-card-tags">
-            <span className={`mini-tag ${toneClass(invoiceStatusMeta(invoice.status).tone)}`}>
-              {invoiceStatusMeta(invoice.status).label}
-            </span>
+            {invoice.status !== "recognized" ? (
+              <span className={`mini-tag ${toneClass(invoiceStatusMeta(invoice.status).tone)}`}>
+                {invoiceStatusMeta(invoice.status).label}
+              </span>
+            ) : null}
             {shouldShowDuplicateStatus(invoice.duplicate_status) ? (
               <span className={`mini-tag ${toneClass(duplicateStatusMeta(invoice.duplicate_status).tone)}`}>
                 {duplicateStatusMeta(invoice.duplicate_status).label}
               </span>
             ) : null}
+            {buildInvoiceTags(invoice).map((tag) => (
+              <span key={tag.label} className={`mini-tag ${toneClass(tag.tone)}`}>
+                {tag.label}
+              </span>
+            ))}
           </div>
         </article>
       ))}

@@ -1,7 +1,7 @@
 import React from "react";
 import type { EventListResult, EventRow } from "../types";
 import { listEvents, deleteAllEvents, getInvoiceIdByRawFile, markEventRead, markAllEventsRead } from "../api";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Copy } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 import { useAppStore } from "../stores/appStore";
@@ -20,6 +20,22 @@ const STATUS_LABELS: Record<string, string> = {
   pending: "进行中",
   running: "进行中",
 };
+
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  const now = Date.now();
+  const diff = now - date.getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return "刚刚";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} 天前`;
+  return dateStr;
+}
 
 type ImportEventMetadata = {
   source_paths?: string[];
@@ -103,11 +119,9 @@ export function EventsPage() {
       const invoiceId = await getInvoiceIdByRawFile(rawFileId);
       if (invoiceId) {
         onNavigateToInvoice(invoiceId);
-      } else {
-        setEventError("该导入事件还没有可打开的发票详情，请等待识别完成后再试。");
       }
-    } catch (err) {
-      setEventError(String(err));
+    } catch {
+      // silent — invoice not ready yet
     }
   };
 
@@ -162,7 +176,7 @@ export function EventsPage() {
             </button>
           ) : null}
           {result && result.total_count > 0 ? (
-            <button className="btn-danger" onClick={() => setClearDialogOpen(true)}>
+            <button className="btn-small" onClick={() => setClearDialogOpen(true)}>
               清空全部事件
             </button>
           ) : null}
@@ -245,8 +259,11 @@ export function EventsPage() {
                   </td>
                   <td className="event-table-desc">
                     {ev.description ? <span>{ev.description}</span> : <span className="muted">-</span>}
-                    {ev.event_type === "import" && ev.metadata_json ? (
-                      <SourcePaths paths={metadata.source_paths ?? []} onOpen={openFolder} />
+                    {(ev.event_type === "import" || ev.event_type === "recognition") && ev.metadata_json && metadata.source_paths?.length ? (
+                      <SourcePaths
+                        paths={metadata.source_paths}
+                        onOpen={ev.event_type === "import" ? openFolder : undefined}
+                      />
                     ) : null}
                   </td>
                   <td>
@@ -265,7 +282,7 @@ export function EventsPage() {
                       <span className="muted">-</span>
                     )}
                   </td>
-                  <td className="event-time">{ev.created_at}</td>
+                  <td className="event-time" title={ev.created_at}>{formatRelativeTime(ev.created_at)}</td>
                   <td className="event-actions" onClick={(e) => e.stopPropagation()}>
                     {!ev.is_read ? (
                       <button
@@ -321,21 +338,38 @@ export function EventsPage() {
   );
 }
 
-function SourcePaths({ paths, onOpen }: { paths: string[]; onOpen: (path: string) => void }) {
+function SourcePaths({ paths, onOpen }: { paths: string[]; onOpen?: (path: string) => void }) {
+  const [copiedIdx, setCopiedIdx] = React.useState<number | null>(null);
+
   if (paths.length === 0) return null;
+
+  const handleClick = async (e: React.MouseEvent, path: string, idx: number) => {
+    e.stopPropagation();
+    if (onOpen) {
+      onOpen(path);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(path);
+      setCopiedIdx(idx);
+      window.setTimeout(() => setCopiedIdx(null), 1200);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
       <div className="event-source-paths">
         {paths.map((p, i) => (
           <span
             key={i}
             className="event-source-path"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpen(p);
-            }}
-            title={p}
+            onClick={(e) => handleClick(e, p, i)}
+            title={onOpen ? p : `点击复制: ${p}`}
           >
+            {onOpen ? null : <Copy size={11} style={{ marginRight: 4, verticalAlign: "middle" }} />}
             {p}
+            {copiedIdx === i ? <span className="copy-hint">已复制</span> : null}
           </span>
         ))}
       </div>

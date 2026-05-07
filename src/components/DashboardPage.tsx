@@ -210,16 +210,16 @@ export function DashboardPage() {
         <>
           <div className="dashboard-work-grid">
             <div className="dashboard-work-card dashboard-work-card-primary">
+              <span className="dashboard-work-label">本月新增</span>
+              <span className="dashboard-work-value">{stats.this_month_count}</span>
+              <span className="dashboard-work-meta">
+                {formatAmount(stats.this_month_amount)}
+              </span>
+            </div>
+            <div className="dashboard-work-card">
               <span className="dashboard-work-label">待确认</span>
               <span className="dashboard-work-value">{stats.pending_count}</span>
               <span className="dashboard-work-meta">需要人工复核的发票</span>
-            </div>
-            <div className="dashboard-work-card">
-              <span className="dashboard-work-label">识别队列</span>
-              <span className="dashboard-work-value">{queueTotal(queueStatus)}</span>
-              <span className="dashboard-work-meta">
-                处理中 {queueStatus?.running ?? "--"} / 等待 {queueStatus?.pending ?? "--"}
-              </span>
             </div>
             <div className="dashboard-work-card">
               <span className="dashboard-work-label">最近导入失败</span>
@@ -227,10 +227,10 @@ export function DashboardPage() {
               <span className="dashboard-work-meta">最近 {recentJobs.length} 次导入</span>
             </div>
             <div className="dashboard-work-card">
-              <span className="dashboard-work-label">本月新增</span>
-              <span className="dashboard-work-value">{stats.this_month_count}</span>
+              <span className="dashboard-work-label">识别队列</span>
+              <span className="dashboard-work-value">{queueTotal(queueStatus)}</span>
               <span className="dashboard-work-meta">
-                {formatAmount(stats.this_month_amount)}
+                处理中 {queueStatus?.running ?? "--"} / 等待 {queueStatus?.pending ?? "--"}
               </span>
             </div>
             <div className="dashboard-work-card">

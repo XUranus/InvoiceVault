@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ImportJob, ImportJobListResult } from "../types";
 import {
+  deleteImportJob,
   getInvoiceIdByRawFile,
   importFiles,
   listImportJobs,
@@ -161,6 +162,19 @@ export function ImportPage() {
     }
   };
 
+  const handleRetryImport = async (job: ImportJob) => {
+    if (!job.source_path) {
+      setError("无法重试：缺少源文件路径。");
+      return;
+    }
+    try {
+      await deleteImportJob(job.id);
+      await doImport([job.source_path]);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
   const allJobs = result?.jobs ?? [];
   const visibleJobs = [...optimisticJobs, ...allJobs];
   const activeJobs = allJobs.filter(isActiveImportJob);
@@ -218,9 +232,7 @@ export function ImportPage() {
           导入历史
           {result ? (
             <span className="badge">
-              {visibleJobs.length > allJobs.length
-                ? result.total_count + optimisticJobs.length
-                : result.total_count}
+              {completedJobs.length}
             </span>
           ) : null}
         </h3>
@@ -235,6 +247,7 @@ export function ImportPage() {
               onRecognize={handleRecognize}
               onToggleExpand={setExpandedJobId}
               onOpenImportedInvoice={handleOpenImportedInvoice}
+              onRetryImport={handleRetryImport}
             />
             {result && result.total_pages > 1 ? (
               <div className="pagination" style={{ marginTop: 12, justifyContent: "center" }}>
@@ -291,6 +304,7 @@ function ImportHistoryTable({
   onRecognize,
   onToggleExpand,
   onOpenImportedInvoice,
+  onRetryImport,
 }: {
   jobs: ImportJob[];
   recognizingJobId: number | null;
@@ -298,6 +312,7 @@ function ImportHistoryTable({
   onRecognize: (job: ImportJob) => void;
   onToggleExpand: (id: number | null) => void;
   onOpenImportedInvoice: (job: ImportJob) => void;
+  onRetryImport: (job: ImportJob) => void;
 }) {
   return (
     <div className="import-history-table-wrap">
@@ -321,6 +336,7 @@ function ImportHistoryTable({
               onRecognize={onRecognize}
               onToggleExpand={onToggleExpand}
               onOpenImportedInvoice={onOpenImportedInvoice}
+              onRetryImport={onRetryImport}
             />
           ))}
         </tbody>
@@ -336,6 +352,7 @@ function ImportHistoryRow({
   onRecognize,
   onToggleExpand,
   onOpenImportedInvoice,
+  onRetryImport,
 }: {
   job: ImportJob;
   recognizingJobId: number | null;
@@ -343,6 +360,7 @@ function ImportHistoryRow({
   onRecognize: (job: ImportJob) => void;
   onToggleExpand: (id: number | null) => void;
   onOpenImportedInvoice: (job: ImportJob) => void;
+  onRetryImport: (job: ImportJob) => void;
 }) {
   const meta = importStatusMeta(job.status);
   const isBusy = recognizingJobId === job.id;
@@ -350,6 +368,7 @@ function ImportHistoryRow({
   const statusLabel = job.status === "duplicate" ? "SHA256 重复" : meta.label;
   const canOpenInvoice =
     ["imported", "completed", "recognized"].includes(job.status) && Boolean(job.invoice_id);
+  const isFailed = job.status === "failed";
 
   return (
     <>
@@ -367,7 +386,20 @@ function ImportHistoryRow({
           <span className="mini-tag tag-tone-neutral">{fileTypeLabel}</span>
         </td>
         <td>
-          {canOpenInvoice ? (
+          {isFailed ? (
+            <button
+              className="status-tag status-tag-button status-tag-retry"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRetryImport(job);
+              }}
+              type="button"
+              title="点击重试导入"
+            >
+              <span className="status-tag-default-text">识别失败</span>
+              <span className="status-tag-hover-text">重试</span>
+            </button>
+          ) : canOpenInvoice ? (
             <button
               className={`status-tag status-tag-button ${toneClass(meta.tone)}`}
               onClick={(e) => {

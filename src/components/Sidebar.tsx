@@ -12,14 +12,15 @@ import { useAppStore } from "../stores/appStore";
 
 const appIcon = new URL("../../icons/icon.png", import.meta.url).href;
 
-const NAV_ITEMS: { path: string; label: string; icon: LucideIcon }[] = [
+const TOP_NAV_ITEMS: { path: string; label: string; icon: LucideIcon }[] = [
   { path: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
   { path: "/import", label: "导入", icon: Upload },
   { path: "/invoices", label: "发票库", icon: ReceiptText },
   { path: "/agent", label: "Agent", icon: Bot },
   { path: "/events", label: "事件", icon: Activity },
-  { path: "/settings", label: "设置", icon: Settings },
 ];
+
+const BOTTOM_NAV_ITEM = { path: "/settings", label: "设置", icon: Settings };
 
 export function Sidebar() {
   const location = useLocation();
@@ -50,7 +51,7 @@ export function Sidebar() {
       </div>
 
       <nav className="sidebar-nav">
-        {NAV_ITEMS.map((item) => {
+        {TOP_NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           return (
             <button
@@ -77,6 +78,14 @@ export function Sidebar() {
             </button>
           );
         })}
+        <div className="sidebar-nav-spacer" />
+        <button
+          className={`nav-item ${(location.pathname === BOTTOM_NAV_ITEM.path || location.pathname.startsWith(BOTTOM_NAV_ITEM.path + "/")) ? "nav-item-active" : ""}`}
+          onClick={() => navigate(BOTTOM_NAV_ITEM.path)}
+        >
+          <BOTTOM_NAV_ITEM.icon className="nav-icon" size={18} strokeWidth={2} />
+          <span className="nav-label">{BOTTOM_NAV_ITEM.label}</span>
+        </button>
       </nav>
 
       <div className="sidebar-footer">
