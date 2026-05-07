@@ -3,6 +3,8 @@ import {
   Activity,
   Bot,
   LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
   ReceiptText,
   Settings,
   Upload,
@@ -33,12 +35,17 @@ export function Sidebar() {
   );
   const importBadgeCount = useAppStore((s) => s.importBadgeCount);
   const invoiceBadgeCount = useAppStore((s) => s.invoiceBadgeCount);
+  const collapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
 
   const healthReady = health !== null;
   const hasError = error !== null;
 
+  const isItemActive = (path: string) =>
+    location.pathname === path || (path !== "/" && location.pathname.startsWith(path + "/"));
+
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${collapsed ? "sidebar-collapsed" : ""}`}>
       <div className="sidebar-brand">
         <img
           className="sidebar-app-icon"
@@ -56,8 +63,9 @@ export function Sidebar() {
           return (
             <button
               key={item.path}
-              className={`nav-item ${(location.pathname === item.path || (item.path !== "/" && location.pathname.startsWith(item.path + "/"))) ? "nav-item-active" : ""}`}
+              className={`nav-item ${isItemActive(item.path) ? "nav-item-active" : ""}`}
               onClick={() => navigate(item.path)}
+              title={collapsed ? item.label : undefined}
             >
               <Icon className="nav-icon" size={18} strokeWidth={2} />
               <span className="nav-label">{item.label}</span>
@@ -80,8 +88,9 @@ export function Sidebar() {
         })}
         <div className="sidebar-nav-spacer" />
         <button
-          className={`nav-item ${(location.pathname === BOTTOM_NAV_ITEM.path || location.pathname.startsWith(BOTTOM_NAV_ITEM.path + "/")) ? "nav-item-active" : ""}`}
+          className={`nav-item ${isItemActive(BOTTOM_NAV_ITEM.path) ? "nav-item-active" : ""}`}
           onClick={() => navigate(BOTTOM_NAV_ITEM.path)}
+          title={collapsed ? BOTTOM_NAV_ITEM.label : undefined}
         >
           <BOTTOM_NAV_ITEM.icon className="nav-icon" size={18} strokeWidth={2} />
           <span className="nav-label">{BOTTOM_NAV_ITEM.label}</span>
@@ -95,6 +104,13 @@ export function Sidebar() {
         <span className="status-text">
           {healthReady ? (hasError ? "后端异常" : "系统就绪") : "连接中"}
         </span>
+        <button
+          className="sidebar-toggle-btn"
+          onClick={toggleSidebar}
+          title={collapsed ? "展开侧边栏" : "收起侧边栏"}
+        >
+          {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
       </div>
     </aside>
   );

@@ -11,6 +11,7 @@ type AppStore = {
   unreadEventCount: number;
   importBadgeCount: number;
   invoiceBadgeCount: number;
+  sidebarCollapsed: boolean;
 
   setHealth: (h: AppHealth) => void;
   setError: (err: string) => void;
@@ -21,6 +22,7 @@ type AppStore = {
   setUnreadEventCount: (n: number) => void;
   setImportBadgeCount: (n: number) => void;
   setInvoiceBadgeCount: (n: number) => void;
+  toggleSidebar: () => void;
   initialize: () => Promise<void>;
   refreshInvoices: () => Promise<void>;
 };
@@ -35,6 +37,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   unreadEventCount: 0,
   importBadgeCount: 0,
   invoiceBadgeCount: 0,
+  sidebarCollapsed:
+    localStorage.getItem("sidebarCollapsed") === "true",
 
   setHealth: (health) => set({ health }),
   setError: (error) => set({ error }),
@@ -50,6 +54,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ unreadEventCount }),
   setImportBadgeCount: (importBadgeCount) => set({ importBadgeCount }),
   setInvoiceBadgeCount: (invoiceBadgeCount) => set({ invoiceBadgeCount }),
+  toggleSidebar: () => {
+    const next = !get().sidebarCollapsed;
+    localStorage.setItem("sidebarCollapsed", String(next));
+    set({ sidebarCollapsed: next });
+  },
 
   initialize: async () => {
     try {
