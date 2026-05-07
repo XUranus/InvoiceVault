@@ -1058,6 +1058,11 @@ fn delete_all_events(state: State<'_, AppState>) -> Result<usize, String> {
     state.delete_all_events().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn delete_import_job(state: State<'_, AppState>, job_id: i64) -> Result<(), String> {
+    state.delete_import_job(job_id).map_err(|e| e.to_string())
+}
+
 
 #[tauri::command]
 fn get_llm_usage(
@@ -1232,6 +1237,7 @@ pub fn run() {
             raw_file_has_invoices,
             get_invoice_id_by_raw_file,
             delete_all_events,
+            delete_import_job,
             export_logs,
             export_backup,
             cleanup_storage,

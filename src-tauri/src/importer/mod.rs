@@ -122,6 +122,11 @@ pub fn list_import_jobs(
     })
 }
 
+pub fn delete_import_job(conn: &Connection, job_id: i64) -> Result<(), ImportError> {
+    conn.execute("DELETE FROM import_jobs WHERE id = ?1", [job_id])?;
+    Ok(())
+}
+
 fn import_one(
     conn: &mut Connection,
     raw_dir: &Path,

@@ -501,6 +501,10 @@ export async function deleteAllEvents(): Promise<number> {
   return invoke<number>("delete_all_events");
 }
 
+export async function deleteImportJob(jobId: number): Promise<void> {
+  return invoke<void>("delete_import_job", { jobId });
+}
+
 export async function exportLogs(outputPath: string): Promise<ExportLogsResult> {
   return invoke<ExportLogsResult>("export_logs", { outputPath });
 }

@@ -53,8 +53,9 @@ use crate::{
         UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
     },
     importer::{
-        import_files, list_import_jobs, recover_interrupted_import_jobs, update_import_job_status,
-        update_import_job_status_by_raw_file, ImportError, ImportJobListResult, ImportJobSummary,
+        delete_import_job, import_files, list_import_jobs, recover_interrupted_import_jobs,
+        update_import_job_status, update_import_job_status_by_raw_file, ImportError,
+        ImportJobListResult, ImportJobSummary,
     },
     llm::{LlmAuditConfig, LlmProviderConfig},
     storage::{run_migrations, StorageError},
@@ -618,6 +619,11 @@ impl AppState {
     ) -> Result<ImportJobListResult, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(list_import_jobs(&db, page, page_size)?)
+    }
+
+    pub fn delete_import_job(&self, job_id: i64) -> Result<(), AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(delete_import_job(&db, job_id)?)
     }
 
     pub fn save_invoice_extraction(
