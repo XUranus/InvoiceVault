@@ -1020,12 +1020,7 @@ textarea:focus {
 
 .import-history-table th:nth-child(4),
 .import-history-table td:nth-child(4) {
-  width: 16%;
-}
-
-.import-history-table th:nth-child(5),
-.import-history-table td:nth-child(5) {
-  width: 15%;
+  width: 24%;
 }
 
 .import-history-row {
@@ -1055,10 +1050,6 @@ textarea:focus {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.import-history-actions {
-  text-align: right;
 }
 
 .import-history-detail-row td {

@@ -175,6 +175,23 @@ export function ImportPage() {
     }
   };
 
+  const handleOpenDuplicateInvoice = async (job: ImportJob) => {
+    if (!job.raw_file_id) {
+      setError("该重复文件没有关联的原始文件。");
+      return;
+    }
+    try {
+      const invoiceId = await getInvoiceIdByRawFile(job.raw_file_id);
+      if (invoiceId) {
+        onNavigateToInvoice(invoiceId);
+      } else {
+        setError("该重复文件还没有生成发票详情。");
+      }
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
   const allJobs = result?.jobs ?? [];
   const visibleJobs = [...optimisticJobs, ...allJobs];
   const activeJobs = allJobs.filter(isActiveImportJob);
@@ -242,11 +259,10 @@ export function ImportPage() {
           <>
             <ImportHistoryTable
               jobs={completedJobs}
-              recognizingJobId={recognizingJobId}
               expandedJobId={expandedJobId}
-              onRecognize={handleRecognize}
               onToggleExpand={setExpandedJobId}
               onOpenImportedInvoice={handleOpenImportedInvoice}
+              onOpenDuplicateInvoice={handleOpenDuplicateInvoice}
               onRetryImport={handleRetryImport}
             />
             {result && result.total_pages > 1 ? (
@@ -299,19 +315,17 @@ function createOptimisticJob(path: string, index: number): ImportJob {
 
 function ImportHistoryTable({
   jobs,
-  recognizingJobId,
   expandedJobId,
-  onRecognize,
   onToggleExpand,
   onOpenImportedInvoice,
+  onOpenDuplicateInvoice,
   onRetryImport,
 }: {
   jobs: ImportJob[];
-  recognizingJobId: number | null;
   expandedJobId: number | null;
-  onRecognize: (job: ImportJob) => void;
   onToggleExpand: (id: number | null) => void;
   onOpenImportedInvoice: (job: ImportJob) => void;
+  onOpenDuplicateInvoice: (job: ImportJob) => void;
   onRetryImport: (job: ImportJob) => void;
 }) {
   return (
@@ -323,7 +337,6 @@ function ImportHistoryTable({
             <th>时间</th>
             <th>类型</th>
             <th>状态</th>
-            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -331,11 +344,10 @@ function ImportHistoryTable({
             <ImportHistoryRow
               key={job.id}
               job={job}
-              recognizingJobId={recognizingJobId}
               expanded={expandedJobId === job.id}
-              onRecognize={onRecognize}
               onToggleExpand={onToggleExpand}
               onOpenImportedInvoice={onOpenImportedInvoice}
+              onOpenDuplicateInvoice={onOpenDuplicateInvoice}
               onRetryImport={onRetryImport}
             />
           ))}
@@ -347,25 +359,22 @@ function ImportHistoryTable({
 
 function ImportHistoryRow({
   job,
-  recognizingJobId,
   expanded,
-  onRecognize,
   onToggleExpand,
   onOpenImportedInvoice,
+  onOpenDuplicateInvoice,
   onRetryImport,
 }: {
   job: ImportJob;
-  recognizingJobId: number | null;
   expanded: boolean;
-  onRecognize: (job: ImportJob) => void;
   onToggleExpand: (id: number | null) => void;
   onOpenImportedInvoice: (job: ImportJob) => void;
+  onOpenDuplicateInvoice: (job: ImportJob) => void;
   onRetryImport: (job: ImportJob) => void;
 }) {
   const meta = importStatusMeta(job.status);
-  const isBusy = recognizingJobId === job.id;
   const fileTypeLabel = formatFileType(job.mime_type, job.original_name ?? job.source_path);
-  const statusLabel = job.status === "duplicate" ? "SHA256 重复" : meta.label;
+  const isDuplicate = job.status === "duplicate";
   const canOpenInvoice =
     ["imported", "completed", "recognized"].includes(job.status) && Boolean(job.invoice_id);
   const isFailed = job.status === "failed";
@@ -399,6 +408,18 @@ function ImportHistoryRow({
               <span className="status-tag-default-text">识别失败</span>
               <span className="status-tag-hover-text">重试</span>
             </button>
+          ) : isDuplicate ? (
+            <button
+              className={`status-tag status-tag-button ${toneClass(meta.tone)}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenDuplicateInvoice(job);
+              }}
+              type="button"
+              title="点击查看重复文件的发票详情"
+            >
+              文件重复
+            </button>
           ) : canOpenInvoice ? (
             <button
               className={`status-tag status-tag-button ${toneClass(meta.tone)}`}
@@ -409,30 +430,18 @@ function ImportHistoryRow({
               type="button"
               title="点击查看发票详情"
             >
-              {statusLabel}
+              {meta.label}
             </button>
           ) : (
-            <span className={`status-tag ${toneClass(meta.tone)} ${isBusy ? "status-tag-busy" : ""}`}>
-              {isBusy ? <span className="inline-spinner" /> : null}
-              {statusLabel}
+            <span className={`status-tag ${toneClass(meta.tone)}`}>
+              {meta.label}
             </span>
           )}
-        </td>
-        <td className="import-history-actions" onClick={(e) => e.stopPropagation()}>
-          {canRecognizeJob(job) ? (
-            <button
-              className="btn-small"
-              disabled={recognizingJobId !== null}
-              onClick={() => onRecognize(job)}
-            >
-              {recognizingJobId === job.id ? "识别中..." : "重新识别"}
-            </button>
-          ) : null}
         </td>
       </tr>
       {expanded ? (
         <tr className="import-history-detail-row">
-          <td colSpan={5}>
+          <td colSpan={4}>
             <JobDetail job={job} />
           </td>
         </tr>
@@ -479,7 +488,7 @@ function JobRow({
           <span className="mini-tag tag-tone-neutral">{fileTypeLabel}</span>
           <span className={`status-tag ${toneClass(meta.tone)} ${isBusy ? "status-tag-busy" : ""}`}>
             {isBusy ? <span className="inline-spinner" /> : null}
-            {job.status === "duplicate" ? "SHA256 重复" : meta.label}
+            {job.status === "duplicate" ? "文件重复" : meta.label}
           </span>
           {canRecognizeJob(job) ? (
             <button
