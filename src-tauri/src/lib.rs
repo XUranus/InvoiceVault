@@ -25,7 +25,7 @@ use app_core::{
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
 use embedding::{EmbeddingConfig, EmbeddingTestResult};
-use event::{EventListResult, NotificationRow};
+use event::EventListResult;
 use exporter::{ExportInvoicesRequest, ExportResult};
 use extractor::{
     BadgeConfig, DashboardStats, InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow,
@@ -484,15 +484,6 @@ async fn recognize_raw_file(
     let count = invoices.len();
     info!("Recognition complete: {count} invoices, model {model}, {total_duration_ms}ms");
     let _ = state.set_import_job_status_for_raw_file(raw_file.id, "imported", None);
-
-    // Create notification
-    let _ = state.create_notification(
-        "info",
-        &format!("识别完成: {count} 张发票"),
-        &format!("共识别 {count} 张发票，模型 {model}，耗时 {total_duration_ms}ms"),
-        None,
-        None,
-    );
 
     Ok(RecognizeRawFileResult {
         invoices,
@@ -959,35 +950,19 @@ fn list_events(
 }
 
 #[tauri::command]
-fn list_notifications(state: State<'_, AppState>) -> Result<Vec<NotificationRow>, String> {
-    state.list_notifications().map_err(|err| err.to_string())
+fn get_unread_event_count(state: State<'_, AppState>) -> Result<i64, String> {
+    state.get_unread_event_count().map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-fn get_unread_notification_count(state: State<'_, AppState>) -> Result<i64, String> {
-    state
-        .get_unread_notification_count()
-        .map_err(|err| err.to_string())
+fn mark_event_read(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state.mark_event_read(id).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-fn mark_notification_read(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+fn mark_all_events_read(state: State<'_, AppState>) -> Result<(), String> {
     state
-        .mark_notification_read(id)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-fn mark_all_notifications_read(state: State<'_, AppState>) -> Result<(), String> {
-    state
-        .mark_all_notifications_read()
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-fn dismiss_notification(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    state
-        .dismiss_notification(id)
+        .mark_all_events_read()
         .map_err(|err| err.to_string())
 }
 
@@ -1083,10 +1058,6 @@ fn delete_all_events(state: State<'_, AppState>) -> Result<usize, String> {
     state.delete_all_events().map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn delete_all_notifications(state: State<'_, AppState>) -> Result<usize, String> {
-    state.delete_all_notifications().map_err(|e| e.to_string())
-}
 
 #[tauri::command]
 fn get_llm_usage(
@@ -1247,11 +1218,9 @@ pub fn run() {
             confirm_agent_action,
             confirm_agent_action_stream,
             list_events,
-            list_notifications,
-            get_unread_notification_count,
-            mark_notification_read,
-            mark_all_notifications_read,
-            dismiss_notification,
+            get_unread_event_count,
+            mark_event_read,
+            mark_all_events_read,
             set_llm_config,
             get_llm_config,
             set_agent_llm_config,
@@ -1263,7 +1232,6 @@ pub fn run() {
             raw_file_has_invoices,
             get_invoice_id_by_raw_file,
             delete_all_events,
-            delete_all_notifications,
             export_logs,
             export_backup,
             cleanup_storage,

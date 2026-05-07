@@ -667,14 +667,6 @@ fn process_pending(
             let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
             let failed = jobs.iter().filter(|j| j.status == "failed").count();
             let _ = event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
-            let _ = event::create_notification(
-                &conn,
-                "info",
-                &format!("监控导入: {total} 个文件"),
-                &format!("成功 {success}，重复 {dups}，失败 {failed}"),
-                None,
-                None,
-            );
 
             (jobs, ids)
         }
@@ -804,17 +796,6 @@ pub async fn recognize_raw_file_async(
                     recognition.duration_ms,
                     &recognition.model,
                     1,
-                );
-                let _ = event::create_notification(
-                    &db,
-                    "info",
-                    &format!("自动识别完成: {title}"),
-                    &format!(
-                        "监控目录文件已自动识别为发票，模型 {}，耗时 {}ms",
-                        recognition.model, recognition.duration_ms
-                    ),
-                    Some("invoice"),
-                    Some(invoice.id),
                 );
             }
         }

@@ -16,9 +16,6 @@ const InvoicesPage = React.lazy(
 );
 const AgentPage = React.lazy(() => import("./components/AgentPage"));
 const EventsPage = React.lazy(() => import("./components/EventsPage"));
-const NotificationsPage = React.lazy(
-  () => import("./components/NotificationsPage"),
-);
 const SettingsPage = React.lazy(
   () => import("./components/SettingsPage"),
 );
@@ -94,14 +91,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             element={
               <Suspense fallback={<PageFallback />}>
                 <EventsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="/notifications"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <NotificationsPage />
               </Suspense>
             }
           />

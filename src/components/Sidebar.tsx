@@ -1,7 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
-  Bell,
   Bot,
   LayoutDashboard,
   ReceiptText,
@@ -19,7 +18,6 @@ const NAV_ITEMS: { path: string; label: string; icon: LucideIcon }[] = [
   { path: "/invoices", label: "发票库", icon: ReceiptText },
   { path: "/agent", label: "Agent", icon: Bot },
   { path: "/events", label: "事件", icon: Activity },
-  { path: "/notifications", label: "通知", icon: Bell },
   { path: "/settings", label: "设置", icon: Settings },
 ];
 
@@ -29,8 +27,8 @@ export function Sidebar() {
 
   const health = useAppStore((s) => s.health);
   const error = useAppStore((s) => s.error);
-  const unreadNotificationCount = useAppStore(
-    (s) => s.unreadNotificationCount,
+  const unreadEventCount = useAppStore(
+    (s) => s.unreadEventCount,
   );
   const importBadgeCount = useAppStore((s) => s.importBadgeCount);
   const invoiceBadgeCount = useAppStore((s) => s.invoiceBadgeCount);
@@ -73,8 +71,8 @@ export function Sidebar() {
                   {invoiceBadgeCount}
                 </span>
               ) : null}
-              {item.path === "/notifications" && unreadNotificationCount ? (
-                <span className="nav-badge">{unreadNotificationCount}</span>
+              {item.path === "/events" && unreadEventCount ? (
+                <span className="nav-badge">{unreadEventCount}</span>
               ) : null}
             </button>
           );

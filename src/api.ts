@@ -38,7 +38,6 @@ import type {
   AgentMessage,
   AgentResponse,
   EventListResult,
-  NotificationRow,
   RecognitionQueueStatus,
   ExportLogsResult,
   CleanupStorageResult,
@@ -429,26 +428,18 @@ export async function listEvents(
   return invoke<EventListResult>("list_events", { page, pageSize, eventType });
 }
 
-// Notification APIs
+// Event read/unread APIs
 
-export async function listNotifications(): Promise<NotificationRow[]> {
-  return invoke<NotificationRow[]>("list_notifications");
+export async function getUnreadEventCount(): Promise<number> {
+  return invoke<number>("get_unread_event_count");
 }
 
-export async function getUnreadNotificationCount(): Promise<number> {
-  return invoke<number>("get_unread_notification_count");
+export async function markEventRead(id: number): Promise<void> {
+  return invoke<void>("mark_event_read", { id });
 }
 
-export async function markNotificationRead(id: number): Promise<void> {
-  return invoke<void>("mark_notification_read", { id });
-}
-
-export async function markAllNotificationsRead(): Promise<void> {
-  return invoke<void>("mark_all_notifications_read");
-}
-
-export async function dismissNotification(id: number): Promise<void> {
-  return invoke<void>("dismiss_notification", { id });
+export async function markAllEventsRead(): Promise<void> {
+  return invoke<void>("mark_all_events_read");
 }
 
 export async function setLlmConfig(config: {
@@ -508,10 +499,6 @@ export async function getInvoiceIdByRawFile(rawFileId: number): Promise<number |
 
 export async function deleteAllEvents(): Promise<number> {
   return invoke<number>("delete_all_events");
-}
-
-export async function deleteAllNotifications(): Promise<number> {
-  return invoke<number>("delete_all_notifications");
 }
 
 export async function exportLogs(outputPath: string): Promise<ExportLogsResult> {

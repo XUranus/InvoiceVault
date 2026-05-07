@@ -12,6 +12,7 @@ pub struct EventRow {
     pub title: String,
     pub description: String,
     pub status: String,
+    pub is_read: bool,
     pub reference_type: Option<String>,
     pub reference_id: Option<i64>,
     pub metadata_json: Option<String>,
@@ -22,21 +23,10 @@ pub struct EventRow {
 pub struct EventListResult {
     pub events: Vec<EventRow>,
     pub total_count: i64,
+    pub unread_count: i64,
     pub page: i64,
     pub page_size: i64,
     pub total_pages: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotificationRow {
-    pub id: i64,
-    pub level: String,
-    pub title: String,
-    pub message: String,
-    pub is_read: bool,
-    pub reference_type: Option<String>,
-    pub reference_id: Option<i64>,
-    pub created_at: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -76,7 +66,7 @@ fn query_events(
 ) -> Result<Vec<EventRow>, EventError> {
     if let Some(f) = filter {
         let sql = format!(
-            "SELECT id, event_type, title, description, status, reference_type, reference_id, metadata_json, created_at
+            "SELECT id, event_type, title, description, status, is_read, reference_type, reference_id, metadata_json, created_at
              FROM events {where_clause}
              ORDER BY created_at DESC
              LIMIT ?2 OFFSET ?3"
@@ -87,7 +77,7 @@ fn query_events(
         Ok(result)
     } else {
         let sql = format!(
-            "SELECT id, event_type, title, description, status, reference_type, reference_id, metadata_json, created_at
+            "SELECT id, event_type, title, description, status, is_read, reference_type, reference_id, metadata_json, created_at
              FROM events
              ORDER BY created_at DESC
              LIMIT ?1 OFFSET ?2"
@@ -121,6 +111,12 @@ pub fn list_events(
         conn.query_row(&count_sql, [], |row| row.get(0))?
     };
 
+    let unread_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM events WHERE is_read = 0",
+        [],
+        |row| row.get(0),
+    )?;
+
     let total_pages = (total_count + page_size - 1) / page_size;
     let offset = (page - 1) * page_size;
 
@@ -129,6 +125,7 @@ pub fn list_events(
     Ok(EventListResult {
         events,
         total_count,
+        unread_count,
         page,
         page_size,
         total_pages,
@@ -142,88 +139,39 @@ fn map_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
         title: row.get(2)?,
         description: row.get(3)?,
         status: row.get(4)?,
-        reference_type: row.get(5)?,
-        reference_id: row.get(6)?,
-        metadata_json: row.get(7)?,
-        created_at: row.get(8)?,
+        is_read: row.get::<_, i32>(5)? != 0,
+        reference_type: row.get(6)?,
+        reference_id: row.get(7)?,
+        metadata_json: row.get(8)?,
+        created_at: row.get(9)?,
     })
 }
 
 // ---------------------------------------------------------------------------
-// Notifications
+// Read/unread state
 // ---------------------------------------------------------------------------
 
-pub fn create_notification(
-    conn: &Connection,
-    level: &str,
-    title: &str,
-    message: &str,
-    reference_type: Option<&str>,
-    reference_id: Option<i64>,
-) -> Result<i64, EventError> {
-    conn.execute(
-        "INSERT INTO notifications (level, title, message, reference_type, reference_id)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![level, title, message, reference_type, reference_id],
-    )?;
-    Ok(conn.last_insert_rowid())
-}
-
-pub fn list_notifications(conn: &Connection) -> Result<Vec<NotificationRow>, EventError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, level, title, message, is_read, reference_type, reference_id, created_at
-         FROM notifications
-         ORDER BY created_at DESC
-         LIMIT 100",
-    )?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(NotificationRow {
-                id: row.get(0)?,
-                level: row.get(1)?,
-                title: row.get(2)?,
-                message: row.get(3)?,
-                is_read: row.get::<_, i32>(4)? != 0,
-                reference_type: row.get(5)?,
-                reference_id: row.get(6)?,
-                created_at: row.get(7)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
-}
-
-pub fn get_unread_notification_count(conn: &Connection) -> Result<i64, EventError> {
+pub fn get_unread_event_count(conn: &Connection) -> Result<i64, EventError> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM notifications WHERE is_read = 0",
+        "SELECT COUNT(*) FROM events WHERE is_read = 0",
         [],
         |row| row.get(0),
     )?;
     Ok(count)
 }
 
-pub fn mark_notification_read(conn: &Connection, id: i64) -> Result<(), EventError> {
-    conn.execute("UPDATE notifications SET is_read = 1 WHERE id = ?1", [id])?;
+pub fn mark_event_read(conn: &Connection, id: i64) -> Result<(), EventError> {
+    conn.execute("UPDATE events SET is_read = 1 WHERE id = ?1", [id])?;
     Ok(())
 }
 
-pub fn mark_all_notifications_read(conn: &Connection) -> Result<(), EventError> {
-    conn.execute("UPDATE notifications SET is_read = 1 WHERE is_read = 0", [])?;
-    Ok(())
-}
-
-pub fn dismiss_notification(conn: &Connection, id: i64) -> Result<(), EventError> {
-    conn.execute("DELETE FROM notifications WHERE id = ?1", [id])?;
+pub fn mark_all_events_read(conn: &Connection) -> Result<(), EventError> {
+    conn.execute("UPDATE events SET is_read = 1 WHERE is_read = 0", [])?;
     Ok(())
 }
 
 pub fn delete_all_events(conn: &Connection) -> Result<usize, EventError> {
     let count = conn.execute("DELETE FROM events", [])?;
-    Ok(count)
-}
-
-pub fn delete_all_notifications(conn: &Connection) -> Result<usize, EventError> {
-    let count = conn.execute("DELETE FROM notifications", [])?;
     Ok(count)
 }
 
@@ -244,7 +192,7 @@ pub fn record_import_event(
     let status = if failure_count == 0 {
         "completed"
     } else {
-        "completed"
+        "failed"
     };
     let metadata = serde_json::json!({
         "source_paths": source_paths,
@@ -321,12 +269,6 @@ pub fn record_agent_event(
     Ok(())
 }
 
-/// Create an error notification.
-pub fn notify_error(conn: &Connection, title: &str, message: &str) -> Result<(), EventError> {
-    create_notification(conn, "error", title, message, None, None)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,6 +309,7 @@ mod tests {
         let result = list_events(&conn, 1, 20, None).expect("list");
         assert_eq!(result.total_count, 2);
         assert_eq!(result.events.len(), 2);
+        assert_eq!(result.unread_count, 2); // new events are unread by default
     }
 
     #[test]
@@ -380,28 +323,17 @@ mod tests {
     }
 
     #[test]
-    fn notifications_crud() {
+    fn events_read_unread_crud() {
         let conn = setup();
-        let id = create_notification(&conn, "info", "任务完成", "识别已完成", None, None)
-            .expect("create");
-        assert_eq!(get_unread_notification_count(&conn).expect("count"), 1);
+        let id1 = create_event(&conn, "import", "t1", "d", "completed", None, None, None).expect("create");
+        let _id2 = create_event(&conn, "import", "t2", "d", "completed", None, None, None).expect("create");
+        assert_eq!(get_unread_event_count(&conn).expect("count"), 2);
 
-        mark_notification_read(&conn, id).expect("mark");
-        assert_eq!(get_unread_notification_count(&conn).expect("count"), 0);
+        mark_event_read(&conn, id1).expect("mark");
+        assert_eq!(get_unread_event_count(&conn).expect("count"), 1);
 
-        dismiss_notification(&conn, id).expect("dismiss");
-        assert_eq!(list_notifications(&conn).expect("list").len(), 0);
-    }
-
-    #[test]
-    fn test_mark_all_notifications_read() {
-        let conn = setup();
-        create_notification(&conn, "info", "t1", "m", None, None).expect("create");
-        create_notification(&conn, "warning", "t2", "m", None, None).expect("create");
-        assert_eq!(get_unread_notification_count(&conn).expect("count"), 2);
-
-        super::mark_all_notifications_read(&conn).expect("mark all");
-        assert_eq!(get_unread_notification_count(&conn).expect("count"), 0);
+        mark_all_events_read(&conn).expect("mark all");
+        assert_eq!(get_unread_event_count(&conn).expect("count"), 0);
     }
 
     #[test]

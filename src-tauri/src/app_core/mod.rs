@@ -36,7 +36,7 @@ use crate::{
         generate_embedding, test_embedding_connection as run_embedding_test, EmbeddingConfig,
         EmbeddingError, EmbeddingTestResult,
     },
-    event::{self, EventError, EventListResult, NotificationRow},
+    event::{self, EventError, EventListResult},
     exporter::{
         export_column_catalog, export_invoices, preview_export,
         resolve_export_column_keys_from_labels, ExportError, ExportInvoicesRequest,
@@ -387,14 +387,6 @@ impl AppState {
             &source_paths,
             &raw_file_ids,
         );
-        let _ = event::create_notification(
-            &db,
-            "info",
-            &format!("导入完成: {total} 个文件"),
-            &format!("成功 {success}，重复 {dups}，失败 {failed}"),
-            None,
-            None,
-        );
 
         // Auto-trigger recognition for successfully imported files
         let config = self.llm_config.lock().expect("lock").clone();
@@ -552,17 +544,6 @@ impl AppState {
                         &recognition.model,
                         1,
                     );
-                    let _ = event::create_notification(
-                        &conn,
-                        "info",
-                        &format!("自动识别完成: {title}"),
-                        &format!(
-                            "模型 {}，耗时 {}ms",
-                            recognition.model, recognition.duration_ms
-                        ),
-                        Some("invoice"),
-                        Some(invoice.id),
-                    );
                     let _ = crate::extractor::insert_usage_log(
                         &conn,
                         "llm_recognition",
@@ -585,8 +566,17 @@ impl AppState {
                 let message = import_failure_message(&e);
                 error!("Auto recognition failed: {message}");
                 if let Ok(db) = db.lock() {
-                    // Record event and notification first (before cleanup)
-                    let _ = event::notify_error(&db, "自动识别失败", &message);
+                    // Record failure event
+                    let _ = event::create_event(
+                        &db,
+                        "recognition",
+                        "自动识别失败",
+                        &message,
+                        "failed",
+                        None,
+                        None,
+                        None,
+                    );
                     // Keep import_job as failed with error message, detach from raw_file
                     // so we can delete the raw_file without breaking the history record.
                     let _ = db.execute(
@@ -1168,39 +1158,24 @@ impl AppState {
         Ok(event::list_events(&db, page, page_size, event_type)?)
     }
 
-    pub fn list_notifications(&self) -> Result<Vec<NotificationRow>, AppError> {
+    pub fn get_unread_event_count(&self) -> Result<i64, AppError> {
         let db = self.db.lock().expect("db lock");
-        Ok(event::list_notifications(&db)?)
+        Ok(event::get_unread_event_count(&db)?)
     }
 
-    pub fn get_unread_notification_count(&self) -> Result<i64, AppError> {
+    pub fn mark_event_read(&self, id: i64) -> Result<(), AppError> {
         let db = self.db.lock().expect("db lock");
-        Ok(event::get_unread_notification_count(&db)?)
+        Ok(event::mark_event_read(&db, id)?)
     }
 
-    pub fn mark_notification_read(&self, id: i64) -> Result<(), AppError> {
+    pub fn mark_all_events_read(&self) -> Result<(), AppError> {
         let db = self.db.lock().expect("db lock");
-        Ok(event::mark_notification_read(&db, id)?)
-    }
-
-    pub fn mark_all_notifications_read(&self) -> Result<(), AppError> {
-        let db = self.db.lock().expect("db lock");
-        Ok(event::mark_all_notifications_read(&db)?)
-    }
-
-    pub fn dismiss_notification(&self, id: i64) -> Result<(), AppError> {
-        let db = self.db.lock().expect("db lock");
-        Ok(event::dismiss_notification(&db, id)?)
+        Ok(event::mark_all_events_read(&db)?)
     }
 
     pub fn delete_all_events(&self) -> Result<usize, AppError> {
         let db = self.db.lock().expect("db lock");
         Ok(event::delete_all_events(&db)?)
-    }
-
-    pub fn delete_all_notifications(&self) -> Result<usize, AppError> {
-        let db = self.db.lock().expect("db lock");
-        Ok(event::delete_all_notifications(&db)?)
     }
 
     pub fn record_usage_log(
@@ -1241,19 +1216,6 @@ impl AppState {
             model,
             page_count,
         )?)
-    }
-
-    pub fn create_notification(
-        &self,
-        level: &str,
-        title: &str,
-        message: &str,
-        reference_type: Option<&str>,
-        reference_id: Option<i64>,
-    ) -> Result<(), AppError> {
-        let db = self.db.lock().expect("db lock");
-        event::create_notification(&db, level, title, message, reference_type, reference_id)?;
-        Ok(())
     }
 
     // --- Agent methods ---

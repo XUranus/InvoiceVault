@@ -50,6 +50,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         16,
         include_str!("../../migrations/0016_pop3_support.sql"),
     ),
+    (
+        17,
+        include_str!("../../migrations/0017_events_add_is_read.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -106,6 +110,6 @@ mod tests {
             )
             .expect("read migration version");
 
-        assert_eq!(version, 16);
+        assert_eq!(version, 17);
     }
 }

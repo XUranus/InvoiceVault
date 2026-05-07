@@ -1,9 +1,10 @@
 import React from "react";
 import type { EventListResult, EventRow } from "../types";
-import { listEvents, deleteAllEvents, getInvoiceIdByRawFile } from "../api";
+import { listEvents, deleteAllEvents, getInvoiceIdByRawFile, markEventRead, markAllEventsRead } from "../api";
 import { ClipboardList } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
+import { useAppStore } from "../stores/appStore";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   import: "导入",
@@ -28,6 +29,7 @@ type ImportEventMetadata = {
 
 export function EventsPage() {
   const onNavigateToInvoice = useNavigateToInvoice();
+  const setUnreadEventCount = useAppStore((s) => s.setUnreadEventCount);
   const [result, setResult] = React.useState<EventListResult | null>(null);
   const [typeFilter, setTypeFilter] = React.useState<string | null>(null);
   const [page, setPage] = React.useState(1);
@@ -38,9 +40,12 @@ export function EventsPage() {
 
   const fetchEvents = React.useCallback(() => {
     listEvents(page, pageSize, typeFilter ?? undefined)
-      .then(setResult)
+      .then((r) => {
+        setResult(r);
+        setUnreadEventCount(r.unread_count);
+      })
       .catch(() => {});
-  }, [page, typeFilter]);
+  }, [page, typeFilter, setUnreadEventCount]);
 
   React.useEffect(() => {
     fetchEvents();
@@ -64,8 +69,20 @@ export function EventsPage() {
     }
   };
 
+  const handleMarkRead = async (id: number) => {
+    await markEventRead(id).catch(() => {});
+    fetchEvents();
+  };
+
+  const handleMarkAllRead = async () => {
+    await markAllEventsRead().catch(() => {});
+    fetchEvents();
+  };
+
   const handleReferenceClick = async (ev: EventRow, metadata: ImportEventMetadata) => {
     setEventError(null);
+    if (!ev.is_read) handleMarkRead(ev.id);
+
     if (ev.reference_type === "invoice" && ev.reference_id && onNavigateToInvoice) {
       onNavigateToInvoice(ev.reference_id);
       return;
@@ -97,7 +114,6 @@ export function EventsPage() {
   const openFolder = async (filePath: string) => {
     try {
       const { open } = await import("@tauri-apps/plugin-shell");
-      // Open the parent directory of the file
       const parentDir = filePath.replace(/[/\\][^/\\]*$/, "") || filePath;
       await open(parentDir);
     } catch {
@@ -128,11 +144,23 @@ export function EventsPage() {
     Boolean(metadata.invoice_ids?.length) ||
     Boolean(metadata.raw_file_ids?.length);
 
+  const unreadCount = result?.unread_count ?? 0;
+
   return (
     <div className="page">
       <div className="page-header">
-        <h2 className="page-title">事件</h2>
+        <h2 className="page-title">
+          事件
+          {unreadCount > 0 ? (
+            <span className="count-badge" style={{ marginLeft: 12 }}>{unreadCount} 条未读</span>
+          ) : null}
+        </h2>
         <div className="page-header-actions">
+          {unreadCount > 0 ? (
+            <button className="btn-small" onClick={handleMarkAllRead}>
+              全部已读
+            </button>
+          ) : null}
           {result && result.total_count > 0 ? (
             <button className="btn-danger" onClick={() => setClearDialogOpen(true)}>
               清空全部事件
@@ -185,6 +213,7 @@ export function EventsPage() {
                   <th>详情</th>
                   <th>关联</th>
                   <th>时间</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -197,7 +226,7 @@ export function EventsPage() {
               return (
                 <tr
                   key={ev.id}
-                  className={navigable ? "event-row-clickable" : ""}
+                  className={`${navigable ? "event-row-clickable" : ""} ${!ev.is_read ? "event-unread" : ""}`}
                   onClick={() => handleReferenceClick(ev, metadata)}
                 >
                   <td>
@@ -210,7 +239,10 @@ export function EventsPage() {
                       {statusLabel(ev.status)}
                     </span>
                   </td>
-                  <td className="event-table-title">{ev.title}</td>
+                  <td className="event-table-title">
+                    {!ev.is_read ? <span className="notification-unread-dot" title="未读" /> : null}
+                    {ev.title}
+                  </td>
                   <td className="event-table-desc">
                     {ev.description ? <span>{ev.description}</span> : <span className="muted">-</span>}
                     {ev.event_type === "import" && ev.metadata_json ? (
@@ -234,6 +266,16 @@ export function EventsPage() {
                     )}
                   </td>
                   <td className="event-time">{ev.created_at}</td>
+                  <td className="event-actions" onClick={(e) => e.stopPropagation()}>
+                    {!ev.is_read ? (
+                      <button
+                        className="btn-small"
+                        onClick={() => handleMarkRead(ev.id)}
+                      >
+                        标记已读
+                      </button>
+                    ) : null}
+                  </td>
                 </tr>
               );
             })}

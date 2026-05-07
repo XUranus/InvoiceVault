@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { AppHealth, Invoice } from "../types";
-import { countUnviewedInvoices, getAppHealth, searchInvoices } from "../api";
+import { countUnviewedInvoices, getAppHealth, searchInvoices, getUnreadEventCount } from "../api";
 
 type AppStore = {
   health: AppHealth | null;
@@ -8,7 +8,7 @@ type AppStore = {
   theme: "light" | "dark";
   invoices: Invoice[];
   isDraggingFiles: boolean;
-  unreadNotificationCount: number;
+  unreadEventCount: number;
   importBadgeCount: number;
   invoiceBadgeCount: number;
 
@@ -18,7 +18,7 @@ type AppStore = {
   toggleTheme: () => void;
   setInvoices: (list: Invoice[]) => void;
   setIsDraggingFiles: (v: boolean) => void;
-  setUnreadNotificationCount: (n: number) => void;
+  setUnreadEventCount: (n: number) => void;
   setImportBadgeCount: (n: number) => void;
   setInvoiceBadgeCount: (n: number) => void;
   initialize: () => Promise<void>;
@@ -32,7 +32,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     (localStorage.getItem("theme") as "light" | "dark" | null) ?? "light",
   invoices: [],
   isDraggingFiles: false,
-  unreadNotificationCount: 0,
+  unreadEventCount: 0,
   importBadgeCount: 0,
   invoiceBadgeCount: 0,
 
@@ -46,8 +46,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   setInvoices: (invoices) => set({ invoices }),
   setIsDraggingFiles: (isDraggingFiles) => set({ isDraggingFiles }),
-  setUnreadNotificationCount: (unreadNotificationCount) =>
-    set({ unreadNotificationCount }),
+  setUnreadEventCount: (unreadEventCount) =>
+    set({ unreadEventCount }),
   setImportBadgeCount: (importBadgeCount) => set({ importBadgeCount }),
   setInvoiceBadgeCount: (invoiceBadgeCount) => set({ invoiceBadgeCount }),
 
@@ -66,6 +66,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ invoices: result.invoices, invoiceBadgeCount });
     } catch (err) {
       set({ error: String(err) });
+    }
+    try {
+      const unreadEventCount = await getUnreadEventCount();
+      set({ unreadEventCount });
+    } catch {
+      // ignore
     }
   },
 

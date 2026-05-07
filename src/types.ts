@@ -523,6 +523,7 @@ export type EventRow = {
   title: string;
   description: string;
   status: string;
+  is_read: boolean;
   reference_type: string | null;
   reference_id: number | null;
   metadata_json: string | null;
@@ -532,22 +533,10 @@ export type EventRow = {
 export type EventListResult = {
   events: EventRow[];
   total_count: number;
+  unread_count: number;
   page: number;
   page_size: number;
   total_pages: number;
-};
-
-// Notification types
-
-export type NotificationRow = {
-  id: number;
-  level: "info" | "warning" | "error";
-  title: string;
-  message: string;
-  is_read: boolean;
-  reference_type: string | null;
-  reference_id: number | null;
-  created_at: string;
 };
 
 export type RecognitionQueueStatus = {

@@ -664,14 +664,6 @@ impl EmailManager {
                     let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
                     let failed = jobs.iter().filter(|j| j.status == "failed").count();
                     let _ = event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
-                    let _ = event::create_notification(
-                        &conn,
-                        "info",
-                        &format!("邮件导入: {total} 个附件"),
-                        &format!("成功 {success}，重复 {dups}，失败 {failed}，来自 {}", source.name),
-                        None,
-                        None,
-                    );
 
                     (jobs, ids)
                 }
@@ -861,14 +853,6 @@ impl EmailManager {
                     let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
                     let failed = jobs.iter().filter(|j| j.status == "failed").count();
                     let _ = event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
-                    let _ = event::create_notification(
-                        &conn,
-                        "info",
-                        &format!("邮件导入: {total} 个附件"),
-                        &format!("成功 {success}，重复 {dups}，失败 {failed}，来自 {}", source.name),
-                        None,
-                        None,
-                    );
 
                     (jobs, ids)
                 }
