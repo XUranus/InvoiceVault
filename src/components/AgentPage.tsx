@@ -37,6 +37,7 @@ type StreamUiState = {
   assistantMessageId: number;
   phase: "starting" | "thinking" | "tool" | "answering" | "done" | "error";
   toolName: string | null;
+  errorMessage: string | null;
 };
 
 export function AgentPage() {
@@ -115,7 +116,9 @@ export function AgentPage() {
         setPendingConfirm(payload.pending_confirmation);
         setStreamState((prev) => (prev ? { ...prev, phase: "done" } : prev));
       } else if (payload.type === "error") {
-        setStreamState((prev) => (prev ? { ...prev, phase: "error" } : prev));
+        setStreamState((prev) =>
+          prev ? { ...prev, phase: "error", errorMessage: payload.message } : prev,
+        );
       }
     })
       .then((cleanup) => {
@@ -245,6 +248,7 @@ export function AgentPage() {
       assistantMessageId,
       phase: "starting",
       toolName: null,
+      errorMessage: null,
     });
     setMessages((prev) => [...prev, ...optimisticMessages]);
     return { streamId, tempIds: optimisticMessages.map((msg) => msg.id) };
@@ -337,14 +341,16 @@ export function AgentPage() {
         .catch(() => {});
       refreshArtifacts(sessionId).catch(() => {});
     } catch (err) {
-      setError(String(err));
-      getAgentSession(sessionId)
-        .then(setMessages)
-        .catch(() => {});
+      const errorMsg = String(err);
+      setStreamState((prev) =>
+        prev ? { ...prev, phase: "error" as const, errorMessage: prev.errorMessage ?? errorMsg } : prev,
+      );
     } finally {
       activeStreamIdRef.current = null;
-      setStreamState(null);
       setLoading(false);
+      if (streamStateRef.current?.phase !== "error") {
+        setStreamState(null);
+      }
     }
   };
 
@@ -708,7 +714,9 @@ export function AgentPage() {
                             {msg.tool_call_json
                               ? "工具调用"
                               : isStreamingAssistant
-                                ? "正在回复"
+                                ? streamState?.phase === "error"
+                                  ? "回复中断"
+                                  : "正在回复"
                                 : "回复"}
                           </span>
                         </div>
@@ -737,6 +745,8 @@ export function AgentPage() {
                           content={msg.content}
                           phase={streamState!.phase}
                           toolName={streamState!.toolName}
+                          errorMessage={streamState!.errorMessage}
+                          onDismiss={() => setStreamState(null)}
                         />
                       ) : (
                         <MarkdownContent content={msg.content} />
@@ -878,23 +888,38 @@ function StreamingAssistantContent({
   content,
   phase,
   toolName,
+  errorMessage,
+  onDismiss,
 }: {
   content: string;
   phase: StreamUiState["phase"];
   toolName: string | null;
+  errorMessage: string | null;
+  onDismiss: () => void;
 }) {
   return (
     <div className="streaming-assistant">
       {content ? <MarkdownContent content={content} /> : null}
-      <div className={`streaming-status streaming-status-${phase}`}>
-        <span className="thinking-orbit" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
-        <span>{streamingStatusText(phase, toolName)}</span>
-        {phase === "answering" ? <span className="typing-caret" /> : null}
-      </div>
+      {phase === "error" ? (
+        <div className="streaming-error">
+          <div className="streaming-error-message">
+            {formatErrorMessage(errorMessage)}
+          </div>
+          <button className="streaming-error-dismiss" onClick={onDismiss}>
+            关闭
+          </button>
+        </div>
+      ) : (
+        <div className={`streaming-status streaming-status-${phase}`}>
+          <span className="thinking-orbit" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span>{streamingStatusText(phase, toolName)}</span>
+          {phase === "answering" ? <span className="typing-caret" /> : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -907,6 +932,21 @@ function streamingStatusText(
   if (phase === "answering") return "正在生成";
   if (phase === "error") return "回复中断";
   return "思考中";
+}
+
+function formatErrorMessage(raw: string | null): string {
+  if (!raw) return "请求失败，请稍后重试";
+  const statusMatch = raw.match(/HTTP\s+(\d{3})/);
+  if (statusMatch) {
+    const status = statusMatch[1];
+    if (status === "429") return "请求过于频繁或配额不足，请稍后重试";
+    if (status === "401" || status === "403") return "API Key 无效或权限不足，请检查设置";
+    if (status === "404") return "模型服务地址不可达，请检查设置";
+    if (status === "500" || status === "502" || status === "503") return "模型服务暂时不可用，请稍后重试";
+  }
+  if (raw.includes("timeout") || raw.includes("timed out")) return "请求超时，请稍后重试";
+  if (raw.includes("connection")) return "无法连接到模型服务，请检查网络和设置";
+  return "请求失败，请稍后重试";
 }
 
 function toolLabel(name: string): string {

@@ -4012,6 +4012,41 @@ textarea:focus {
   animation: typing-caret-blink 0.9s steps(2, start) infinite;
 }
 
+.streaming-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--color-danger-border, rgba(220, 53, 69, 0.25));
+  border-radius: 8px;
+  background: var(--color-danger-bg, rgba(220, 53, 69, 0.06));
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--color-danger, #dc3545);
+}
+
+.streaming-error-message {
+  flex: 1;
+  line-height: 1.5;
+}
+
+.streaming-error-dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--color-danger, #dc3545);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 120ms;
+}
+
+.streaming-error-dismiss:hover {
+  opacity: 1;
+}
+
 @keyframes thinking-dot {
   0%,
   80%,

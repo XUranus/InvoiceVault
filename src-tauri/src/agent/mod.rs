@@ -243,6 +243,7 @@ pub struct AgentMessageRow {
     pub role: String,
     pub content: String,
     pub tool_call_json: Option<String>,
+    pub tool_call_id: Option<String>,
     pub created_at: String,
     pub attachments: Vec<AgentAttachment>,
 }
@@ -546,7 +547,7 @@ pub fn get_session_messages(
     session_id: i64,
 ) -> Result<Vec<AgentMessageRow>, AgentError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, role, content, tool_call_json, created_at
+        "SELECT id, session_id, role, content, tool_call_json, tool_call_id, created_at
          FROM agent_messages
          WHERE session_id = ?1
          ORDER BY id ASC",
@@ -559,7 +560,8 @@ pub fn get_session_messages(
                 role: row.get(2)?,
                 content: row.get(3)?,
                 tool_call_json: row.get(4)?,
-                created_at: row.get(5)?,
+                tool_call_id: row.get(5)?,
+                created_at: row.get(6)?,
                 attachments: Vec::new(),
             })
         })?
@@ -840,8 +842,8 @@ fn save_message(
         .transpose()?;
     let content = msg.content.clone().unwrap_or_default();
     conn.execute(
-        "INSERT INTO agent_messages (session_id, role, content, tool_call_json) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![session_id, msg.role, content, tool_call_json],
+        "INSERT INTO agent_messages (session_id, role, content, tool_call_json, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![session_id, msg.role, content, tool_call_json, msg.tool_call_id],
     )?;
     let id = conn.last_insert_rowid();
     conn.execute(
@@ -854,6 +856,7 @@ fn save_message(
         role: msg.role.clone(),
         content,
         tool_call_json,
+        tool_call_id: msg.tool_call_id.clone(),
         created_at: String::new(),
         attachments: Vec::new(),
     })
@@ -1813,7 +1816,7 @@ fn get_recent_messages(
     limit: usize,
 ) -> Result<Vec<AgentMessageRow>, AgentError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, role, content, tool_call_json, created_at
+        "SELECT id, session_id, role, content, tool_call_json, tool_call_id, created_at
          FROM agent_messages
          WHERE session_id = ?1
          ORDER BY id DESC
@@ -1827,7 +1830,8 @@ fn get_recent_messages(
                 role: row.get(2)?,
                 content: row.get(3)?,
                 tool_call_json: row.get(4)?,
-                created_at: row.get(5)?,
+                tool_call_id: row.get(5)?,
+                created_at: row.get(6)?,
                 attachments: Vec::new(),
             })
         })?
@@ -1859,7 +1863,7 @@ fn build_llm_messages(history: &[AgentMessageRow]) -> Vec<LlmMessage> {
                 Some(m.content.clone())
             },
             tool_calls,
-            tool_call_id: None, // tool_call_id comes from the original tool call, not stored separately
+            tool_call_id: m.tool_call_id.clone(),
         });
     }
 

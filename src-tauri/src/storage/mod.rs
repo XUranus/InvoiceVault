@@ -54,6 +54,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         17,
         include_str!("../../migrations/0017_events_add_is_read.sql"),
     ),
+    (
+        18,
+        include_str!("../../migrations/0018_agent_message_tool_call_id.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]
