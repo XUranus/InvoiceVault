@@ -9,6 +9,7 @@ import { useAppStore } from "../stores/appStore";
 const EVENT_TYPE_LABELS: Record<string, string> = {
   import: "导入",
   recognition: "识别",
+  duplicate: "疑似重复",
   config_change: "配置变更",
   agent: "Agent",
   export: "导出",

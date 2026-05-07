@@ -269,6 +269,35 @@ pub fn record_agent_event(
     Ok(())
 }
 
+/// Record a duplicate detection event.
+pub fn record_duplicate_event(
+    conn: &Connection,
+    invoice_id: i64,
+    seller_name: Option<&str>,
+    invoice_number: Option<&str>,
+    candidate_invoice_id: i64,
+    candidate_score: f64,
+) -> Result<(), EventError> {
+    let seller = seller_name.unwrap_or("未知销方");
+    let number = invoice_number.unwrap_or("未知号码");
+    let score_pct = (candidate_score as i64).min(100);
+    let metadata = serde_json::json!({
+        "candidate_invoice_id": candidate_invoice_id,
+        "score": candidate_score,
+    });
+    create_event(
+        conn,
+        "duplicate",
+        &format!("发现疑似重复: {seller} {number}"),
+        &format!("与发票 #{candidate_invoice_id} 疑似重复（匹配度 {score_pct}%）"),
+        "pending",
+        Some("invoice"),
+        Some(invoice_id),
+        Some(&metadata.to_string()),
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -632,7 +632,20 @@ impl AppState {
     ) -> Result<InvoiceSummary, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let invoice = save_invoice_extraction(&mut db, request)?;
-        let _ = run_dedupe_check(&db, invoice.id);
+        if let Ok(dedupe_result) = run_dedupe_check(&db, invoice.id) {
+            if let Some(best) = dedupe_result.candidates.iter().max_by(|a, b| {
+                a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal)
+            }) {
+                let _ = event::record_duplicate_event(
+                    &db,
+                    invoice.id,
+                    invoice.seller_name.as_deref(),
+                    invoice.invoice_number.as_deref(),
+                    best.candidate_invoice_id,
+                    best.score,
+                );
+            }
+        }
 
         // Best-effort embedding generation
         if self.chroma_config.lock().expect("lock").enabled {
@@ -728,7 +741,20 @@ impl AppState {
     ) -> Result<UpdateInvoiceResult, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let result = update_invoice(&mut db, request)?;
-        let _ = run_dedupe_check(&db, result.invoice.id);
+        if let Ok(dedupe_result) = run_dedupe_check(&db, result.invoice.id) {
+            if let Some(best) = dedupe_result.candidates.iter().max_by(|a, b| {
+                a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal)
+            }) {
+                let _ = event::record_duplicate_event(
+                    &db,
+                    result.invoice.id,
+                    result.invoice.seller_name.as_deref(),
+                    result.invoice.invoice_number.as_deref(),
+                    best.candidate_invoice_id,
+                    best.score,
+                );
+            }
+        }
 
         // Best-effort embedding regeneration
         if self.chroma_config.lock().expect("lock").enabled {
