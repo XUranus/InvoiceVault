@@ -2378,6 +2378,42 @@ textarea:focus {
   gap: 6px;
 }
 
+.dup-actions-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.dup-actions-label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.dup-actions-grid {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dup-action-btn {
+  white-space: nowrap;
+}
+
+.dup-actions-cancel {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.dup-actions-cancel:hover {
+  color: var(--color-text);
+}
+
 /* Export */
 .export-group {
   display: flex;

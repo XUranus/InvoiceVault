@@ -27,12 +27,20 @@ pub struct DedupeCandidate {
 pub enum DedupeError {
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
+    #[error("extractor error: {0}")]
+    Extractor(#[from] crate::extractor::ExtractorError),
 }
 
 #[derive(Debug, serde::Deserialize)]
 pub struct ResolveDuplicateRequest {
     pub dedupe_id: i64,
     pub action: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolveDuplicateResult {
+    pub action: String,
+    pub deleted_invoice_id: Option<i64>,
 }
 
 pub fn check_invoice_duplicates(
@@ -79,34 +87,91 @@ pub fn check_invoice_duplicates(
 pub fn resolve_duplicate(
     conn: &Connection,
     request: ResolveDuplicateRequest,
-) -> Result<(), DedupeError> {
-    let valid_actions = ["confirm", "ignore", "merge"];
+) -> Result<ResolveDuplicateResult, DedupeError> {
+    let valid_actions = ["confirm", "ignore", "keep_current", "keep_other", "keep_both"];
     if !valid_actions.contains(&request.action.as_str()) {
-        return Ok(());
+        return Ok(ResolveDuplicateResult {
+            action: request.action,
+            deleted_invoice_id: None,
+        });
     }
 
-    conn.execute(
-        "UPDATE dedupe_candidates SET status = ?2, resolved_at = CURRENT_TIMESTAMP WHERE id = ?1",
-        params![request.dedupe_id, request.action],
-    )?;
-
-    // Update invoice duplicate_status based on remaining open candidates
-    let invoice_id: i64 = conn.query_row(
-        "SELECT invoice_id FROM dedupe_candidates WHERE id = ?1",
+    // Look up the dedupe candidate pair
+    let (invoice_id, candidate_invoice_id): (i64, i64) = conn.query_row(
+        "SELECT invoice_id, candidate_invoice_id FROM dedupe_candidates WHERE id = ?1",
         [request.dedupe_id],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
 
-    if request.action == "confirm" {
-        conn.execute(
-            "UPDATE invoices SET duplicate_status = 'probable_duplicate', updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
-            [invoice_id],
-        )?;
-    } else {
-        recalc_duplicate_status(conn, invoice_id)?;
+    match request.action.as_str() {
+        "confirm" | "ignore" => {
+            conn.execute(
+                "UPDATE dedupe_candidates SET status = ?2, resolved_at = CURRENT_TIMESTAMP WHERE id = ?1",
+                params![request.dedupe_id, request.action],
+            )?;
+            if request.action == "confirm" {
+                conn.execute(
+                    "UPDATE invoices SET duplicate_status = 'probable_duplicate', updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+                    [invoice_id],
+                )?;
+            } else {
+                recalc_duplicate_status(conn, invoice_id)?;
+            }
+            Ok(ResolveDuplicateResult {
+                action: request.action,
+                deleted_invoice_id: None,
+            })
+        }
+        "keep_current" => {
+            // Delete the candidate (other) invoice, mark current as unique
+            let tx = conn.unchecked_transaction()?;
+            crate::extractor::batch_delete_invoices(&tx, &[candidate_invoice_id])?;
+            // Clean up any remaining dedupe candidates referencing deleted invoice
+            tx.execute(
+                "DELETE FROM dedupe_candidates WHERE invoice_id = ?1 OR candidate_invoice_id = ?1",
+                [candidate_invoice_id],
+            )?;
+            recalc_duplicate_status(&tx, invoice_id)?;
+            tx.commit()?;
+            Ok(ResolveDuplicateResult {
+                action: "keep_current".into(),
+                deleted_invoice_id: Some(candidate_invoice_id),
+            })
+        }
+        "keep_other" => {
+            // Delete the current invoice, return candidate ID for navigation
+            let tx = conn.unchecked_transaction()?;
+            crate::extractor::batch_delete_invoices(&tx, &[invoice_id])?;
+            tx.execute(
+                "DELETE FROM dedupe_candidates WHERE invoice_id = ?1 OR candidate_invoice_id = ?1",
+                [invoice_id],
+            )?;
+            recalc_duplicate_status(&tx, candidate_invoice_id)?;
+            tx.commit()?;
+            Ok(ResolveDuplicateResult {
+                action: "keep_other".into(),
+                deleted_invoice_id: Some(invoice_id),
+            })
+        }
+        "keep_both" => {
+            // Mark bidirectional candidates as not_duplicate
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "UPDATE dedupe_candidates SET status = 'not_duplicate', resolved_at = CURRENT_TIMESTAMP
+                 WHERE (invoice_id = ?1 AND candidate_invoice_id = ?2)
+                    OR (invoice_id = ?2 AND candidate_invoice_id = ?1)",
+                params![invoice_id, candidate_invoice_id],
+            )?;
+            recalc_duplicate_status(&tx, invoice_id)?;
+            recalc_duplicate_status(&tx, candidate_invoice_id)?;
+            tx.commit()?;
+            Ok(ResolveDuplicateResult {
+                action: "keep_both".into(),
+                deleted_invoice_id: None,
+            })
+        }
+        _ => unreachable!(),
     }
-
-    Ok(())
 }
 
 fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), DedupeError> {
@@ -238,7 +303,7 @@ fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), Ded
             ON CONFLICT(invoice_id, candidate_invoice_id) DO UPDATE SET
                 score = excluded.score,
                 reason = excluded.reason,
-                status = CASE WHEN dedupe_candidates.status IN ('confirmed', 'ignored') THEN dedupe_candidates.status ELSE 'open' END",
+                status = CASE WHEN dedupe_candidates.status IN ('confirm', 'ignore') THEN dedupe_candidates.status ELSE 'open' END",
             params![invoice_id, candidate_id, score, reason],
         )?;
     }
@@ -272,7 +337,7 @@ pub fn detect_semantic_duplicates(
             ON CONFLICT(invoice_id, candidate_invoice_id) DO UPDATE SET
                 score = MAX(dedupe_candidates.score, excluded.score),
                 reason = CASE WHEN dedupe_candidates.score >= excluded.score THEN dedupe_candidates.reason ELSE 'semantic' END,
-                status = CASE WHEN dedupe_candidates.status IN ('confirmed', 'ignored') THEN dedupe_candidates.status ELSE 'open' END",
+                status = CASE WHEN dedupe_candidates.status IN ('confirm', 'ignore') THEN dedupe_candidates.status ELSE 'open' END",
             params![invoice_id, result.invoice_id, score],
         )?;
     }

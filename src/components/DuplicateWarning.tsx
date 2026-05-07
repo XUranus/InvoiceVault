@@ -5,10 +5,13 @@ import { checkInvoiceDuplicates, resolveDuplicate } from "../api";
 type Props = {
   invoiceId: number;
   onError: (error: string) => void;
+  onDeleted: (deletedId: number) => void;
 };
 
-export function DuplicateWarning({ invoiceId, onError }: Props) {
+export function DuplicateWarning({ invoiceId, onError, onDeleted }: Props) {
   const [result, setResult] = React.useState<DedupeCheckResult | null>(null);
+  const [confirmingId, setConfirmingId] = React.useState<number | null>(null);
+  const [resolving, setResolving] = React.useState(false);
 
   React.useEffect(() => {
     checkInvoiceDuplicates(invoiceId)
@@ -26,14 +29,37 @@ export function DuplicateWarning({ invoiceId, onError }: Props) {
 
   if (openCandidates.length === 0) return null;
 
-  const handleResolve = async (dedupeId: number, action: string) => {
+  const refresh = async () => {
+    const updated = await checkInvoiceDuplicates(invoiceId);
+    setResult(updated);
+    setConfirmingId(null);
+  };
+
+  const handleIgnore = async (dedupeId: number) => {
+    setResolving(true);
     try {
-      await resolveDuplicate(dedupeId, action);
-      // refresh
-      const updated = await checkInvoiceDuplicates(invoiceId);
-      setResult(updated);
+      await resolveDuplicate(dedupeId, "ignore");
+      await refresh();
     } catch (err) {
       onError(String(err));
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const handleAction = async (dedupeId: number, action: string) => {
+    setResolving(true);
+    try {
+      const res = await resolveDuplicate(dedupeId, action);
+      if (res.deleted_invoice_id != null) {
+        onDeleted(res.deleted_invoice_id);
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setResolving(false);
     }
   };
 
@@ -46,7 +72,7 @@ export function DuplicateWarning({ invoiceId, onError }: Props) {
       </h3>
       {openCandidates.map((c) => (
         <div className="dup-candidate" key={c.id}>
-          <div>
+          <div className="dup-candidate-info">
             <strong>
               发票号码: {c.invoice_number ?? "未知"} | 销售方:{" "}
               {c.seller_name ?? "未知"}
@@ -56,20 +82,58 @@ export function DuplicateWarning({ invoiceId, onError }: Props) {
               {c.total_amount ?? "未知"} | 匹配分数: {c.score}
             </span>
           </div>
-          <div className="dup-actions">
-            <button
-              className="btn-small"
-              onClick={() => handleResolve(c.id, "confirm")}
-            >
-              确认重复
-            </button>
-            <button
-              className="btn-small"
-              onClick={() => handleResolve(c.id, "ignore")}
-            >
-              忽略
-            </button>
-          </div>
+          {confirmingId === c.id ? (
+            <div className="dup-actions-expanded">
+              <span className="dup-actions-label">选择处理方式：</span>
+              <div className="dup-actions-grid">
+                <button
+                  className="btn-small dup-action-btn"
+                  disabled={resolving}
+                  onClick={() => handleAction(c.id, "keep_current")}
+                >
+                  保留当前，删除重复
+                </button>
+                <button
+                  className="btn-small dup-action-btn"
+                  disabled={resolving}
+                  onClick={() => handleAction(c.id, "keep_other")}
+                >
+                  保留重复，删除当前
+                </button>
+                <button
+                  className="btn-small dup-action-btn"
+                  disabled={resolving}
+                  onClick={() => handleAction(c.id, "keep_both")}
+                >
+                  两份都保留
+                </button>
+              </div>
+              <button
+                className="btn-ghost dup-actions-cancel"
+                disabled={resolving}
+                onClick={() => setConfirmingId(null)}
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <div className="dup-actions">
+              <button
+                className="btn-small"
+                disabled={resolving}
+                onClick={() => setConfirmingId(c.id)}
+              >
+                确认重复
+              </button>
+              <button
+                className="btn-small"
+                disabled={resolving}
+                onClick={() => handleIgnore(c.id)}
+              >
+                忽略
+              </button>
+            </div>
+          )}
         </div>
       ))}
     </div>

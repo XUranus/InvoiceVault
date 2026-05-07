@@ -16,6 +16,7 @@ import type {
   LlmConnectionTestResult,
   RecognizeRawFileResult,
   DedupeCheckResult,
+  ResolveDuplicateResult,
   ExportInvoicesRequest,
   ExportResult,
   WatchDirStatus,
@@ -159,8 +160,8 @@ export async function checkInvoiceDuplicates(
 export async function resolveDuplicate(
   dedupeId: number,
   action: string,
-): Promise<void> {
-  return invoke<void>("resolve_duplicate", {
+): Promise<ResolveDuplicateResult> {
+  return invoke<ResolveDuplicateResult>("resolve_duplicate", {
     request: { dedupe_id: dedupeId, action },
   });
 }

@@ -221,6 +221,11 @@ export type DedupeCheckResult = {
   has_exact_duplicate: boolean;
 };
 
+export type ResolveDuplicateResult = {
+  action: string;
+  deleted_invoice_id: number | null;
+};
+
 export type ExportInvoicesRequest = {
   format: string;
   output_path: string;

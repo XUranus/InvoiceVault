@@ -268,7 +268,17 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
         </aside>
 
         <div className="detail-content-pane">
-          <DuplicateWarning invoiceId={invoiceId} onError={onError} />
+          <DuplicateWarning
+            invoiceId={invoiceId}
+            onError={onError}
+            onDeleted={(deletedId) => {
+              if (deletedId === invoiceId) {
+                onBack();
+              } else {
+                loadDetail();
+              }
+            }}
+          />
 
           {isEditing ? (
             <InvoiceEditForm

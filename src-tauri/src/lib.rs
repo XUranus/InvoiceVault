@@ -23,7 +23,7 @@ use app_core::{
     RecognitionQueueStatus,
 };
 use chroma::{ChromaConfig, SimilarResult};
-use dedupe::{DedupeCheckResult, ResolveDuplicateRequest};
+use dedupe::{DedupeCheckResult, ResolveDuplicateRequest, ResolveDuplicateResult};
 use embedding::{EmbeddingConfig, EmbeddingTestResult};
 use event::EventListResult;
 use exporter::{ExportInvoicesRequest, ExportResult};
@@ -307,7 +307,7 @@ fn check_invoice_duplicates(
 fn resolve_duplicate(
     state: State<'_, AppState>,
     request: ResolveDuplicateRequest,
-) -> Result<(), String> {
+) -> Result<ResolveDuplicateResult, String> {
     state
         .resolve_duplicate(request)
         .map_err(|err| err.to_string())

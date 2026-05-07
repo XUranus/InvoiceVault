@@ -22,7 +22,7 @@ use crate::{
     chroma::{self, ChromaConfig, ChromaError},
     dedupe::{
         check_invoice_duplicates as run_dedupe_check, resolve_duplicate as run_dedupe_resolve,
-        DedupeCheckResult, DedupeError, ResolveDuplicateRequest,
+        DedupeCheckResult, DedupeError, ResolveDuplicateRequest, ResolveDuplicateResult,
     },
     document::{
         prepare_image_for_recognition, render_pdf_pages, DocumentError, PreparedImage,
@@ -825,7 +825,10 @@ impl AppState {
         Ok(run_dedupe_check(&db, invoice_id)?)
     }
 
-    pub fn resolve_duplicate(&self, request: ResolveDuplicateRequest) -> Result<(), AppError> {
+    pub fn resolve_duplicate(
+        &self,
+        request: ResolveDuplicateRequest,
+    ) -> Result<ResolveDuplicateResult, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(run_dedupe_resolve(&db, request)?)
     }
