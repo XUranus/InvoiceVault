@@ -135,7 +135,6 @@ export async function testLlmConnection(config: {
   api_key: string;
   model: string;
   timeout_seconds: number;
-  audit_enabled?: boolean;
 }): Promise<LlmConnectionTestResult> {
   return invoke<LlmConnectionTestResult>("test_llm_connection", { config });
 }
@@ -147,7 +146,6 @@ export async function recognizeRawFile(request: {
     api_key: string;
     model: string;
     timeout_seconds: number;
-    audit_enabled?: boolean;
   };
 }): Promise<RecognizeRawFileResult> {
   return invoke<RecognizeRawFileResult>("recognize_raw_file", { request });
@@ -322,7 +320,7 @@ export async function deleteAgentSession(
 export async function sendAgentMessage(
   sessionId: number,
   content: string,
-  config: { base_url: string; api_key: string; model: string; timeout_seconds: number; audit_enabled?: boolean },
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
   attachmentIds: number[] = [],
 ): Promise<AgentResponse> {
   return invoke<AgentResponse>("send_agent_message", {
@@ -337,7 +335,7 @@ export async function sendAgentMessageStream(
   streamId: string,
   sessionId: number,
   content: string,
-  config: { base_url: string; api_key: string; model: string; timeout_seconds: number; audit_enabled?: boolean },
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
   attachmentIds: number[] = [],
 ): Promise<AgentResponse> {
   return invoke<AgentResponse>("send_agent_message_stream", {
@@ -399,7 +397,7 @@ export async function confirmAgentAction(
   sessionId: number,
   confirmed: boolean,
   extraParams: Record<string, unknown> | null,
-  config: { base_url: string; api_key: string; model: string; timeout_seconds: number; audit_enabled?: boolean },
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
 ): Promise<AgentResponse> {
   return invoke<AgentResponse>("confirm_agent_action", {
     request: { session_id: sessionId, confirmed, extra_params: extraParams },
@@ -412,7 +410,7 @@ export async function confirmAgentActionStream(
   sessionId: number,
   confirmed: boolean,
   extraParams: Record<string, unknown> | null,
-  config: { base_url: string; api_key: string; model: string; timeout_seconds: number; audit_enabled?: boolean },
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
 ): Promise<AgentResponse> {
   return invoke<AgentResponse>("confirm_agent_action_stream", {
     streamId,
@@ -457,7 +455,6 @@ export async function setLlmConfig(config: {
   base_url: string;
   api_key: string;
   model: string;
-  audit_enabled: boolean;
 }): Promise<void> {
   return invoke<void>("set_llm_config", { config });
 }
@@ -467,11 +464,30 @@ export type LlmConfigResponse = {
   api_key: string;
   model: string;
   timeout_seconds?: number;
-  audit_enabled?: boolean;
 } | null;
 
 export async function getLlmConfig(): Promise<LlmConfigResponse> {
   return invoke<LlmConfigResponse>("get_llm_config");
+}
+
+export async function setAgentLlmConfig(config: {
+  base_url: string;
+  api_key: string;
+  model: string;
+}): Promise<void> {
+  return invoke<void>("set_agent_llm_config", { config });
+}
+
+export async function getAgentLlmConfig(): Promise<LlmConfigResponse> {
+  return invoke<LlmConfigResponse>("get_agent_llm_config");
+}
+
+export async function setLlmAuditEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_llm_audit_enabled", { enabled });
+}
+
+export async function getLlmAuditEnabled(): Promise<boolean> {
+  return invoke<boolean>("get_llm_audit_enabled");
 }
 
 export async function getRecognitionQueueStatus(): Promise<RecognitionQueueStatus> {

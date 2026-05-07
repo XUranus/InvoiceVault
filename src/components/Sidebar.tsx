@@ -57,7 +57,7 @@ export function Sidebar() {
           return (
             <button
               key={item.path}
-              className={`nav-item ${location.pathname === item.path ? "nav-item-active" : ""}`}
+              className={`nav-item ${(location.pathname === item.path || (item.path !== "/" && location.pathname.startsWith(item.path + "/"))) ? "nav-item-active" : ""}`}
               onClick={() => navigate(item.path)}
             >
               <Icon className="nav-icon" size={18} strokeWidth={2} />

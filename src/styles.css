@@ -2267,6 +2267,37 @@ textarea:focus {
   font-size: 12px;
 }
 
+/* ---- Settings Tabs ---- */
+.settings-tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0;
+}
+
+.settings-tab {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 150ms, border-color 150ms;
+}
+
+.settings-tab:hover {
+  color: var(--color-text);
+}
+
+.settings-tab-active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
 /* ---- Settings Form ---- */
 .settings-page .btn-primary,
 .settings-page .btn-secondary,
@@ -2503,6 +2534,13 @@ textarea:focus {
   color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.provider-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 .test-result {

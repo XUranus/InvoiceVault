@@ -40,7 +40,8 @@ type StreamUiState = {
 };
 
 export function AgentPage() {
-  const { llmBaseUrl, llmModel, llmApiKey, llmAuditEnabled } = useLlmStore();
+  const agent = useLlmStore((s) => s.agent);
+  const auditEnabled = useLlmStore((s) => s.auditEnabled);
   const setError = useAppStore((s) => s.setError);
   const [sessions, setSessions] = React.useState<AgentSession[]>([]);
   const [activeSessionId, setActiveSessionId] = React.useState<number | null>(null);
@@ -59,13 +60,12 @@ export function AgentPage() {
 
   const llmConfig = React.useMemo(
     () => ({
-      base_url: llmBaseUrl,
-      api_key: llmApiKey,
-      model: llmModel,
+      base_url: agent.config.baseUrl,
+      api_key: agent.config.apiKey,
+      model: agent.config.model,
       timeout_seconds: 60,
-      audit_enabled: llmAuditEnabled,
     }),
-    [llmBaseUrl, llmModel, llmApiKey, llmAuditEnabled],
+    [agent.config.baseUrl, agent.config.model, agent.config.apiKey],
   );
 
   React.useEffect(() => {
@@ -289,7 +289,7 @@ export function AgentPage() {
   const handleSend = async () => {
     const text = input.trim();
     if ((!text && pendingAttachments.length === 0) || loading) return;
-    if (!llmBaseUrl || !llmApiKey || !llmModel) {
+    if (!agent.config.baseUrl || !agent.config.apiKey || !agent.config.model) {
       setError("请先在设置页配置 LLM Provider");
       return;
     }

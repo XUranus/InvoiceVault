@@ -241,6 +241,8 @@ pub struct AppState {
     badge_config: Mutex<BadgeConfig>,
     price_config: Mutex<PriceConfig>,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
+    agent_llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
+    llm_audit_enabled: Arc<Mutex<bool>>,
     recognition_pending: Arc<Mutex<i64>>,
     recognition_running: Arc<Mutex<i64>>,
     recognition_max_concurrent: Arc<Mutex<usize>>,
@@ -274,6 +276,19 @@ impl AppState {
             Arc::new(Mutex::new(saved))
         };
 
+        let agent_llm_config: Arc<Mutex<Option<LlmProviderConfig>>> = {
+            let saved =
+                Self::load_config_raw::<LlmProviderConfig>(&app_data_dir, "agent_llm_config.json");
+            Arc::new(Mutex::new(saved))
+        };
+
+        let llm_audit_enabled: Arc<Mutex<bool>> = {
+            let saved = Self::load_config_raw::<serde_json::Value>(&app_data_dir, "audit_config.json")
+                .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
+                .unwrap_or(true);
+            Arc::new(Mutex::new(saved))
+        };
+
         let recognition_max_concurrent: usize =
             Self::load_config_raw::<serde_json::Value>(&app_data_dir, "recognition_config.json")
                 .and_then(|v| v.get("max_concurrent").and_then(|v| v.as_u64()))
@@ -292,6 +307,7 @@ impl AppState {
             paths.thumbnails_dir.clone(),
             paths.llm_audit_dir.clone(),
             Arc::clone(&llm_config),
+            Arc::clone(&llm_audit_enabled),
             app.clone(),
         )?;
 
@@ -300,6 +316,7 @@ impl AppState {
             paths.raw_dir.clone(),
             paths.thumbnails_dir.clone(),
             Arc::clone(&llm_config),
+            Arc::clone(&llm_audit_enabled),
             app.clone(),
         );
 
@@ -313,6 +330,8 @@ impl AppState {
             badge_config: Mutex::new(badge_config),
             price_config: Mutex::new(price_config),
             llm_config,
+            agent_llm_config,
+            llm_audit_enabled,
             recognition_pending: Arc::new(Mutex::new(0)),
             recognition_running: Arc::new(Mutex::new(0)),
             recognition_max_concurrent: Arc::new(Mutex::new(recognition_max_concurrent)),
@@ -387,7 +406,7 @@ impl AppState {
                             job.id,
                             job.raw_file_id.unwrap(),
                             cfg.clone(),
-                            self.llm_audit_config(&cfg),
+                            self.llm_audit_config(),
                             app.clone(),
                         );
                     }
@@ -1019,10 +1038,41 @@ impl AppState {
         self.llm_config.lock().expect("lock").clone()
     }
 
-    pub fn llm_audit_config(&self, config: &LlmProviderConfig) -> Option<LlmAuditConfig> {
-        config.audit_enabled.then(|| LlmAuditConfig {
+    pub fn llm_audit_config(&self) -> Option<LlmAuditConfig> {
+        (*self.llm_audit_enabled.lock().expect("lock")).then(|| LlmAuditConfig {
             dir: self.paths.llm_audit_dir.clone(),
         })
+    }
+
+    pub fn set_agent_llm_config(&self, config: LlmProviderConfig) {
+        let mut cfg = self.agent_llm_config.lock().expect("lock");
+        *cfg = Some(config.clone());
+        let path = self.paths.app_data_dir.join("agent_llm_config.json");
+        if let Ok(json) = serde_json::to_string_pretty(&config) {
+            if let Err(e) = std::fs::write(&path, json) {
+                error!("Failed to persist Agent LLM config: {e}");
+            }
+        }
+        info!("Agent LLM config updated");
+    }
+
+    pub fn get_agent_llm_config(&self) -> Option<LlmProviderConfig> {
+        self.agent_llm_config.lock().expect("lock").clone()
+    }
+
+    pub fn set_llm_audit_enabled(&self, enabled: bool) {
+        *self.llm_audit_enabled.lock().expect("lock") = enabled;
+        let path = self.paths.app_data_dir.join("audit_config.json");
+        if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({"enabled": enabled})) {
+            if let Err(e) = std::fs::write(&path, json) {
+                error!("Failed to persist audit config: {e}");
+            }
+        }
+        info!("LLM audit enabled: {enabled}");
+    }
+
+    pub fn get_llm_audit_enabled(&self) -> bool {
+        *self.llm_audit_enabled.lock().expect("lock")
     }
 
     fn load_config_raw<T: serde::de::DeserializeOwned>(
@@ -1681,7 +1731,7 @@ impl AppState {
             attachment_ids,
             attachment_context,
             config,
-            self.llm_audit_config(config),
+            self.llm_audit_config(),
             executor,
         )
         .await?)
@@ -1708,7 +1758,7 @@ impl AppState {
             attachment_ids,
             attachment_context,
             config,
-            self.llm_audit_config(config),
+            self.llm_audit_config(),
             executor,
             stream_sink,
         )
@@ -1757,7 +1807,7 @@ impl AppState {
             request.confirmed,
             request.extra_params,
             config,
-            self.llm_audit_config(config),
+            self.llm_audit_config(),
             executor,
         )
         .await?)
@@ -1780,7 +1830,7 @@ impl AppState {
             request.confirmed,
             request.extra_params,
             config,
-            self.llm_audit_config(config),
+            self.llm_audit_config(),
             executor,
             stream_sink,
         )

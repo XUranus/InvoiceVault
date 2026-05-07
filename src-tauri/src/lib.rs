@@ -407,7 +407,7 @@ async fn recognize_raw_file(
     let mut total_completion_tokens: i64 = 0;
     let mut total_total_tokens: i64 = 0;
     let mut model = request.config.model.clone();
-    let audit_config = state.llm_audit_config(&request.config);
+    let audit_config = state.llm_audit_config();
 
     for input in recognition_inputs {
         thumbnail_paths.push(input.thumbnail_path.to_string_lossy().into_owned());
@@ -531,7 +531,7 @@ async fn test_llm_connection(
     state: State<'_, AppState>,
     config: LlmProviderConfig,
 ) -> Result<LlmConnectionTestResult, String> {
-    let audit_config = state.llm_audit_config(&config);
+    let audit_config = state.llm_audit_config();
     run_llm_connection_test(config, audit_config.as_ref())
         .await
         .map_err(|err| err.to_string())
@@ -1002,6 +1002,28 @@ fn get_llm_config(state: State<'_, AppState>) -> Result<Option<LlmProviderConfig
 }
 
 #[tauri::command]
+fn set_agent_llm_config(state: State<'_, AppState>, config: LlmProviderConfig) -> Result<(), String> {
+    state.set_agent_llm_config(config);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_agent_llm_config(state: State<'_, AppState>) -> Result<Option<LlmProviderConfig>, String> {
+    Ok(state.get_agent_llm_config())
+}
+
+#[tauri::command]
+fn set_llm_audit_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    state.set_llm_audit_enabled(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_llm_audit_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.get_llm_audit_enabled())
+}
+
+#[tauri::command]
 fn get_recognition_queue_status(
     state: State<'_, AppState>,
 ) -> Result<RecognitionQueueStatus, String> {
@@ -1232,6 +1254,10 @@ pub fn run() {
             dismiss_notification,
             set_llm_config,
             get_llm_config,
+            set_agent_llm_config,
+            get_agent_llm_config,
+            set_llm_audit_enabled,
+            get_llm_audit_enabled,
             get_recognition_queue_status,
             set_recognition_concurrency,
             raw_file_has_invoices,

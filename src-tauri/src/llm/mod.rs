@@ -18,8 +18,6 @@ pub struct LlmProviderConfig {
     pub api_key: String,
     pub model: String,
     pub timeout_seconds: Option<u64>,
-    #[serde(default = "default_audit_enabled")]
-    pub audit_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -69,10 +67,6 @@ pub enum LlmError {
     Io(#[from] std::io::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-}
-
-fn default_audit_enabled() -> bool {
-    true
 }
 
 #[derive(Debug, Serialize)]
@@ -604,7 +598,6 @@ mod tests {
                 api_key: "key".to_owned(),
                 model: "model".to_owned(),
                 timeout_seconds: Some(1),
-                audit_enabled: true,
             },
             None,
         )
@@ -639,16 +632,6 @@ mod tests {
         let err = extract_json_object("not json").expect_err("missing json object");
 
         assert!(matches!(err, LlmError::MissingJsonObject));
-    }
-
-    #[test]
-    fn defaults_audit_enabled_for_legacy_config() {
-        let config: LlmProviderConfig = serde_json::from_str(
-            r#"{"base_url":"https://example.test/v1","api_key":"key","model":"model"}"#,
-        )
-        .expect("legacy config");
-
-        assert!(config.audit_enabled);
     }
 
     #[test]
@@ -694,7 +677,6 @@ mod tests {
                 api_key: std::env::var("RECEIPTIER_LLM_API_KEY").expect("RECEIPTIER_LLM_API_KEY"),
                 model: std::env::var("RECEIPTIER_LLM_MODEL").expect("RECEIPTIER_LLM_MODEL"),
                 timeout_seconds: Some(30),
-                audit_enabled: true,
             },
             None,
         )
@@ -718,7 +700,6 @@ mod tests {
                 api_key: std::env::var("RECEIPTIER_LLM_API_KEY").expect("RECEIPTIER_LLM_API_KEY"),
                 model: std::env::var("RECEIPTIER_LLM_MODEL").expect("RECEIPTIER_LLM_MODEL"),
                 timeout_seconds: Some(120),
-                audit_enabled: true,
             },
             &sample_path,
             "image/jpeg",

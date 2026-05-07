@@ -102,6 +102,7 @@ pub struct WatcherManager {
     thumbnails_dir: PathBuf,
     llm_audit_dir: PathBuf,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
+    llm_audit_enabled: Arc<Mutex<bool>>,
     handles: Mutex<HashMap<i64, WatchHandle>>,
     app_handle: AppHandle,
 }
@@ -113,6 +114,7 @@ impl WatcherManager {
         thumbnails_dir: PathBuf,
         llm_audit_dir: PathBuf,
         llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
+        llm_audit_enabled: Arc<Mutex<bool>>,
         app_handle: AppHandle,
     ) -> Result<Self, WatcherError> {
         let manager = Self {
@@ -121,6 +123,7 @@ impl WatcherManager {
             thumbnails_dir,
             llm_audit_dir,
             llm_config,
+            llm_audit_enabled,
             handles: Mutex::new(HashMap::new()),
             app_handle,
         };
@@ -413,6 +416,7 @@ impl WatcherManager {
         let thumbnails_dir = self.thumbnails_dir.clone();
         let llm_audit_dir = self.llm_audit_dir.clone();
         let llm_config = Arc::clone(&self.llm_config);
+        let llm_audit_enabled = Arc::clone(&self.llm_audit_enabled);
         let app_handle = self.app_handle.clone();
         let name_keywords = config.name_keywords;
         let max_file_age_days = config.max_file_age_days;
@@ -426,6 +430,7 @@ impl WatcherManager {
                     thumbnails_dir,
                     llm_audit_dir,
                     llm_config,
+                    llm_audit_enabled,
                     app_handle,
                     id,
                     path,
@@ -470,6 +475,7 @@ fn watch_loop(
     thumbnails_dir: PathBuf,
     llm_audit_dir: PathBuf,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
+    llm_audit_enabled: Arc<Mutex<bool>>,
     app_handle: AppHandle,
     watch_id: i64,
     path: PathBuf,
@@ -528,6 +534,7 @@ fn watch_loop(
                     &thumbnails_dir,
                     &llm_audit_dir,
                     &llm_config,
+                    &llm_audit_enabled,
                     &app_handle,
                     watch_id,
                     &path,
@@ -557,6 +564,7 @@ fn watch_loop(
                         &thumbnails_dir,
                         &llm_audit_dir,
                         &llm_config,
+                        &llm_audit_enabled,
                         &app_handle,
                         watch_id,
                         &path,
@@ -627,6 +635,7 @@ fn process_pending(
     thumbnails_dir: &Path,
     llm_audit_dir: &Path,
     llm_config: &Arc<Mutex<Option<LlmProviderConfig>>>,
+    llm_audit_enabled: &Arc<Mutex<bool>>,
     app_handle: &AppHandle,
     watch_id: i64,
     watch_path: &Path,
@@ -687,7 +696,7 @@ fn process_pending(
         if let Some(config) = llm_config.lock().ok().and_then(|c| c.clone()) {
             let db = Arc::clone(db);
             let thumbnails_dir = thumbnails_dir.to_path_buf();
-            let audit = config.audit_enabled.then(|| LlmAuditConfig {
+            let audit = (*llm_audit_enabled.lock().expect("lock")).then(|| LlmAuditConfig {
                 dir: llm_audit_dir.to_path_buf(),
             });
 

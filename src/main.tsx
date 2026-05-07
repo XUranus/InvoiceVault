@@ -22,6 +22,15 @@ const NotificationsPage = React.lazy(
 const SettingsPage = React.lazy(
   () => import("./components/SettingsPage"),
 );
+const AiProviderPage = React.lazy(
+  () => import("./components/settings/AiProviderPage"),
+);
+const GeneralPage = React.lazy(
+  () => import("./components/settings/GeneralPage"),
+);
+const AdvancedPage = React.lazy(
+  () => import("./components/settings/AdvancedPage"),
+);
 
 function PageFallback() {
   return (
@@ -103,7 +112,33 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <SettingsPage />
               </Suspense>
             }
-          />
+          >
+            <Route index element={<Navigate to="ai" replace />} />
+            <Route
+              path="ai"
+              element={
+                <Suspense fallback={<PageFallback />}>
+                  <AiProviderPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="general"
+              element={
+                <Suspense fallback={<PageFallback />}>
+                  <GeneralPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="advanced"
+              element={
+                <Suspense fallback={<PageFallback />}>
+                  <AdvancedPage />
+                </Suspense>
+              }
+            />
+          </Route>
         </Route>
       </Routes>
     </HashRouter>

@@ -216,6 +216,7 @@ pub struct EmailManager {
     raw_dir: PathBuf,
     thumbnails_dir: PathBuf,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
+    llm_audit_enabled: Arc<Mutex<bool>>,
     app: tauri::AppHandle,
 }
 
@@ -225,6 +226,7 @@ impl EmailManager {
         raw_dir: PathBuf,
         thumbnails_dir: PathBuf,
         llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
+        llm_audit_enabled: Arc<Mutex<bool>>,
         app: tauri::AppHandle,
     ) -> Self {
         Self {
@@ -232,6 +234,7 @@ impl EmailManager {
             raw_dir,
             thumbnails_dir,
             llm_config,
+            llm_audit_enabled,
             app,
         }
     }
@@ -680,7 +683,7 @@ impl EmailManager {
                 if let Some(config) = self.llm_config.lock().ok().and_then(|c| c.clone()) {
                     let db = Arc::clone(&self.db);
                     let thumbnails_dir = self.thumbnails_dir.clone();
-                    let audit = config.audit_enabled.then(|| crate::llm::LlmAuditConfig {
+                    let audit = (*self.llm_audit_enabled.lock().expect("lock")).then(|| crate::llm::LlmAuditConfig {
                         dir: std::path::PathBuf::from("audit"), // placeholder
                     });
 
@@ -877,7 +880,7 @@ impl EmailManager {
                 if let Some(config) = self.llm_config.lock().ok().and_then(|c| c.clone()) {
                     let db = Arc::clone(&self.db);
                     let thumbnails_dir = self.thumbnails_dir.clone();
-                    let audit = config.audit_enabled.then(|| crate::llm::LlmAuditConfig {
+                    let audit = (*self.llm_audit_enabled.lock().expect("lock")).then(|| crate::llm::LlmAuditConfig {
                         dir: std::path::PathBuf::from("audit"),
                     });
 
