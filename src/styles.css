@@ -1451,6 +1451,10 @@ textarea:focus {
   width: 44px;
 }
 
+.invoice-table-col-id {
+  width: 52px;
+}
+
 .invoice-table-col-company {
   width: 32%;
 }
@@ -1473,6 +1477,14 @@ textarea:focus {
 
 .invoice-table-col-similarity {
   width: 92px;
+}
+
+.invoice-table-id-col,
+.invoice-table-id {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }
 
 .invoice-table th,

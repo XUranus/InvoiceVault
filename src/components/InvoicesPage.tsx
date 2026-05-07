@@ -667,6 +667,7 @@ function InvoiceTableView({
       <table className={`invoice-table ${similarities ? "invoice-table-with-similarity" : ""}`}>
         <colgroup>
           <col className="invoice-table-col-check" />
+          <col className="invoice-table-col-id" />
           <col className="invoice-table-col-company" />
           <col className="invoice-table-col-date" />
           <col className="invoice-table-col-code" />
@@ -677,6 +678,7 @@ function InvoiceTableView({
         <thead>
           <tr>
             <th className="invoice-table-check-col" aria-label="选择" />
+            <th className="invoice-table-id-col">#</th>
             <th>{sortableHeader("公司名称", "seller_name")}</th>
             <th>{sortableHeader("时间", "issue_date")}</th>
             <th>{sortableHeader("发票编码", "invoice_number")}</th>
@@ -699,6 +701,7 @@ function InvoiceTableView({
                   onChange={() => onToggleSelect(invoice.id)}
                 />
               </td>
+              <td className="invoice-table-id">#{invoice.id}</td>
               <td className="invoice-table-company">
                 <div className="invoice-table-name-line">
                   {!invoice.viewed_at ? <InvoiceUnreadDot /> : null}

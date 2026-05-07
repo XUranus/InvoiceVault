@@ -228,7 +228,6 @@ export function EventsPage() {
                   <th>详情</th>
                   <th>关联</th>
                   <th>时间</th>
-                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -284,16 +283,6 @@ export function EventsPage() {
                     )}
                   </td>
                   <td className="event-time" title={ev.created_at}>{formatRelativeTime(ev.created_at)}</td>
-                  <td className="event-actions" onClick={(e) => e.stopPropagation()}>
-                    {!ev.is_read ? (
-                      <button
-                        className="btn-small"
-                        onClick={() => handleMarkRead(ev.id)}
-                      >
-                        标记已读
-                      </button>
-                    ) : null}
-                  </td>
                 </tr>
               );
             })}
