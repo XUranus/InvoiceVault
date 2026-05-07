@@ -86,3 +86,46 @@ npm run tauri dev
 - Agent 流式输出、任务取消、更多工具和确认状态持久化。
 - 编辑历史 UI 和审计日志查询 UI。
 - 资源占用测试、缓存策略和跨平台打包验收。
+
+## 使用方式
+
+1. 启动应用。
+2. 在导入队列中选择或拖入 PDF/PNG/JPG/JPEG 文件。
+3. 在设置页填写 LLM Provider 的 Base URL、Model 和 API Key。
+4. 点击"测试连接"确认配置可用。
+5. 对已导入的图片或 PDF 文件点击"识别"。
+6. 识别成功后，结构化发票会出现在发票库列表。
+7. 在发票详情页修正字段、维护明细行、处理重复候选或选择自定义 Badge。
+8. 在 Agent 页面通过自然语言查询、统计或导出发票。
+
+当前图片识别支持 `image/png` 和 `image/jpeg`。PDF 文件会先通过 `pdftoppm` 渲染为 JPEG 页面缓存，再逐页调用多模态识别。所有图片和 PDF 页面在发送给 LLM 前会通过 `magick` 生成标准化 JPEG，同时生成预览缩略图。RAW 归档文件不会被修改。
+
+## 数据存储
+
+应用数据保存在系统分配的应用数据目录中，后端启动时会创建：
+
+- `invoicevault.sqlite3`：SQLite 数据库。
+- `raw/`：原始 PDF/图片归档目录。
+- `thumbnails/`：标准化识别图、PDF 页面缓存和预览缩略图目录。
+- `logs/`：应用运行日志。
+- `llm_config.json`、`embedding_config.json`、`recognition_config.json`、`badge_config.json`：本机应用配置文件。
+
+RAW 文件归档策略：
+
+```text
+raw/YYYY/MM/current_name.ext
+```
+
+同名文件进入同一月份目录时，会自动追加 `-1`、`-2` 等后缀避免覆盖。数据库中同时保存 `original_name`（导入时原始文件名）、`current_name`（归档后的当前文件名）、`storage_path`（归档后的实际路径）、`sha256` 和 `md5`（用于文件级去重）。
+
+## LLM 说明
+
+LLM 配置保存在本机应用数据目录，不会写入仓库。不要把 API Key 提交到代码或文档。
+
+图片识别和 Agent 对话均使用 OpenAI-compatible `/chat/completions`：
+
+```text
+POST {base_url}/chat/completions
+```
+
+模型需要支持多模态图片输入，并能返回 JSON。后端会从模型响应中提取 JSON 对象，校验后写入 SQLite。Agent 对话通过受控工具执行查询、统计、导出和字段更新，写操作会经过 UI 确认。
