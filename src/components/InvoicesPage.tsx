@@ -769,11 +769,17 @@ function formatInvoiceCode(invoice: Invoice): string {
 
 function InvoiceTagBadges({ invoice }: { invoice: Invoice }) {
   const tags = buildInvoiceTags(invoice);
-  if (tags.length === 0) {
+  const showDuplicate = shouldShowDuplicateStatus(invoice.duplicate_status);
+  if (tags.length === 0 && !showDuplicate) {
     return <span className="muted">-</span>;
   }
   return (
     <div className="invoice-table-tags">
+      {showDuplicate ? (
+        <span className={`mini-tag ${toneClass(duplicateStatusMeta(invoice.duplicate_status).tone)}`}>
+          {duplicateStatusMeta(invoice.duplicate_status).label}
+        </span>
+      ) : null}
       {tags.map((tag) => (
         <span key={`${tag.label}-${tag.tone}`} className={`mini-tag ${toneClass(tag.tone)}`}>
           {tag.label}

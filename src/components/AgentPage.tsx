@@ -25,11 +25,12 @@ import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../stores/appStore";
 import { useLlmStore } from "../stores/llmStore";
 
-const EXAMPLE_QUESTIONS = [
-  "本月发票总金额是多少？",
-  "搜索办公用品相关的发票",
-  "导出发票为 CSV 格式",
-];
+const TASK_CARDS = [
+  { label: "统计本月发票金额", query: "统计本月发票金额" },
+  { label: "搜索办公用品发票", query: "搜索办公用品相关的发票" },
+  { label: "导出为 CSV", query: "导出发票为 CSV 格式" },
+  { label: "检查重复风险", query: "检查发票库中是否有重复的发票" },
+] as const;
 
 type StreamUiState = {
   streamId: string;
@@ -53,6 +54,10 @@ export function AgentPage() {
   const [pendingAttachments, setPendingAttachments] = React.useState<AgentAttachment[]>([]);
   const [artifacts, setArtifacts] = React.useState<AgentArtifact[]>([]);
   const [streamState, setStreamState] = React.useState<StreamUiState | null>(null);
+  const [sessionSearch, setSessionSearch] = React.useState("");
+  const [sessionRenameId, setSessionRenameId] = React.useState<number | null>(null);
+  const [sessionRenameValue, setSessionRenameValue] = React.useState("");
+  const [collapsedTools, setCollapsedTools] = React.useState<Set<number>>(new Set());
   const messagesEnd = React.useRef<HTMLDivElement>(null);
   const streamStateRef = React.useRef<StreamUiState | null>(null);
   const activeStreamIdRef = React.useRef<string | null>(null);
@@ -68,6 +73,14 @@ export function AgentPage() {
     }),
     [agent.config.baseUrl, agent.config.model, agent.config.apiKey],
   );
+
+  const filteredSessions = React.useMemo(() => {
+    const q = sessionSearch.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((s) => (s.title || "新对话").toLowerCase().includes(q));
+  }, [sessions, sessionSearch]);
+
+  const groupedSessions = React.useMemo(() => groupSessions(filteredSessions), [filteredSessions]);
 
   React.useEffect(() => {
     streamStateRef.current = streamState;
@@ -478,6 +491,23 @@ export function AgentPage() {
     }
   };
 
+  const handleRenameSession = (id: number, currentTitle: string) => {
+    setSessionRenameId(id);
+    setSessionRenameValue(currentTitle || "");
+  };
+
+  const handleRenameSessionSave = (id: number) => {
+    const title = sessionRenameValue.trim();
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: title || s.title } : s)));
+    setSessionRenameId(null);
+    setSessionRenameValue("");
+  };
+
+  const handleRenameSessionCancel = () => {
+    setSessionRenameId(null);
+    setSessionRenameValue("");
+  };
+
   const toolCallSummary = (msg: AgentMessage): string | null => {
     if (!msg.tool_call_json) return null;
     try {
@@ -599,19 +629,19 @@ export function AgentPage() {
             </div>
           );
         }
-        const entries = Object.entries(parsed).slice(0, 5);
-        const more = Object.keys(parsed).length > 5;
+        const entries = Object.entries(parsed).slice(0, 8);
+        const more = Object.keys(parsed).length > 8;
         return (
           <div className="chat-tool-summary">
             {entries.map(([key, value]) => (
               <div key={key} className="chat-tool-field">
                 <span className="chat-tool-field-key">{formatFieldName(key)}</span>
                 <span className="chat-tool-field-value">
-                  {typeof value === "number" ? value.toLocaleString() : String(value).slice(0, 80)}
+                  {formatToolValue(value)}
                 </span>
               </div>
             ))}
-            {more && <span className="chat-tool-more">...</span>}
+            {more && <span className="chat-tool-more">还有更多字段</span>}
           </div>
         );
       }
@@ -633,41 +663,100 @@ export function AgentPage() {
     }
   };
 
-  return (
-    <div className="page agent-page">
-      {/* Session sidebar */}
-      <div className="agent-sessions">
-        <button className="btn-primary" onClick={handleNewSession} style={{ width: "100%" }}>
-          + 新对话
-        </button>
-        <div className="agent-session-list">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              className={`agent-session-item ${s.id === activeSessionId ? "active" : ""}`}
-              onClick={() => setActiveSessionId(s.id)}
-            >
-              <span className="agent-session-title">
-                {s.title || "新对话"}
-              </span>
-              <span className="agent-session-time">
-                {s.updated_at.slice(0, 10)}
-              </span>
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+
+  const renderSessionItem = (s: AgentSession) => {
+    const isActive = s.id === activeSessionId;
+    const isRenaming = sessionRenameId === s.id;
+    return (
+      <div
+        key={s.id}
+        className={`agent-session-item ${isActive ? "active" : ""}`}
+        onClick={() => !isRenaming && setActiveSessionId(s.id)}
+      >
+        {isRenaming ? (
+          <input
+            className="agent-session-rename-input"
+            value={sessionRenameValue}
+            onChange={(e) => setSessionRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleRenameSessionSave(s.id);
+              if (e.key === "Escape") handleRenameSessionCancel();
+            }}
+            onBlur={() => handleRenameSessionSave(s.id)}
+            onClick={(e) => e.stopPropagation()}
+            autoFocus
+          />
+        ) : (
+          <>
+            <div className="agent-session-content">
+              <span className="agent-session-title">{s.title || "新对话"}</span>
+              <span className="agent-session-time">{formatRelativeTime(s.updated_at)}</span>
+            </div>
+            <div className="agent-session-actions">
               <button
-                className="agent-session-delete"
+                className="agent-session-action-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRenameSession(s.id, s.title || "");
+                }}
+                title="重命名"
+              >
+                ✎
+              </button>
+              <button
+                className="agent-session-action-btn agent-session-delete"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDeleteSession(s.id);
                 }}
-                title="删除会话"
+                title="删除"
               >
                 ×
               </button>
             </div>
-          ))}
-          {sessions.length === 0 && (
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderSessionGroup = (label: string, items: AgentSession[]) => {
+    if (items.length === 0) return null;
+    return (
+      <div className="agent-session-group">
+        <div className="agent-session-group-label">{label}</div>
+        {items.map(renderSessionItem)}
+      </div>
+    );
+  };
+
+  return (
+    <div className="page agent-page">
+      {/* Session sidebar */}
+      <div className="agent-sessions">
+        <div className="agent-sessions-header">
+          <button className="agent-new-session-btn" onClick={handleNewSession}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            新建对话
+          </button>
+        </div>
+        <div className="agent-search-wrap">
+          <input
+            className="agent-search-input"
+            type="text"
+            placeholder="搜索对话..."
+            value={sessionSearch}
+            onChange={(e) => setSessionSearch(e.target.value)}
+          />
+        </div>
+        <div className="agent-session-list">
+          {renderSessionGroup("今天", groupedSessions.today)}
+          {renderSessionGroup("最近7天", groupedSessions.week)}
+          {renderSessionGroup("更早", groupedSessions.older)}
+          {filteredSessions.length === 0 && (
             <p className="muted" style={{ padding: 12 }}>
-              暂无对话记录
+              {sessions.length === 0 ? "暂无对话记录" : "没有匹配的对话"}
             </p>
           )}
         </div>
@@ -675,165 +764,230 @@ export function AgentPage() {
 
       {/* Chat area */}
       <div className="agent-chat">
-        {activeSessionId === null ? (
-          <div className="agent-chat-empty">
-            <h3>有什么可以帮助你的？</h3>
-            <p className="muted">选择或创建一个会话，开始与 Agent 对话</p>
-            <div className="example-questions">
-              {EXAMPLE_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  className="example-question-btn"
-                  onClick={() => {
-                    setInput(q);
-                    handleNewSession();
-                  }}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="chat-messages">
-              {messages.length === 0 && !loading && (
-                <div className="agent-chat-empty">
-                  <p className="muted">发送消息开始对话</p>
-                </div>
-              )}
-              {messages.map((msg) => {
-                const isStreamingAssistant =
-                  streamState?.assistantMessageId === msg.id;
-                return (
-                  <div key={msg.id} className={`chat-message chat-message-${msg.role}`}>
-                    <div className="chat-bubble">
-                      {msg.role === "assistant" ? (
-                        <div className="chat-card-header">
-                          <span>
-                            {msg.tool_call_json
-                              ? "工具调用"
-                              : isStreamingAssistant
-                                ? streamState?.phase === "error"
-                                  ? "回复中断"
-                                  : "正在回复"
-                                : "回复"}
-                          </span>
-                        </div>
-                      ) : null}
-                      {msg.role === "assistant" && msg.tool_call_json && (
-                        <div className="chat-tool-call">
-                          <span className="chat-tool-call-dot" />
-                          <span>{toolCallSummary(msg)}</span>
-                        </div>
-                      )}
-                      {msg.attachments && msg.attachments.length > 0 ? (
-                        <AttachmentList attachments={msg.attachments} />
-                      ) : null}
-                      {msg.role === "tool" ? (
-                        <div className="chat-tool-result">
-                          <div className="chat-tool-result-header">
-                            <span className="chat-tool-result-icon" />
-                            <span className="chat-tool-label">工具结果</span>
-                          </div>
-                          <div className="chat-tool-result-body">
-                            {formatToolResult(msg.content)}
-                          </div>
-                        </div>
-                      ) : isStreamingAssistant ? (
-                        <StreamingAssistantContent
-                          content={msg.content}
-                          phase={streamState!.phase}
-                          toolName={streamState!.toolName}
-                          errorMessage={streamState!.errorMessage}
-                          onDismiss={() => setStreamState(null)}
-                        />
-                      ) : (
-                        <MarkdownContent content={msg.content} />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {/* Confirmation panel */}
-              {pendingConfirm && (
-                <div className="chat-message chat-message-assistant">
-                  <div className="confirmation-panel">
-                    <p className="confirmation-title">
-                      确认操作：{toolLabel(pendingConfirm.tool_name)}
-                    </p>
-                    <p className="confirmation-detail">{pendingConfirm.message}</p>
-                    <div className="confirmation-actions">
-                      <button
-                        className="btn-primary"
-                        onClick={() => handleConfirm(true)}
-                        disabled={loading}
-                      >
-                        确认执行
-                      </button>
-                      <button
-                        className="btn-secondary"
-                        onClick={() => handleConfirm(false)}
-                        disabled={loading}
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div ref={messagesEnd} />
-            </div>
-
-            <div className="chat-input-wrap">
-              {pendingAttachments.length > 0 ? (
-                <div className="chat-pending-attachments">
-                  {pendingAttachments.map((attachment) => (
-                    <span className="chat-attachment-chip" key={attachment.id}>
-                      {attachment.original_name}
-                      <button
-                        type="button"
-                        onClick={() => setPendingAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
-                        title="移除附件"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              <div className="chat-input-bar">
-                <button
-                  className="btn-secondary chat-attach-btn"
-                  type="button"
-                  onClick={handleAttach}
-                  disabled={loading}
-                  title="上传 xlsx/csv 表格"
-                >
-                  附件
-                </button>
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-                rows={2}
-                disabled={loading}
-                spellCheck={false}
-              />
-              <button
-                className="btn-primary"
-                onClick={handleSend}
-                disabled={loading || (!input.trim() && pendingAttachments.length === 0)}
-              >
-                发送
-              </button>
+        <div className="agent-chat-body">
+          {activeSessionId === null ? (
+            <div className="agent-chat-empty">
+              <div className="agent-empty-hero">
+                <h3 className="agent-empty-title">发票 Agent</h3>
+                <p className="agent-empty-subtitle">
+                  基于你的发票库，我可以帮助你搜索、统计、筛选、导出和检查风险
+                </p>
+              </div>
+              <div className="agent-task-grid">
+                {TASK_CARDS.map((card) => (
+                  <button
+                    key={card.label}
+                    className="agent-task-card"
+                    onClick={() => {
+                      setInput(card.query);
+                      handleNewSession();
+                    }}
+                  >
+                    <span className="agent-task-card-label">{card.label}</span>
+                  </button>
+                ))}
               </div>
             </div>
-          </>
-        )}
+          ) : (
+            <>
+              <div className="agent-chat-session-header">
+                <h4 className="agent-chat-session-title">{activeSession?.title || "新对话"}</h4>
+                <span className="agent-chat-session-hint">可以搜索、统计、筛选、导出和检查风险</span>
+              </div>
+              <div className="chat-messages">
+                {messages.length === 0 && !loading && (
+                  <div className="agent-chat-empty">
+                    <p className="muted">发送消息开始对话</p>
+                  </div>
+                )}
+                {messages.map((msg, index) => {
+                  // Skip tool messages — they are merged into the preceding tool-call card
+                  if (msg.role === "tool") return null;
+
+                  const isStreamingAssistant =
+                    streamState?.assistantMessageId === msg.id;
+                  const isToolCall = msg.role === "assistant" && !!msg.tool_call_json;
+
+                  // Find the paired tool result message
+                  let toolResultMsg: AgentMessage | null = null;
+                  if (isToolCall) {
+                    for (let j = index + 1; j < messages.length; j++) {
+                      if (messages[j].role === "tool") {
+                        toolResultMsg = messages[j];
+                        break;
+                      }
+                      if (messages[j].role !== "tool") break;
+                    }
+                  }
+
+                  const isCollapsed = !collapsedTools.has(msg.id);
+
+                  return (
+                    <div key={msg.id} className={`chat-message chat-message-${msg.role}`}>
+                      <div className="chat-bubble">
+                        {msg.role === "assistant" ? (
+                          <div className="chat-card-header">
+                            <span>
+                              {isToolCall
+                                ? "工具调用"
+                                : isStreamingAssistant
+                                  ? streamState?.phase === "error"
+                                    ? "回复中断"
+                                    : "正在回复"
+                                  : "回复"}
+                            </span>
+                          </div>
+                        ) : null}
+                        {isToolCall && (
+                          <div
+                            className="chat-tool-call"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() =>
+                              setCollapsedTools((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(msg.id)) next.delete(msg.id);
+                                else next.add(msg.id);
+                                return next;
+                              })
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setCollapsedTools((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(msg.id)) next.delete(msg.id);
+                                  else next.add(msg.id);
+                                  return next;
+                                });
+                              }
+                            }}
+                          >
+                            <span className="chat-tool-call-dot" />
+                            <span className="chat-tool-call-name">{toolCallSummary(msg)}</span>
+                            <svg
+                              className={`chat-tool-toggle ${isCollapsed ? "is-collapsed" : ""}`}
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="6 9 12 15 18 9" />
+                            </svg>
+                          </div>
+                        )}
+                        {isToolCall && toolResultMsg && isCollapsed && (
+                          <div className="chat-tool-result">
+                            <div className="chat-tool-result-body">
+                              {formatToolResult(toolResultMsg.content)}
+                            </div>
+                          </div>
+                        )}
+                        {msg.attachments && msg.attachments.length > 0 ? (
+                          <AttachmentList attachments={msg.attachments} />
+                        ) : null}
+                        {!isToolCall && (
+                          isStreamingAssistant ? (
+                            <StreamingAssistantContent
+                              content={msg.content}
+                              phase={streamState!.phase}
+                              toolName={streamState!.toolName}
+                              errorMessage={streamState!.errorMessage}
+                              onDismiss={() => setStreamState(null)}
+                            />
+                          ) : (
+                            <MarkdownContent content={msg.content} />
+                          )
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Confirmation panel */}
+                {pendingConfirm && (
+                  <div className="chat-message chat-message-assistant">
+                    <div className="confirmation-panel">
+                      <p className="confirmation-title">
+                        确认操作：{toolLabel(pendingConfirm.tool_name)}
+                      </p>
+                      <p className="confirmation-detail">{pendingConfirm.message}</p>
+                      <div className="confirmation-actions">
+                        <button
+                          className="btn-primary"
+                          onClick={() => handleConfirm(true)}
+                          disabled={loading}
+                        >
+                          确认执行
+                        </button>
+                        <button
+                          className="btn-secondary"
+                          onClick={() => handleConfirm(false)}
+                          disabled={loading}
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div ref={messagesEnd} />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Input bar - always visible */}
+        <div className="chat-input-wrap">
+          {pendingAttachments.length > 0 ? (
+            <div className="chat-pending-attachments">
+              {pendingAttachments.map((attachment) => (
+                <span className="chat-attachment-chip" key={attachment.id}>
+                  {attachment.original_name}
+                  <button
+                    type="button"
+                    onClick={() => setPendingAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
+                    title="移除附件"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div className="chat-input-bar">
+            <button
+              className="btn-secondary chat-attach-btn"
+              type="button"
+              onClick={handleAttach}
+              disabled={loading}
+              title="上传 xlsx/csv 表格"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="问我任何关于发票的问题…"
+              rows={2}
+              disabled={loading}
+              spellCheck={false}
+            />
+            <button
+              className="btn-primary chat-send-btn"
+              onClick={handleSend}
+              disabled={loading || (!input.trim() && pendingAttachments.length === 0)}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
 
       {activeSessionId !== null ? (
@@ -847,6 +1001,39 @@ export function AgentPage() {
       ) : null}
     </div>
   );
+}
+
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.floor((today.getTime() - target.getTime()) / 86400000);
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "昨天";
+  if (diffDays < 7) return `${diffDays}天前`;
+  return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function groupSessions(sessions: AgentSession[]): {
+  today: AgentSession[];
+  week: AgentSession[];
+  older: AgentSession[];
+} {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const weekStart = todayStart - 6 * 86400000;
+  const today: AgentSession[] = [];
+  const week: AgentSession[] = [];
+  const older: AgentSession[] = [];
+  for (const s of sessions) {
+    const t = new Date(s.updated_at).getTime();
+    if (t >= todayStart) today.push(s);
+    else if (t >= weekStart) week.push(s);
+    else older.push(s);
+  }
+  return { today, week, older };
 }
 
 function createStreamId(): string {
@@ -966,6 +1153,16 @@ function toolLabel(name: string): string {
   return labels[name] ?? name;
 }
 
+function artifactTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    export: "文件导出",
+    csv: "CSV 导出",
+    xlsx: "Excel 导出",
+    search: "搜索结果",
+  };
+  return labels[type] ?? type;
+}
+
 function ArtifactPanel({
   artifacts,
   onOpen,
@@ -982,7 +1179,7 @@ function ArtifactPanel({
   return (
     <aside className="agent-artifacts">
       <div className="agent-artifacts-header">
-        <h3>产物</h3>
+        <h3>结果</h3>
         <span>{artifacts.length}</span>
       </div>
       <div className="agent-artifact-list">
@@ -993,7 +1190,7 @@ function ArtifactPanel({
               <div className="agent-artifact-title-row">
                 <strong title={artifact.title}>{artifact.title}</strong>
                 <span className="mini-tag tag-recognized">
-                  {artifact.artifact_type}
+                  {artifactTypeLabel(artifact.artifact_type)}
                 </span>
               </div>
               <div className="agent-artifact-meta">
@@ -1008,37 +1205,24 @@ function ArtifactPanel({
                 ) : null}
               </div>
               {artifact.file_path ? (
-                <div className="agent-artifact-path" title={artifact.file_path}>
-                  {artifact.file_path}
-                </div>
-              ) : null}
-              {artifact.file_path ? (
                 <div className="agent-artifact-actions">
-                  <button type="button" onClick={() => onOpen(artifact.id)}>
-                    打开
+                  <button type="button" className="agent-artifact-icon-btn icon-btn-open" onClick={() => onOpen(artifact.id)} title="打开文件">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                   </button>
-                  <button type="button" onClick={() => onOpenFolder(artifact.id)}>
-                    目录
+                  <button type="button" className="agent-artifact-icon-btn icon-btn-folder" onClick={() => onOpenFolder(artifact.id)} title="所在目录">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                   </button>
-                  <button type="button" onClick={() => onCopy(artifact.file_path!)}>
-                    复制
+                  <button type="button" className="agent-artifact-icon-btn icon-btn-copy" onClick={() => onCopy(artifact.file_path!)} title="复制路径">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                   </button>
-                  <button
-                    type="button"
-                    className="agent-artifact-delete"
-                    onClick={() => onDelete(artifact.id)}
-                  >
-                    移除
+                  <button type="button" className="agent-artifact-icon-btn icon-btn-delete" onClick={() => onDelete(artifact.id)} title="删除">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                   </button>
                 </div>
               ) : (
                 <div className="agent-artifact-actions">
-                  <button
-                    type="button"
-                    className="agent-artifact-delete"
-                    onClick={() => onDelete(artifact.id)}
-                  >
-                    移除
+                  <button type="button" className="agent-artifact-icon-btn icon-btn-delete" onClick={() => onDelete(artifact.id)} title="删除">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                   </button>
                 </div>
               )}
@@ -1046,7 +1230,7 @@ function ArtifactPanel({
           );
         })}
         {artifacts.length === 0 ? (
-          <p className="muted agent-artifacts-empty">暂无导出产物</p>
+          <p className="muted agent-artifacts-empty">暂无导出结果</p>
         ) : null}
       </div>
     </aside>
@@ -1382,6 +1566,25 @@ function splitTableRow(line: string): string[] {
     .map((cell) => cell.trim());
 }
 
+function formatToolValue(value: unknown): string {
+  if (value === null || value === undefined) return "无";
+  if (typeof value === "number") return value.toLocaleString();
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (typeof value === "string") return value.length > 80 ? value.slice(0, 80) + "..." : value;
+  if (Array.isArray(value)) {
+    const items = value.slice(0, 3).map((v) => formatToolValue(v));
+    const suffix = value.length > 3 ? ` 等${value.length}项` : "";
+    return items.join("、") + suffix;
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value).slice(0, 3);
+    const parts = entries.map(([k, v]) => `${formatFieldName(k)}: ${formatToolValue(v)}`);
+    const suffix = Object.keys(value).length > 3 ? "..." : "";
+    return parts.join("，") + suffix;
+  }
+  return String(value);
+}
+
 function formatFieldName(key: string): string {
   const names: Record<string, string> = {
     total_count: "总数",
@@ -1406,6 +1609,34 @@ function formatFieldName(key: string): string {
     issue_date: "日期",
     category: "类别",
     status: "状态",
+    year: "年份",
+    month: "月份",
+    today: "今天",
+    current_month: "当前月份",
+    current_year: "当前年份",
+    current_month_name: "月份名称",
+    current_quarter: "当前季度",
+    quarter_start: "季度起始",
+    quarter_end: "季度结束",
+    first_day_of_month: "月初",
+    last_day_of_month: "月末",
+    search_query: "搜索词",
+    filters: "筛选条件",
+    columns: "列",
+    sample_rows: "样例行",
+    seller: "销售方",
+    buyer: "购买方",
+    invoice_type: "发票类型",
+    tax_amount: "税额",
+    amount_without_tax: "不含税金额",
+    amount_with_tax: "价税合计",
+    confidence: "置信度",
+    raw_file_id: "原始文件",
+    export: "导出",
+    artifact: "产物",
+    task: "任务",
+    title: "标题",
+    id: "ID",
   };
   return names[key] ?? key;
 }

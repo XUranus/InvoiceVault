@@ -25,6 +25,15 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "flagged", label: "已标记" },
 ];
 
+const DUPLICATE_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "全部重复状态" },
+  { value: "possible_duplicate", label: "可能重复" },
+  { value: "probable_duplicate", label: "高度疑似" },
+  { value: "exact_duplicate", label: "完全重复" },
+  { value: "not_duplicate", label: "已排除" },
+  { value: "unique", label: "唯一" },
+];
+
 export function InvoiceListControls({
   params,
   onFilterChange,
@@ -71,6 +80,19 @@ export function InvoiceListControls({
           }
         >
           {STATUS_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <select
+          className="control-input"
+          value={params.duplicate_status ?? ""}
+          onChange={(e) =>
+            onFilterChange({ duplicate_status: e.target.value || undefined })
+          }
+        >
+          {DUPLICATE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

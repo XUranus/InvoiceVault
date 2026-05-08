@@ -107,6 +107,10 @@ function rangeLabel(range: DateRange): string {
   }
 }
 
+function duplicatePairs(count: number): number {
+  return Math.ceil(count / 2);
+}
+
 function buildPageSummary(stats: DashboardStatsType, range: DateRange): string {
   const label = rangeLabel(range);
   const parts: string[] = [];
@@ -116,14 +120,14 @@ function buildPageSummary(stats: DashboardStatsType, range: DateRange): string {
     parts.push(`平均置信度 ${(stats.average_confidence * 100).toFixed(0)}%`);
   }
   if (stats.duplicate_count > 0) {
-    parts.push(`${stats.duplicate_count} 条重复风险`);
+    parts.push(`${duplicatePairs(stats.duplicate_count)} 对重复风险`);
   }
   return parts.join("，");
 }
 
 function buildInsight(stats: DashboardStatsType): string | null {
   const issues: string[] = [];
-  if (stats.duplicate_count > 0) issues.push(`${stats.duplicate_count} 条疑似重复记录`);
+  if (stats.duplicate_count > 0) issues.push(`${duplicatePairs(stats.duplicate_count)} 对疑似重复`);
   if (stats.pending_count > 0) issues.push(`${stats.pending_count} 张待复核`);
   if (issues.length > 0) {
     return `检测到 ${issues.join("、")}，建议优先核查`;
@@ -262,7 +266,7 @@ export function DashboardPage() {
                 已处理 <strong>{stats.total_invoices}</strong> 张发票，
                 累计 <strong>{formatAmount(stats.total_amount)}</strong>
                 {stats.duplicate_count > 0
-                  ? <>，含 <strong className="text-warn">{stats.duplicate_count}</strong> 条重复风险</>
+                  ? <>，含 <strong className="text-warn">{duplicatePairs(stats.duplicate_count)}</strong> 对重复风险</>
                   : null}
               </p>
               <div className="dashboard-hero-metrics">
@@ -279,8 +283,8 @@ export function DashboardPage() {
                   <span className="dashboard-hero-label">置信度</span>
                 </div>
                 <div className="dashboard-hero-metric">
-                  <span className={`dashboard-hero-value ${stats.duplicate_count > 0 ? "text-warn" : ""}`}>{stats.duplicate_count}</span>
-                  <span className="dashboard-hero-label">重复风险</span>
+                  <span className={`dashboard-hero-value ${stats.duplicate_count > 0 ? "text-warn" : ""}`}>{duplicatePairs(stats.duplicate_count)}</span>
+                  <span className="dashboard-hero-label">重复对数</span>
                 </div>
               </div>
               {buildInsight(stats) ? (
@@ -330,7 +334,7 @@ export function DashboardPage() {
               <div className="dashboard-action-header">
                 <h3 className="dashboard-section-title">待处理事项</h3>
                 <span className="dashboard-action-count">
-                  {stats.pending_count + failedJobs.length + stats.duplicate_count} 项
+                  {stats.pending_count + failedJobs.length + duplicatePairs(stats.duplicate_count)} 项
                 </span>
               </div>
               <div className="dashboard-action-rows">
@@ -360,7 +364,7 @@ export function DashboardPage() {
                   <div className="dashboard-action-row">
                     <span className="dashboard-action-indicator indicator-warning" />
                     <div className="dashboard-action-body">
-                      <span className="dashboard-action-label">{stats.duplicate_count} 对发票疑似重复</span>
+                      <span className="dashboard-action-label">{duplicatePairs(stats.duplicate_count)} 对发票疑似重复</span>
                       <span className="dashboard-action-hint">需要确认是否保留或合并</span>
                     </div>
                     <button className="dashboard-action-btn" onClick={() => navigateToInvoice(0)}>核查重复发票</button>
