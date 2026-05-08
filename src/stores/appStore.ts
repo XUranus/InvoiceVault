@@ -12,6 +12,7 @@ type AppStore = {
   importBadgeCount: number;
   invoiceBadgeCount: number;
   sidebarCollapsed: boolean;
+  showOnboarding: boolean;
 
   setHealth: (h: AppHealth) => void;
   setError: (err: string) => void;
@@ -23,6 +24,8 @@ type AppStore = {
   setImportBadgeCount: (n: number) => void;
   setInvoiceBadgeCount: (n: number) => void;
   toggleSidebar: () => void;
+  setShowOnboarding: (v: boolean) => void;
+  dismissOnboarding: () => void;
   initialize: () => Promise<void>;
   refreshInvoices: () => Promise<void>;
 };
@@ -39,6 +42,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   invoiceBadgeCount: 0,
   sidebarCollapsed:
     localStorage.getItem("sidebarCollapsed") === "true",
+  showOnboarding: false,
 
   setHealth: (health) => set({ health }),
   setError: (error) => set({ error }),
@@ -58,6 +62,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const next = !get().sidebarCollapsed;
     localStorage.setItem("sidebarCollapsed", String(next));
     set({ sidebarCollapsed: next });
+  },
+  setShowOnboarding: (showOnboarding) => set({ showOnboarding }),
+  dismissOnboarding: () => {
+    localStorage.setItem("onboarding_dismissed", "1");
+    set({ showOnboarding: false });
   },
 
   initialize: async () => {

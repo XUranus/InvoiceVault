@@ -38,7 +38,13 @@ export function useAppInitializer() {
   // Initialize data on mount
   useEffect(() => {
     initialize();
-    loadConfigFromBackend();
+    loadConfigFromBackend().then(() => {
+      const { ocr } = useLlmStore.getState();
+      const dismissed = localStorage.getItem("onboarding_dismissed") === "1";
+      if (!ocr.config.apiKey.trim() && !dismissed) {
+        useAppStore.getState().setShowOnboarding(true);
+      }
+    });
   }, [initialize, loadConfigFromBackend]);
 
   // Global drag-drop handler

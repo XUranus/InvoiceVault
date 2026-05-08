@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { OnboardingDialog } from "./OnboardingDialog";
 import { useAppInitializer } from "../hooks/useAppInitializer";
 import { useAppStore } from "../stores/appStore";
 
@@ -9,6 +10,7 @@ export function Layout() {
   useAppInitializer();
   const location = useLocation();
   const setError = useAppStore((s) => s.setError);
+  const showOnboarding = useAppStore((s) => s.showOnboarding);
 
   useEffect(() => {
     useAppStore.getState().clearError();
@@ -22,6 +24,7 @@ export function Layout() {
           <Outlet />
         </ErrorBoundary>
       </main>
+      {showOnboarding ? <OnboardingDialog /> : null}
     </div>
   );
 }
