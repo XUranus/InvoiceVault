@@ -308,6 +308,7 @@ function createOptimisticJob(path: string, index: number): ImportJob {
     storage_path: null,
     mime_type: inferMimeType(name),
     error_message: null,
+    source_type: "manual",
     created_at: now,
     updated_at: now,
   };
@@ -334,6 +335,7 @@ function ImportHistoryTable({
         <thead>
           <tr>
             <th>文件</th>
+            <th>来源</th>
             <th>时间</th>
             <th>类型</th>
             <th>状态</th>
@@ -387,6 +389,9 @@ function ImportHistoryRow({
       >
         <td className="import-history-file-cell">
           <strong>{jobDisplayName(job)}</strong>
+        </td>
+        <td>
+          <span className="mini-tag tag-tone-neutral">{sourceTypeLabel(job.source_type)}</span>
         </td>
         <td className="import-history-time-cell">
           {formatImportTime(job.updated_at || job.created_at)}
@@ -528,6 +533,8 @@ function JobDetail({ job }: { job: ImportJob }) {
 
   return (
     <dl className="job-detail-list">
+      <dt>来源</dt>
+      <dd>{sourceTypeLabel(job.source_type)}</dd>
       <dt>源路径</dt>
       <dd>
         <CopyableText
@@ -612,6 +619,15 @@ function CopyableText({
 
 function jobDisplayName(job: ImportJob): string {
   return job.original_name ?? job.source_path.split(/[\\/]/).pop() ?? job.source_path;
+}
+
+function sourceTypeLabel(sourceType: string): string {
+  const labels: Record<string, string> = {
+    manual: "手动上传",
+    watcher: "文件夹监听",
+    email: "邮件导入",
+  };
+  return labels[sourceType] ?? sourceType;
 }
 
 function isActiveImportJob(job: ImportJob): boolean {

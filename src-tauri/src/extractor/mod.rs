@@ -316,6 +316,7 @@ pub struct InvoiceDetail {
     pub extraction_model: Option<String>,
     pub extraction_provider: Option<String>,
     pub badges: Vec<InvoiceBadgeSelection>,
+    pub source_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -423,6 +424,7 @@ pub fn get_invoice_detail(
                 extraction_model: None,
                 extraction_provider: None,
                 badges: Vec::new(),
+                source_type: None,
             })
         },
     )?;
@@ -493,6 +495,14 @@ pub fn get_invoice_detail(
 
     let badges = list_invoice_badges(conn, invoice_id)?;
 
+    let source_type: Option<String> = conn
+        .query_row(
+            "SELECT ij.source_type FROM import_jobs ij WHERE ij.raw_file_id = ?1 ORDER BY ij.id DESC LIMIT 1",
+            [invoice.raw_file_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+
     Ok(InvoiceDetail {
         items,
         raw_file_name: raw_name,
@@ -502,6 +512,7 @@ pub fn get_invoice_detail(
         extraction_model: model,
         extraction_provider: provider,
         badges,
+        source_type,
         ..invoice
     })
 }

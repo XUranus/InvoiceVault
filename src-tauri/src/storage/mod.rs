@@ -58,6 +58,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         18,
         include_str!("../../migrations/0018_agent_message_tool_call_id.sql"),
     ),
+    (
+        19,
+        include_str!("../../migrations/0019_import_source_type.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -114,6 +118,6 @@ mod tests {
             )
             .expect("read migration version");
 
-        assert_eq!(version, 17);
+        assert_eq!(version, 19);
     }
 }

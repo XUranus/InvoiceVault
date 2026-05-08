@@ -302,6 +302,7 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               <Field label="价税合计" value={detail.total_amount} />
               <Field label="类别" value={detail.category} />
               <Field label="备注" value={detail.remarks} />
+              <Field label="来源" value={detail.source_type ? sourceTypeLabel(detail.source_type) : null} />
               {parseExtraFields(detail.extra_fields).map(([label, value]) => (
                 <Field key={label} label={label} value={value} />
               ))}
@@ -399,6 +400,15 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
       ) : null}
     </div>
   );
+}
+
+function sourceTypeLabel(sourceType: string): string {
+  const labels: Record<string, string> = {
+    manual: "手动上传",
+    watcher: "文件夹监听",
+    email: "邮件导入",
+  };
+  return labels[sourceType] ?? sourceType;
 }
 
 function parseExtraFields(value: string | null): Array<[string, string]> {

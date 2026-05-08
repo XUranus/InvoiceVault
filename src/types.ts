@@ -16,6 +16,7 @@ export type ImportJob = {
   storage_path: string | null;
   mime_type: string | null;
   error_message: string | null;
+  source_type: string;
   created_at: string;
   updated_at: string;
 };
@@ -153,6 +154,7 @@ export type InvoiceDetail = {
   extraction_model: string | null;
   extraction_provider: string | null;
   badges: InvoiceBadgeSelection[];
+  source_type: string | null;
 };
 
 export type FieldError = {

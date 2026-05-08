@@ -652,7 +652,7 @@ impl EmailManager {
             let count = path_strs.len();
             let (jobs, raw_file_ids) = match self.db.lock() {
                 Ok(mut conn) => {
-                    let jobs = import_files(&mut conn, &self.raw_dir, path_strs).unwrap_or_default();
+                    let jobs = import_files(&mut conn, &self.raw_dir, path_strs, "email").unwrap_or_default();
                     let ids: Vec<i64> = jobs
                         .iter()
                         .filter(|j| j.status == "imported" && j.raw_file_id.is_some())
@@ -841,7 +841,7 @@ impl EmailManager {
 
             let (jobs, raw_file_ids) = match self.db.lock() {
                 Ok(mut conn) => {
-                    let jobs = import_files(&mut conn, &self.raw_dir, path_strs).unwrap_or_default();
+                    let jobs = import_files(&mut conn, &self.raw_dir, path_strs, "email").unwrap_or_default();
                     let ids: Vec<i64> = jobs
                         .iter()
                         .filter(|j| j.status == "imported" && j.raw_file_id.is_some())

@@ -654,7 +654,7 @@ fn process_pending(
     info!("Watcher import: {count} files from watch_dir {watch_id}");
     let (imported, raw_file_ids) = match db.lock() {
         Ok(mut conn) => {
-            let jobs = import_files(&mut conn, raw_dir, path_strs).unwrap_or_default();
+            let jobs = import_files(&mut conn, raw_dir, path_strs, "watcher").unwrap_or_default();
             let ids: Vec<i64> = jobs
                 .iter()
                 .filter(|j| j.status == "imported" && j.raw_file_id.is_some())

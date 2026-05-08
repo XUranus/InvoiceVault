@@ -364,7 +364,7 @@ impl AppState {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let source_paths: Vec<String> = paths.iter().map(|p| p.clone()).collect();
         info!("Importing {} files", paths.len());
-        let jobs = import_files(&mut db, &self.paths.raw_dir, paths)?;
+        let jobs = import_files(&mut db, &self.paths.raw_dir, paths, "manual")?;
         let total = jobs.len();
         let success = jobs.iter().filter(|j| j.status == "imported").count();
         let dups = jobs.iter().filter(|j| j.status == "duplicate").count();

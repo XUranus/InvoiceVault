@@ -27,6 +27,7 @@ pub struct ImportJobSummary {
     pub storage_path: Option<String>,
     pub mime_type: Option<String>,
     pub error_message: Option<String>,
+    pub source_type: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -56,6 +57,7 @@ pub fn import_files(
     conn: &mut Connection,
     raw_dir: &Path,
     paths: Vec<String>,
+    source_type: &str,
 ) -> Result<Vec<ImportJobSummary>, ImportError> {
     if paths.is_empty() {
         return Err(ImportError::EmptyRequest);
@@ -63,7 +65,7 @@ pub fn import_files(
 
     let mut summaries = Vec::with_capacity(paths.len());
     for source_path in paths {
-        summaries.push(import_one(conn, raw_dir, PathBuf::from(source_path))?);
+        summaries.push(import_one(conn, raw_dir, PathBuf::from(source_path), source_type)?);
     }
     Ok(summaries)
 }
@@ -99,6 +101,7 @@ pub fn list_import_jobs(
             rf.storage_path,
             rf.mime_type,
             ij.error_message,
+            ij.source_type,
             ij.created_at,
             ij.updated_at
         FROM import_jobs ij
@@ -131,9 +134,10 @@ fn import_one(
     conn: &mut Connection,
     raw_dir: &Path,
     source_path: PathBuf,
+    source_type: &str,
 ) -> Result<ImportJobSummary, ImportError> {
     let source_path_text = source_path.to_string_lossy().into_owned();
-    let job_id = insert_import_job(conn, None, &source_path_text, "importing", None)?;
+    let job_id = insert_import_job(conn, None, &source_path_text, "importing", None, source_type)?;
 
     match inspect_file(&source_path) {
         Ok(raw_file) => {
@@ -218,6 +222,7 @@ fn insert_import_job(
     source_path: &str,
     status: &str,
     error_message: Option<&str>,
+    source_type: &str,
 ) -> Result<i64, ImportError> {
     let now = current_timestamp();
     conn.execute(
@@ -226,10 +231,11 @@ fn insert_import_job(
             source_path,
             status,
             error_message,
+            source_type,
             created_at,
             updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-        params![raw_file_id, source_path, status, error_message, now],
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+        params![raw_file_id, source_path, status, error_message, source_type, now],
     )?;
 
     Ok(conn.last_insert_rowid())
@@ -321,6 +327,7 @@ fn load_import_job(conn: &Connection, job_id: i64) -> Result<ImportJobSummary, I
             rf.storage_path,
             rf.mime_type,
             ij.error_message,
+            ij.source_type,
             ij.created_at,
             ij.updated_at
         FROM import_jobs ij
@@ -345,8 +352,9 @@ fn row_to_import_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportJobSumma
         storage_path: row.get(8)?,
         mime_type: row.get(9)?,
         error_message: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        source_type: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 
@@ -376,12 +384,14 @@ mod tests {
             &mut conn,
             &temp_dir.path().join("raw"),
             vec![source_path.to_string_lossy().into_owned()],
+            "manual",
         )
         .expect("first import");
         let second = import_files(
             &mut conn,
             &temp_dir.path().join("raw"),
             vec![source_path.to_string_lossy().into_owned()],
+            "manual",
         )
         .expect("second import");
 
@@ -412,7 +422,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("open sqlite");
         run_migrations(&mut conn).expect("migrate");
 
-        let jobs = import_files(&mut conn, &temp_dir.path().join("raw"), sample_paths)
+        let jobs = import_files(&mut conn, &temp_dir.path().join("raw"), sample_paths, "manual")
             .expect("import sample receipts");
 
         assert_eq!(jobs.len(), 2);
@@ -425,7 +435,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("open sqlite");
         run_migrations(&mut conn).expect("migrate");
 
-        let importing_id = insert_import_job(&conn, None, "/tmp/a.pdf", "importing", None)
+        let importing_id = insert_import_job(&conn, None, "/tmp/a.pdf", "importing", None, "manual")
             .expect("insert importing job");
 
         let raw_file_id = {
@@ -439,7 +449,7 @@ mod tests {
             conn.last_insert_rowid()
         };
         let recognizing_id =
-            insert_import_job(&conn, Some(raw_file_id), "/tmp/b.pdf", "recognizing", None)
+            insert_import_job(&conn, Some(raw_file_id), "/tmp/b.pdf", "recognizing", None, "manual")
                 .expect("insert recognizing job");
         conn.execute(
             "INSERT INTO invoices (raw_file_id, currency, status, duplicate_status)
