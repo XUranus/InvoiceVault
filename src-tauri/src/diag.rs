@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tracing::info;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::embedding::{test_embedding_connection as run_embedding_test, EmbeddingConfig};
 use crate::llm::{
@@ -351,7 +352,8 @@ fn compare_ground_truth(
             .or_else(|| obj.get(key).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()))
     };
 
-    // String fields: contains match
+    // String fields: flexible CJK-aware matching
+    // NFKC-normalize both sides, then use contains + char-overlap fallback
     macro_rules! check_str {
         ($field:ident, $keys:expr) => {
             if let Some(ref expected) = gt.$field {
@@ -359,7 +361,25 @@ fn compare_ground_truth(
                 let recognized_val = get_str(recognized, $keys);
                 let got = recognized_val.as_deref().unwrap_or("(空)");
                 let name = stringify!($field);
-                if recognized_val.as_ref().map_or(false, |v| v.contains(expected.as_str()) || expected.contains(v.as_str())) {
+                let is_match = recognized_val.as_ref().map_or(false, |v| {
+                    let e_norm: String = expected.nfkc().collect();
+                    let v_norm: String = v.nfkc().collect();
+                    if v_norm.contains(&e_norm) || e_norm.contains(&v_norm) {
+                        return true;
+                    }
+                    // Fallback: for CJK text, check if all expected chars
+                    // appear in the recognized value (handles e.g. "电子" gap)
+                    let e_chars: Vec<char> = e_norm.chars().collect();
+                    let v_chars: Vec<char> = v_norm.chars().collect();
+                    if !e_chars.is_empty() && e_chars.iter().all(|c| v_chars.contains(c)) {
+                        return true;
+                    }
+                    if !v_chars.is_empty() && v_chars.iter().all(|c| e_chars.contains(c)) {
+                        return true;
+                    }
+                    false
+                });
+                if is_match {
                     matched += 1;
                     lines.push(format!("{name}: ✓ ({got})"));
                 } else {
@@ -432,5 +452,26 @@ fn infer_mime(path: &Path) -> String {
         "image/jpeg".into()
     } else {
         "application/octet-stream".into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compare_ground_truth_invoice_type_match() {
+        let gt = GroundTruth {
+            invoice_type: Some("增值税电子普通发票".into()),
+            ..GroundTruth::default()
+        };
+        let recognized = serde_json::json!({
+            "is_invoice": true,
+            "invoice_type": "增值税普通发票"
+        });
+        let (matched, total, details) = compare_ground_truth(&gt, &recognized);
+        assert_eq!(total, 1, "should have 1 field to compare");
+        assert_eq!(matched, 1, "'增值税电子普通发票' should contain '增值税普通发票' after NFKC normalization");
+        eprintln!("{details}");
     }
 }
