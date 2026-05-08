@@ -2,66 +2,6 @@ use rusqlite::Connection;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../migrations/0001_initial.sql")),
-    (
-        2,
-        include_str!("../../migrations/0002_raw_current_name.sql"),
-    ),
-    (
-        3,
-        include_str!("../../migrations/0003_dedupe_candidates.sql"),
-    ),
-    (4, include_str!("../../migrations/0004_watch_dirs.sql")),
-    (5, include_str!("../../migrations/0005_chroma_support.sql")),
-    (6, include_str!("../../migrations/0006_agent_support.sql")),
-    (
-        7,
-        include_str!("../../migrations/0007_invoice_embeddings.sql"),
-    ),
-    (
-        8,
-        include_str!("../../migrations/0008_events_notifications.sql"),
-    ),
-    (9, include_str!("../../migrations/0009_invoice_badges.sql")),
-    (
-        10,
-        include_str!("../../migrations/0010_agent_attachments.sql"),
-    ),
-    (
-        11,
-        include_str!("../../migrations/0011_agent_tasks_artifacts.sql"),
-    ),
-    (
-        12,
-        include_str!("../../migrations/0012_invoice_extra_fields.sql"),
-    ),
-    (
-        13,
-        include_str!("../../migrations/0013_invoice_viewed_at.sql"),
-    ),
-    (
-        14,
-        include_str!("../../migrations/0014_usage_log.sql"),
-    ),
-    (
-        15,
-        include_str!("../../migrations/0015_email_sources.sql"),
-    ),
-    (
-        16,
-        include_str!("../../migrations/0016_pop3_support.sql"),
-    ),
-    (
-        17,
-        include_str!("../../migrations/0017_events_add_is_read.sql"),
-    ),
-    (
-        18,
-        include_str!("../../migrations/0018_agent_message_tool_call_id.sql"),
-    ),
-    (
-        19,
-        include_str!("../../migrations/0019_import_source_type.sql"),
-    ),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -118,6 +58,6 @@ mod tests {
             )
             .expect("read migration version");
 
-        assert_eq!(version, 19);
+        assert_eq!(version, 1);
     }
 }
