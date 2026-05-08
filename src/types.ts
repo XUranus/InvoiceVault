@@ -588,3 +588,36 @@ export type PriceConfig = {
   embedding_input_price_per_1k: number;
   embedding_output_price_per_1k: number;
 };
+
+export type GroundTruth = {
+  invoice_type: string | null;
+  invoice_code: string | null;
+  invoice_number: string | null;
+  issue_date: string | null;
+  seller_name: string | null;
+  buyer_name: string | null;
+  total_amount: number | null;
+  amount_without_tax: number | null;
+  tax_amount: number | null;
+  items_count: number | null;
+};
+
+export type DiagnosticConfig = {
+  test_image_path: string;
+  ground_truth: GroundTruth;
+  enabled: boolean;
+};
+
+export type DiagnosticStep = {
+  name: string;
+  passed: boolean;
+  duration_ms: number;
+  message: string;
+  details: string | null;
+};
+
+export type DiagnosticResult = {
+  steps: DiagnosticStep[];
+  score: number | null;
+  all_passed: boolean;
+};

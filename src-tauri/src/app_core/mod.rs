@@ -360,6 +360,10 @@ impl AppState {
         })
     }
 
+    pub fn app_data_dir(&self) -> &Path {
+        &self.paths.app_data_dir
+    }
+
     pub fn import_files(&self, paths: Vec<String>, app: &AppHandle) -> Result<Vec<ImportJobSummary>, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let source_paths: Vec<String> = paths.iter().map(|p| p.clone()).collect();

@@ -129,3 +129,41 @@ POST {base_url}/chat/completions
 ```
 
 模型需要支持多模态图片输入，并能返回 JSON。后端会从模型响应中提取 JSON 对象，校验后写入 SQLite。Agent 对话通过受控工具执行查询、统计、导出和字段更新，写操作会经过 UI 确认。
+
+## 端到端诊断测试
+
+设置页面提供「端到端诊断」按钮，用于验证 LLM 全链路是否可用（文本生成 → 图片识别 → 结果对比 → Embedding）。
+
+诊断配置存储在 `{app_data_dir}/diagnostic_config.json`，首次运行自动创建默认配置。开发者需要手动编辑此文件来设置测试发票和 ground truth。
+
+配置文件格式：
+
+```json
+{
+  "test_image_path": "/absolute/path/to/test-invoice.png",
+  "ground_truth": {
+    "invoice_type": "增值税电子普通发票",
+    "invoice_code": "033001900211",
+    "invoice_number": "68087646",
+    "issue_date": "2019-12-24",
+    "seller_name": "杭州热联电子商务有限公司",
+    "buyer_name": "杭州热联集团中邦实业有限公司",
+    "total_amount": 2740.00,
+    "amount_without_tax": 2358.92,
+    "tax_amount": 381.08,
+    "items_count": 7
+  },
+  "enabled": true
+}
+```
+
+字段说明：
+
+- `test_image_path`：测试发票图片的绝对路径，支持 PNG/JPEG。仓库 `sample/` 目录下提供了一张测试发票 `fake-invoice-1.png`。
+- `ground_truth`：预期识别结果。所有字段均可选，填写的字段才会参与对比评分。
+  - 字符串字段（`invoice_type`、`seller_name` 等）：包含匹配。
+  - 金额字段（`total_amount` 等）：允许 ±5% 误差。
+  - `items_count`：精确匹配。
+- `enabled`：是否启用诊断。
+
+修改 ground truth 时，先用「端到端诊断」运行一次，查看识别原始结果，再将正确值填入 `diagnostic_config.json`。评分 = 匹配字段数 / 填写的总字段数 × 100。

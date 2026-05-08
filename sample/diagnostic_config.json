@@ -1,0 +1,16 @@
+{
+  "test_image_path": "sample/fake-invoice-1.png",
+  "ground_truth": {
+    "invoice_type": "增值税电子普通发票",
+    "invoice_code": null,
+    "invoice_number": null,
+    "issue_date": null,
+    "seller_name": null,
+    "buyer_name": null,
+    "total_amount": null,
+    "amount_without_tax": null,
+    "tax_amount": null,
+    "items_count": null
+  },
+  "enabled": true
+}

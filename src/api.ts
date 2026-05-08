@@ -45,6 +45,8 @@ import type {
   ExternalDependencyStatus,
   LlmUsageStats,
   PriceConfig,
+  DiagnosticConfig,
+  DiagnosticResult,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -535,4 +537,18 @@ export async function getPriceConfig(): Promise<PriceConfig> {
 
 export async function setPriceConfig(config: PriceConfig): Promise<void> {
   return invoke<void>("set_price_config", { config });
+}
+
+export async function getDiagnosticConfig(): Promise<DiagnosticConfig> {
+  return invoke<DiagnosticConfig>("get_diagnostic_config");
+}
+
+export async function setDiagnosticConfig(
+  config: DiagnosticConfig,
+): Promise<void> {
+  return invoke<void>("set_diagnostic_config", { config });
+}
+
+export async function runLlmDiagnostic(): Promise<DiagnosticResult> {
+  return invoke<DiagnosticResult>("run_llm_diagnostic");
 }

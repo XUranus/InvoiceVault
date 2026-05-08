@@ -14,6 +14,7 @@ import {
   setLlmAuditEnabled as apiSetLlmAuditEnabled,
 } from "../../api";
 import { useLlmStore } from "../../stores/llmStore";
+import { LlmDiagnosticDialog } from "../LlmDiagnosticDialog";
 
 export function AiProviderPage() {
   // --- OCR Panel ---
@@ -56,6 +57,9 @@ export function AiProviderPage() {
   // --- Audit ---
   const auditEnabled = useLlmStore((s) => s.auditEnabled);
   const setAuditEnabled = useLlmStore((s) => s.setAuditEnabled);
+
+  // --- Diagnostic ---
+  const [showDiagnostic, setShowDiagnostic] = React.useState(false);
 
   // Load embedding config on mount
   React.useEffect(() => {
@@ -248,6 +252,9 @@ export function AiProviderPage() {
             disabled={savingOcr || !ocr.dirty || !ocr.testPassed}
           >
             {savingOcr ? "保存中..." : "保存设置"}
+          </button>
+          <button className="btn-small" onClick={() => setShowDiagnostic(true)}>
+            端到端诊断
           </button>
           {ocrSaveMsg ? <span className="badge-config-message">{ocrSaveMsg}</span> : null}
         </div>
@@ -445,6 +452,11 @@ export function AiProviderPage() {
           </span>
         </label>
       </div>
+
+      <LlmDiagnosticDialog
+        open={showDiagnostic}
+        onClose={() => setShowDiagnostic(false)}
+      />
     </>
   );
 }

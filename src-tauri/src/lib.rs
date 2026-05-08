@@ -2,6 +2,7 @@ mod agent;
 mod app_core;
 mod chroma;
 mod dedupe;
+mod diag;
 mod document;
 mod email_manager;
 mod embedding;
@@ -1090,6 +1091,56 @@ fn set_price_config(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_diagnostic_config(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<diag::DiagnosticConfig, String> {
+    let app_data_dir = state.app_data_dir();
+    let resource_dir = app.path().resource_dir().ok();
+    Ok(diag::load_config(app_data_dir, resource_dir.as_deref()))
+}
+
+#[tauri::command]
+fn set_diagnostic_config(
+    state: State<'_, AppState>,
+    config: diag::DiagnosticConfig,
+) -> Result<(), String> {
+    let app_data_dir = state.app_data_dir();
+    diag::save_config(app_data_dir, &config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn run_llm_diagnostic(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<diag::DiagnosticResult, String> {
+    let app_data_dir = state.app_data_dir();
+    let resource_dir = app.path().resource_dir().ok();
+    let diag_config = diag::load_config(app_data_dir, resource_dir.as_deref());
+
+    let llm_config = state
+        .get_llm_config()
+        .ok_or("LLM 未配置，请先在设置中填写 API Key。")?;
+
+    let embedding_config = state.get_embedding_config();
+    let emb = if embedding_config.enabled && !embedding_config.base_url.is_empty() {
+        Some(embedding_config)
+    } else {
+        None
+    };
+
+    let audit_config = state.llm_audit_config();
+
+    Ok(diag::run_diagnostic(
+        &diag_config,
+        &llm_config,
+        emb.as_ref(),
+        audit_config.as_ref(),
+    )
+    .await)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1244,7 +1295,10 @@ pub fn run() {
             get_llm_usage,
             get_price_config,
             set_price_config,
-            check_external_dependencies
+            check_external_dependencies,
+            get_diagnostic_config,
+            set_diagnostic_config,
+            run_llm_diagnostic
         ])
         .run(tauri::generate_context!())
         .expect("failed to run InvoiceVault");
