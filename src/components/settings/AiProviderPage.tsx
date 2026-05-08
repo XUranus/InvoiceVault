@@ -253,9 +253,6 @@ export function AiProviderPage() {
           >
             {savingOcr ? "保存中..." : "保存设置"}
           </button>
-          <button className="btn-small" onClick={() => setShowDiagnostic(true)}>
-            端到端诊断
-          </button>
           {ocrSaveMsg ? <span className="badge-config-message">{ocrSaveMsg}</span> : null}
         </div>
 
@@ -451,6 +448,17 @@ export function AiProviderPage() {
             </small>
           </span>
         </label>
+      </div>
+
+      {/* End-to-End Diagnostic */}
+      <div className="section">
+        <h3>端到端诊断</h3>
+        <p className="section-desc">
+          综合测试 OCR 多模态识别、Agent 文本生成和 Embedding 的完整链路，验证实际可用性。
+        </p>
+        <button className="btn-primary" onClick={() => setShowDiagnostic(true)}>
+          运行诊断测试
+        </button>
       </div>
 
       <LlmDiagnosticDialog

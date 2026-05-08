@@ -83,13 +83,19 @@ pub fn load_config(app_data_dir: &Path, resource_dir: Option<&Path>) -> Diagnost
     }
     // First run: try to copy bundled diagnostic_config.json from resource_dir
     if let Some(res_dir) = resource_dir {
-        let bundled_config = res_dir.join("sample").join("diagnostic_config.json");
+        // In dev mode resource_dir is target/debug/ but resources are in target/debug/_up_/
+        let base_dir = if res_dir.join("_up_").is_dir() {
+            res_dir.join("_up_")
+        } else {
+            res_dir.to_path_buf()
+        };
+        let bundled_config = base_dir.join("sample").join("diagnostic_config.json");
         if bundled_config.exists() {
             if let Ok(json) = std::fs::read_to_string(&bundled_config) {
                 if let Ok(mut config) = serde_json::from_str::<DiagnosticConfig>(&json) {
                     // Resolve test_image_path relative to resource_dir
                     if !config.test_image_path.is_empty() && !Path::new(&config.test_image_path).is_absolute() {
-                        let resolved = res_dir.join(&config.test_image_path);
+                        let resolved = base_dir.join(&config.test_image_path);
                         if resolved.exists() {
                             config.test_image_path = resolved.to_string_lossy().into_owned();
                         }

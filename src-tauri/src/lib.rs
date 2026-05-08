@@ -1171,6 +1171,13 @@ pub fn run() {
             app.manage(state);
             setup_tray(app.handle())?;
 
+            // Ensure diagnostic config is created from bundled resource on first run
+            {
+                let app_data_dir = app.path().app_data_dir().expect("app data dir");
+                let resource_dir = app.path().resource_dir().ok();
+                diag::load_config(&app_data_dir, resource_dir.as_deref());
+            }
+
             // Restore and persist window size
             let window = app
                 .get_webview_window(MAIN_WINDOW_LABEL)
