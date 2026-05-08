@@ -307,7 +307,7 @@ pub async fn recognize_invoice_image(
             ],
         }],
         temperature: 0.0,
-        max_tokens: 1800,
+        max_tokens: 4096,
     };
     let endpoint = format!("{base_url}/chat/completions");
     let request_json = serde_json::to_value(&request)?;
@@ -484,9 +484,10 @@ pub fn body_to_value(body: &str) -> Value {
 fn invoice_recognition_prompt() -> &'static str {
     r#"你是发票识别引擎。请只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。
 
-如果图片不是发票，输出 {"is_invoice": false, "confidence": 0, "needs_review": true, "warnings": ["not an invoice"]}。
+如果图片完全不是发票或票据（如风景照、人物照等），输出 {"is_invoice": false, "confidence": 0, "needs_review": true, "warnings": ["not an invoice"]}。
+注意：即使图片带有"测试""样例""模拟""fake"等水印或标注，只要票据格式正确、字段可读，就应视为有效发票进行识别，不要因为水印而判定为非发票。
 
-如果图片是发票或可报销票据，按下面字段输出。无法识别的字段用 null，金额用数字，日期必须使用 YYYY-MM-DD。
+如果图片是发票、票据或测试票据，按下面字段输出。无法识别的字段用 null，金额用数字，日期必须使用 YYYY-MM-DD。
 支持并尽量准确区分这些类型：
 - 增值税电子普通发票、增值税电子专用发票、全电发票、增值税普通发票、增值税专用发票
 - 通行费发票、出租车发票、火车票/铁路电子客票、机票行程单
