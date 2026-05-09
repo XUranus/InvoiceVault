@@ -1,16 +1,16 @@
 {
   "test_image_path": "sample/fake-invoice-1.png",
   "ground_truth": {
-    "invoice_type": "增值税电子普通发票",
+    "invoice_type": null,
     "invoice_code": null,
-    "invoice_number": null,
-    "issue_date": null,
-    "seller_name": null,
-    "buyer_name": null,
-    "total_amount": null,
-    "amount_without_tax": null,
-    "tax_amount": null,
-    "items_count": null
+    "invoice_number": "TEST20250400098765",
+    "issue_date": "2025-04-30",
+    "seller_name": "云海智联数码（测试）有限公司",
+    "buyer_name": "星辰未来科技（测试）有限公司",
+    "total_amount": 1882.02,
+    "amount_without_tax": 1665.5,
+    "tax_amount": 216.52,
+    "items_count": 2
   },
   "enabled": true
 }

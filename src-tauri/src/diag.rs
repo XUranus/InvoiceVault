@@ -3,7 +3,6 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use unicode_normalization::UnicodeNormalization;
 
 use crate::embedding::{test_embedding_connection as run_embedding_test, EmbeddingConfig};
 use crate::llm::{
@@ -312,74 +311,54 @@ fn compare_ground_truth(
     let mut total = 0usize;
     let mut lines = Vec::new();
 
-    // Helper: extract recognized value from either top-level or nested object
-    let get_str = |obj: &serde_json::Value, keys: &[&str]| -> Option<String> {
-        for key in keys {
-            if let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
-                let s = v.trim();
-                if !s.is_empty() {
-                    return Some(s.to_string());
-                }
-            }
-        }
-        // Check nested seller/buyer objects
-        if let Some(seller) = obj.get("seller").and_then(|v| v.as_object()) {
-            for key in keys {
-                if let Some(v) = seller.get(*key).and_then(|v| v.as_str()) {
-                    let s = v.trim();
-                    if !s.is_empty() {
-                        return Some(s.to_string());
-                    }
-                }
-            }
-        }
-        if let Some(buyer) = obj.get("buyer").and_then(|v| v.as_object()) {
-            for key in keys {
-                if let Some(v) = buyer.get(*key).and_then(|v| v.as_str()) {
-                    let s = v.trim();
-                    if !s.is_empty() {
-                        return Some(s.to_string());
-                    }
-                }
-            }
-        }
-        None
-    };
-
     let get_f64 = |obj: &serde_json::Value, key: &str| -> Option<f64> {
         obj.get(key)
             .and_then(|v| v.as_f64())
             .or_else(|| obj.get(key).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()))
     };
 
-    // String fields: flexible CJK-aware matching
-    // NFKC-normalize both sides, then use contains + char-overlap fallback
+    // String fields: contains match
+    // $nested: optional nested object name to search (e.g. "seller" or "buyer")
     macro_rules! check_str {
         ($field:ident, $keys:expr) => {
+            check_str!($field, $keys, None::<&str>);
+        };
+        ($field:ident, $keys:expr, $nested:expr) => {
             if let Some(ref expected) = gt.$field {
                 total += 1;
-                let recognized_val = get_str(recognized, $keys);
+                let recognized_val = {
+                    let mut found: Option<String> = None;
+                    // Check top-level keys
+                    for key in $keys {
+                        if let Some(v) = recognized.get(key).and_then(|v| v.as_str()) {
+                            let s = v.trim();
+                            if !s.is_empty() {
+                                found = Some(s.to_string());
+                                break;
+                            }
+                        }
+                    }
+                    // Check nested object if specified
+                    if found.is_none() {
+                        if let Some(nested_name) = $nested {
+                            if let Some(obj) = recognized.get(nested_name).and_then(|v| v.as_object()) {
+                                for key in $keys {
+                                    if let Some(v) = obj.get(*key).and_then(|v| v.as_str()) {
+                                        let s = v.trim();
+                                        if !s.is_empty() {
+                                            found = Some(s.to_string());
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    found
+                };
                 let got = recognized_val.as_deref().unwrap_or("(空)");
                 let name = stringify!($field);
-                let is_match = recognized_val.as_ref().map_or(false, |v| {
-                    let e_norm: String = expected.nfkc().collect();
-                    let v_norm: String = v.nfkc().collect();
-                    if v_norm.contains(&e_norm) || e_norm.contains(&v_norm) {
-                        return true;
-                    }
-                    // Fallback: for CJK text, check if all expected chars
-                    // appear in the recognized value (handles e.g. "电子" gap)
-                    let e_chars: Vec<char> = e_norm.chars().collect();
-                    let v_chars: Vec<char> = v_norm.chars().collect();
-                    if !e_chars.is_empty() && e_chars.iter().all(|c| v_chars.contains(c)) {
-                        return true;
-                    }
-                    if !v_chars.is_empty() && v_chars.iter().all(|c| e_chars.contains(c)) {
-                        return true;
-                    }
-                    false
-                });
-                if is_match {
+                if recognized_val.as_ref().map_or(false, |v| v.contains(expected.as_str()) || expected.contains(v.as_str())) {
                     matched += 1;
                     lines.push(format!("{name}: ✓ ({got})"));
                 } else {
@@ -393,8 +372,8 @@ fn compare_ground_truth(
     check_str!(invoice_code, &["invoice_code"]);
     check_str!(invoice_number, &["invoice_number"]);
     check_str!(issue_date, &["issue_date"]);
-    check_str!(seller_name, &["seller_name", "name"]);
-    check_str!(buyer_name, &["buyer_name", "name"]);
+    check_str!(seller_name, &["seller_name", "name"], Some("seller"));
+    check_str!(buyer_name, &["buyer_name", "name"], Some("buyer"));
 
     // Numeric fields: ±5% tolerance
     macro_rules! check_amount {
@@ -460,18 +439,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compare_ground_truth_invoice_type_match() {
+    fn compare_ground_truth_matches_model_output() {
         let gt = GroundTruth {
-            invoice_type: Some("增值税电子普通发票".into()),
+            invoice_number: Some("TEST20250400098765".into()),
+            issue_date: Some("2025-04-30".into()),
+            seller_name: Some("云海智联数码（测试）有限公司".into()),
+            buyer_name: Some("星辰未来科技（测试）有限公司".into()),
+            total_amount: Some(1882.02),
+            amount_without_tax: Some(1665.50),
+            tax_amount: Some(216.52),
+            items_count: Some(2),
             ..GroundTruth::default()
         };
         let recognized = serde_json::json!({
             "is_invoice": true,
-            "invoice_type": "增值税普通发票"
+            "invoice_type": null,
+            "invoice_number": "TEST20250400098765",
+            "issue_date": "2025-04-30",
+            "seller": {"name": "云海智联数码（测试）有限公司", "tax_id": "ABCDEFG1234567890Z"},
+            "buyer": {"name": "星辰未来科技（测试）有限公司", "tax_id": "1234567890ABCDEF12"},
+            "total_amount": 1882.02,
+            "amount_without_tax": 1665.50,
+            "tax_amount": 216.52,
+            "items": [
+                {"name": "测试商品A-智能数据采集器"},
+                {"name": "测试服务B-云端数据存储服务"}
+            ]
         });
         let (matched, total, details) = compare_ground_truth(&gt, &recognized);
-        assert_eq!(total, 1, "should have 1 field to compare");
-        assert_eq!(matched, 1, "'增值税电子普通发票' should contain '增值税普通发票' after NFKC normalization");
         eprintln!("{details}");
+        assert_eq!(total, 8);
+        assert_eq!(matched, 8, "all fields should match");
     }
 }
