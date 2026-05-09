@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "InvoiceVault",
-        "width": 960,
-        "height": 660,
-        "minWidth": 960,
-        "minHeight": 660,
+        "width": 1260,
+        "height": 860,
+        "minWidth": 1060,
+        "minHeight": 760,
         "transparent": false
       }
     ],
@@ -32,6 +32,6 @@
     "active": true,
     "targets": "all",
     "icon": ["../icons/app.png"],
-    "resources": ["../sample/*"]
+    "resources": ["../sample/*", "resources/*"]
   }
 }

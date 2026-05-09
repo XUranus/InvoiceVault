@@ -33,7 +33,7 @@ use crate::{
         EmailTestResult, UpdateEmailSourceRequest,
     },
     embedding::{
-        ensure_model, generate_embedding, test_embedding_connection as run_embedding_test,
+        generate_embedding, test_embedding_connection as run_embedding_test,
         EmbeddingError, EmbeddingTestResult, LocalEmbeddingEngine,
     },
     event::{self, EventError, EventListResult},
@@ -313,7 +313,6 @@ impl AppState {
             paths.thumbnails_dir.clone(),
             Arc::clone(&llm_config),
             Arc::clone(&llm_audit_enabled),
-            app.clone(),
         );
 
         let state = Self {
@@ -1033,14 +1032,6 @@ impl AppState {
             None => (false, None, None),
         };
         (enabled, model_loaded, model_dir, dimensions)
-    }
-
-    pub fn embedding_enabled(&self) -> bool {
-        *self.embedding_enabled.lock().expect("lock")
-    }
-
-    pub fn has_embedding_engine(&self) -> bool {
-        self.local_embedding.lock().expect("lock").is_some()
     }
 
     pub fn set_embedding_engine(&self, engine: LocalEmbeddingEngine) {

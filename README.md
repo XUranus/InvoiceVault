@@ -59,4 +59,7 @@ cd src-tauri && cargo test
 
 ## 截图
 
-![screenshot](./screenshots/Screenshot_20260503_232149.png)
+![screenshot](./screenshots/Screenshot_20260509_125846.png)
+
+![screenshot](./screenshots/Screenshot_20260509_125911.png)
+

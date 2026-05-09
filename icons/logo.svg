@@ -1,0 +1,107 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGradient" x1="256" y1="128" x2="768" y2="896" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0A63D8"/>
+      <stop offset="100%" stop-color="#0043B8"/>
+    </linearGradient>
+
+    <linearGradient id="tealGradient" x1="360" y1="260" x2="760" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#12B8B8"/>
+      <stop offset="100%" stop-color="#008C8C"/>
+    </linearGradient>
+
+    <linearGradient id="foldGradient" x1="580" y1="220" x2="720" y2="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EEF5FF"/>
+      <stop offset="100%" stop-color="#C9DCF7"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#003B8F" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <!-- Circle background -->
+  <circle cx="512" cy="512" r="415" fill="url(#bgGradient)"/>
+
+  <!-- Invoice document -->
+  <path
+    d="M326 236
+       H574
+       L722 384
+       V728
+       C722 754 701 775 675 775
+       H366
+       C340 775 319 754 319 728
+       V283
+       C319 257 300 236 326 236Z"
+    fill="#FFFFFF"
+    filter="url(#softShadow)"
+  />
+
+  <!-- Folded corner -->
+  <path
+    d="M574 236
+       V339
+       C574 364 594 384 619 384
+       H722
+       Z"
+    fill="url(#foldGradient)"
+  />
+
+  <!-- Dollar sign -->
+  <text
+    x="426"
+    y="420"
+    text-anchor="middle"
+    font-family="Arial, Helvetica, sans-serif"
+    font-size="150"
+    font-weight="700"
+    fill="url(#tealGradient)">
+    $
+  </text>
+
+  <!-- Invoice lines -->
+  <rect x="358" y="488" width="278" height="21" rx="10.5" fill="url(#tealGradient)"/>
+  <rect x="358" y="557" width="278" height="21" rx="10.5" fill="#C7DAF5"/>
+  <rect x="358" y="620" width="202" height="21" rx="10.5" fill="#C7DAF5"/>
+
+  <!-- Shield white outline -->
+  <path
+    d="M674 604
+       L766 570
+       C778 566 790 575 790 588
+       V656
+       C790 733 742 779 674 807
+       C606 779 558 733 558 656
+       V588
+       C558 575 570 566 582 570
+       Z"
+    fill="#FFFFFF"
+  />
+
+  <!-- Shield body -->
+  <path
+    d="M674 620
+       L748 592
+       C757 589 766 595 766 605
+       V657
+       C766 717 730 754 674 778
+       C618 754 582 717 582 657
+       V605
+       C582 595 591 589 600 592
+       Z"
+    fill="url(#tealGradient)"
+  />
+
+  <!-- Check mark -->
+  <path
+    d="M626 670
+       L661 705
+       L724 638"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

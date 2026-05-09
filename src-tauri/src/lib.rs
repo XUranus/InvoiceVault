@@ -1181,6 +1181,23 @@ pub fn run() {
             // Leak it so it lives for the lifetime of the app
             std::mem::forget(_guard);
 
+            // On macOS/Windows, ONNX Runtime is loaded dynamically at runtime.
+            // Set ORT_DYLIB_PATH to the bundled resource directory if available.
+            #[cfg(not(target_os = "linux"))]
+            {
+                if let Some(resource_dir) = app.path().resource_dir().ok() {
+                    let lib_name = if cfg!(target_os = "macos") {
+                        "libonnxruntime.dylib"
+                    } else {
+                        "onnxruntime.dll"
+                    };
+                    let lib_path = resource_dir.join(lib_name);
+                    if lib_path.exists() {
+                        std::env::set_var("ORT_DYLIB_PATH", &lib_path);
+                    }
+                }
+            }
+
             let state = AppState::initialize(app.handle())?;
             app.manage(state);
             setup_tray(app.handle())?;

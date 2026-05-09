@@ -1,11 +1,9 @@
 use std::{
-    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
 use chrono::{Duration as ChronoDuration, Utc};
-use imap::types::Fetch;
 use mailparse::{parse_mail, ParsedMail};
 use imap::ClientBuilder;
 use rusqlite::{params, Connection};
@@ -16,8 +14,6 @@ use crate::{
     event,
     importer::{import_files, ImportJobSummary},
     llm::LlmProviderConfig,
-    document::render_pdf_pages,
-    extractor::{save_invoice_extraction, SaveInvoiceExtractionRequest},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -32,8 +28,6 @@ pub enum EmailError {
     Tls(#[from] native_tls::Error),
     #[error("email source not found: {0}")]
     NotFound(i64),
-    #[error("email parse error: {0}")]
-    Parse(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,7 +211,6 @@ pub struct EmailManager {
     thumbnails_dir: PathBuf,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     llm_audit_enabled: Arc<Mutex<bool>>,
-    app: tauri::AppHandle,
 }
 
 impl EmailManager {
@@ -227,7 +220,6 @@ impl EmailManager {
         thumbnails_dir: PathBuf,
         llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
         llm_audit_enabled: Arc<Mutex<bool>>,
-        app: tauri::AppHandle,
     ) -> Self {
         Self {
             db,
@@ -235,7 +227,6 @@ impl EmailManager {
             thumbnails_dir,
             llm_config,
             llm_audit_enabled,
-            app,
         }
     }
 
@@ -649,7 +640,6 @@ impl EmailManager {
                 .filter_map(|p| p.to_str().map(String::from))
                 .collect();
 
-            let count = path_strs.len();
             let (jobs, raw_file_ids) = match self.db.lock() {
                 Ok(mut conn) => {
                     let jobs = import_files(&mut conn, &self.raw_dir, path_strs, "email").unwrap_or_default();

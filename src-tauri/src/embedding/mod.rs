@@ -20,8 +20,6 @@ pub enum EmbeddingError {
     Load(String),
     #[error("inference failed: {0}")]
     Inference(String),
-    #[error("empty embedding returned")]
-    EmptyEmbedding,
 }
 
 #[derive(Debug, Clone, Serialize)]

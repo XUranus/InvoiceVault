@@ -4,6 +4,8 @@ dist/
 target/
 src-tauri/target/
 src-tauri/gen/schemas/
+src-tauri/resources/libonnxruntime.*
+src-tauri/resources/onnxruntime.dll
 .DS_Store
 *.log
 .env
