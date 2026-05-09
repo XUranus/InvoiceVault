@@ -2720,6 +2720,40 @@ textarea:focus {
   background: var(--color-input-bg);
 }
 
+.input-with-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-toggle input {
+  padding-right: 40px;
+}
+
+.input-toggle-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.input-toggle-btn:hover {
+  background: var(--color-input-bg-subtle);
+  color: var(--color-text);
+}
+
 .settings-toggle-card {
   display: flex;
   align-items: flex-start;
@@ -2755,6 +2789,45 @@ textarea:focus {
   color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.preset-badges {
+  display: flex;
+  gap: 8px;
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.preset-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s, box-shadow 0.15s;
+  background: none;
+  line-height: 1.6;
+}
+
+.preset-badge:hover {
+  filter: brightness(0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.preset-badge-orange {
+  background: var(--color-badge-orange-bg);
+  color: var(--color-badge-orange-text);
+  border-color: var(--color-badge-orange-bg);
+}
+
+.preset-badge-blue {
+  background: var(--color-badge-blue-bg);
+  color: var(--color-badge-blue-text);
+  border-color: var(--color-badge-blue-bg);
 }
 
 .provider-actions {

@@ -39,9 +39,9 @@ export function useAppInitializer() {
   useEffect(() => {
     initialize();
     loadConfigFromBackend().then(() => {
-      const { ocr } = useLlmStore.getState();
+      const { llm } = useLlmStore.getState();
       const dismissed = localStorage.getItem("onboarding_dismissed") === "1";
-      if (!ocr.config.apiKey.trim() && !dismissed) {
+      if (!llm.config.apiKey.trim() && !dismissed) {
         useAppStore.getState().setShowOnboarding(true);
       }
     });

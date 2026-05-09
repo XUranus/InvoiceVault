@@ -33,8 +33,8 @@ use crate::{
         EmailTestResult, UpdateEmailSourceRequest,
     },
     embedding::{
-        generate_embedding, test_embedding_connection as run_embedding_test, EmbeddingConfig,
-        EmbeddingError, EmbeddingTestResult,
+        ensure_model, generate_embedding, test_embedding_connection as run_embedding_test,
+        EmbeddingError, EmbeddingTestResult, LocalEmbeddingEngine,
     },
     event::{self, EventError, EventListResult},
     exporter::{
@@ -238,11 +238,11 @@ pub struct AppState {
     watcher_manager: WatcherManager,
     email_manager: EmailManager,
     chroma_config: Mutex<ChromaConfig>,
-    embedding_config: Mutex<EmbeddingConfig>,
+    local_embedding: Mutex<Option<LocalEmbeddingEngine>>,
+    embedding_enabled: Mutex<bool>,
     badge_config: Mutex<BadgeConfig>,
     price_config: Mutex<PriceConfig>,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
-    agent_llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     llm_audit_enabled: Arc<Mutex<bool>>,
     recognition_pending: Arc<Mutex<i64>>,
     recognition_running: Arc<Mutex<i64>>,
@@ -267,19 +267,14 @@ impl AppState {
         let chroma_config = ChromaConfig::default();
 
         // Load persisted configs
-        let embedding_config =
-            Self::load_config_raw::<EmbeddingConfig>(&app_data_dir, "embedding_config.json")
-                .unwrap_or_default();
+        let embedding_enabled: bool =
+            Self::load_config_raw::<serde_json::Value>(&app_data_dir, "embedding_enabled.json")
+                .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
+                .unwrap_or(true);
 
         let llm_config: Arc<Mutex<Option<LlmProviderConfig>>> = {
             let saved =
                 Self::load_config_raw::<LlmProviderConfig>(&app_data_dir, "llm_config.json");
-            Arc::new(Mutex::new(saved))
-        };
-
-        let agent_llm_config: Arc<Mutex<Option<LlmProviderConfig>>> = {
-            let saved =
-                Self::load_config_raw::<LlmProviderConfig>(&app_data_dir, "agent_llm_config.json");
             Arc::new(Mutex::new(saved))
         };
 
@@ -327,16 +322,36 @@ impl AppState {
             watcher_manager,
             email_manager,
             chroma_config: Mutex::new(chroma_config),
-            embedding_config: Mutex::new(embedding_config),
+            local_embedding: Mutex::new(None),
+            embedding_enabled: Mutex::new(embedding_enabled),
             badge_config: Mutex::new(badge_config),
             price_config: Mutex::new(price_config),
             llm_config,
-            agent_llm_config,
             llm_audit_enabled,
             recognition_pending: Arc::new(Mutex::new(0)),
             recognition_running: Arc::new(Mutex::new(0)),
             recognition_max_concurrent: Arc::new(Mutex::new(recognition_max_concurrent)),
         };
+
+        // Load local embedding engine if enabled and model exists
+        if embedding_enabled {
+            let model_dir = state.paths.app_data_dir.join("models").join("bge-small-zh-v1.5");
+            let onnx_path = model_dir.join("onnx").join("model_q4.onnx");
+            let tok_path = model_dir.join("tokenizer.json");
+            if onnx_path.exists() && tok_path.exists() {
+                match LocalEmbeddingEngine::load(&model_dir) {
+                    Ok(engine) => {
+                        *state.local_embedding.lock().expect("lock") = Some(engine);
+                        info!("Local embedding engine loaded from {}", model_dir.display());
+                    }
+                    Err(e) => {
+                        error!("Failed to load local embedding engine: {e}");
+                    }
+                }
+            } else {
+                info!("Embedding model not found at {}, will download on first use", model_dir.display());
+            }
+        }
 
         info!(
             "AppState initialized, concurrency={}",
@@ -651,44 +666,47 @@ impl AppState {
             }
         }
 
-        // Best-effort embedding generation
-        if self.chroma_config.lock().expect("lock").enabled {
-            let emb_config = self.embedding_config.lock().expect("lock").clone();
-            let db_arc = Arc::clone(&self.db);
-            let thumb_dir = self.paths.thumbnails_dir.clone();
-            let invoice_id = invoice.id;
-
-            tauri::async_runtime::spawn(async move {
-                let detail = match db_arc.lock() {
-                    Ok(db) => get_invoice_detail(&db, &thumb_dir, invoice_id).ok(),
-                    Err(_) => None,
-                };
+        // Best-effort embedding generation (local ONNX inference)
+        if self.chroma_config.lock().expect("lock").enabled
+            && *self.embedding_enabled.lock().expect("lock")
+        {
+            let mut engine_guard = self.local_embedding.lock().expect("lock");
+            if let Some(ref mut engine) = *engine_guard {
+                let thumb_dir = self.paths.thumbnails_dir.clone();
+                let invoice_id = invoice.id;
+                let detail = get_invoice_detail(&db, &thumb_dir, invoice_id).ok();
                 if let Some(detail) = detail {
                     let text = invoice_to_embedding_text(&detail);
-                    if let Ok(result) = generate_embedding(&emb_config, &text).await {
-                        if let Ok(db) = db_arc.lock() {
-                            let _ = chroma::upsert_embedding(&db, invoice_id, &result.embedding, &text);
-                            let _ = db.execute(
-                                "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
-                                [invoice_id],
-                            );
-                            if let Ok(similar) = chroma::query_similar(&db, &result.embedding, 5) {
-                                let _ = crate::dedupe::detect_semantic_duplicates(
-                                    &db, invoice_id, &similar,
+                    if let Ok(result) = generate_embedding(engine, &text) {
+                        let embedding = result.embedding;
+                        let prompt_tokens = result.prompt_tokens;
+                        let total_tokens = result.total_tokens;
+                        let db_arc = Arc::clone(&self.db);
+                        tauri::async_runtime::spawn(async move {
+                            if let Ok(db) = db_arc.lock() {
+                                let _ = chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
+                                let _ = db.execute(
+                                    "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
+                                    [invoice_id],
+                                );
+                                if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
+                                    let _ = crate::dedupe::detect_semantic_duplicates(
+                                        &db, invoice_id, &similar,
+                                    );
+                                }
+                                let _ = crate::extractor::insert_usage_log(
+                                    &db,
+                                    "embedding",
+                                    "bge-small-zh-v1.5",
+                                    prompt_tokens,
+                                    total_tokens.saturating_sub(prompt_tokens),
+                                    total_tokens,
                                 );
                             }
-                            let _ = crate::extractor::insert_usage_log(
-                                &db,
-                                "embedding",
-                                &emb_config.model,
-                                result.prompt_tokens,
-                                result.total_tokens.saturating_sub(result.prompt_tokens),
-                                result.total_tokens,
-                            );
-                        }
+                        });
                     }
                 }
-            });
+            }
         }
 
         Ok(invoice)
@@ -760,44 +778,48 @@ impl AppState {
             }
         }
 
-        // Best-effort embedding regeneration
-        if self.chroma_config.lock().expect("lock").enabled {
-            let emb_config = self.embedding_config.lock().expect("lock").clone();
-            let db_arc = Arc::clone(&self.db);
-            let thumb_dir = self.paths.thumbnails_dir.clone();
-            let invoice_id = result.invoice.id;
-
-            tauri::async_runtime::spawn(async move {
-                let detail = match db_arc.lock() {
-                    Ok(db) => get_invoice_detail(&db, &thumb_dir, invoice_id).ok(),
-                    Err(_) => None,
-                };
+        // Best-effort embedding regeneration (local ONNX inference)
+        if self.chroma_config.lock().expect("lock").enabled
+            && *self.embedding_enabled.lock().expect("lock")
+        {
+            let mut engine_guard = self.local_embedding.lock().expect("lock");
+            if let Some(ref mut engine) = *engine_guard {
+                let db = self.db.lock().expect("db lock");
+                let thumb_dir = self.paths.thumbnails_dir.clone();
+                let invoice_id = result.invoice.id;
+                let detail = get_invoice_detail(&db, &thumb_dir, invoice_id).ok();
                 if let Some(detail) = detail {
                     let text = invoice_to_embedding_text(&detail);
-                    if let Ok(result) = generate_embedding(&emb_config, &text).await {
-                        if let Ok(db) = db_arc.lock() {
-                            let _ = chroma::upsert_embedding(&db, invoice_id, &result.embedding, &text);
-                            let _ = db.execute(
-                                "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
-                                [invoice_id],
-                            );
-                            if let Ok(similar) = chroma::query_similar(&db, &result.embedding, 5) {
-                                let _ = crate::dedupe::detect_semantic_duplicates(
-                                    &db, invoice_id, &similar,
+                    if let Ok(emb_result) = generate_embedding(engine, &text) {
+                        let embedding = emb_result.embedding;
+                        let prompt_tokens = emb_result.prompt_tokens;
+                        let total_tokens = emb_result.total_tokens;
+                        let db_arc = Arc::clone(&self.db);
+                        tauri::async_runtime::spawn(async move {
+                            if let Ok(db) = db_arc.lock() {
+                                let _ = chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
+                                let _ = db.execute(
+                                    "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
+                                    [invoice_id],
+                                );
+                                if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
+                                    let _ = crate::dedupe::detect_semantic_duplicates(
+                                        &db, invoice_id, &similar,
+                                    );
+                                }
+                                let _ = crate::extractor::insert_usage_log(
+                                    &db,
+                                    "embedding",
+                                    "bge-small-zh-v1.5",
+                                    prompt_tokens,
+                                    total_tokens.saturating_sub(prompt_tokens),
+                                    total_tokens,
                                 );
                             }
-                            let _ = crate::extractor::insert_usage_log(
-                                &db,
-                                "embedding",
-                                &emb_config.model,
-                                result.prompt_tokens,
-                                result.total_tokens.saturating_sub(result.prompt_tokens),
-                                result.total_tokens,
-                            );
-                        }
+                        });
                     }
                 }
-            });
+            }
         }
 
         Ok(result)
@@ -953,19 +975,43 @@ impl AppState {
         self.chroma_config.lock().expect("lock").clone()
     }
 
-    pub fn set_embedding_config(&self, config: EmbeddingConfig) -> Result<(), AppError> {
-        let mut cfg = self.embedding_config.lock().expect("lock");
-        *cfg = config.clone();
-        // Persist to file
-        let path = self.paths.app_data_dir.join("embedding_config.json");
-        if let Ok(json) = serde_json::to_string_pretty(&config) {
-            let _ = std::fs::write(&path, json);
+    pub fn set_embedding_enabled(&self, enabled: bool) -> Result<(), AppError> {
+        {
+            let mut flag = self.embedding_enabled.lock().expect("lock");
+            *flag = enabled;
         }
+        // Persist to file
+        let path = self.paths.app_data_dir.join("embedding_enabled.json");
+        let json = serde_json::json!({ "enabled": enabled });
+        if let Ok(s) = serde_json::to_string_pretty(&json) {
+            let _ = std::fs::write(&path, s);
+        }
+
+        // If enabling and engine not loaded, try to load
+        if enabled {
+            let mut engine_guard = self.local_embedding.lock().expect("lock");
+            if engine_guard.is_none() {
+                let model_dir = self.paths.app_data_dir.join("models").join("bge-small-zh-v1.5");
+                if model_dir.exists() {
+                    match LocalEmbeddingEngine::load(&model_dir) {
+                        Ok(engine) => {
+                            *engine_guard = Some(engine);
+                            info!("Local embedding engine loaded");
+                        }
+                        Err(e) => {
+                            error!("Failed to load embedding engine: {e}");
+                        }
+                    }
+                }
+            }
+        }
+
         let db = self.db.lock().expect("db lock");
+        let label = if enabled { "启用" } else { "禁用" };
         let _ = event::create_event(
             &db,
             "config_change",
-            "更新 Embedding 配置",
+            &format!("{label} 本地 Embedding"),
             "",
             "completed",
             None,
@@ -975,8 +1021,30 @@ impl AppState {
         Ok(())
     }
 
-    pub fn get_embedding_config(&self) -> EmbeddingConfig {
-        self.embedding_config.lock().expect("lock").clone()
+    pub fn embedding_status(&self) -> (bool, bool, Option<String>, Option<usize>) {
+        let enabled = *self.embedding_enabled.lock().expect("lock");
+        let guard = self.local_embedding.lock().expect("lock");
+        let (model_loaded, model_dir, dimensions) = match *guard {
+            Some(ref engine) => (
+                true,
+                Some(engine.model_dir().to_string_lossy().into_owned()),
+                Some(engine.dimensions()),
+            ),
+            None => (false, None, None),
+        };
+        (enabled, model_loaded, model_dir, dimensions)
+    }
+
+    pub fn embedding_enabled(&self) -> bool {
+        *self.embedding_enabled.lock().expect("lock")
+    }
+
+    pub fn has_embedding_engine(&self) -> bool {
+        self.local_embedding.lock().expect("lock").is_some()
+    }
+
+    pub fn set_embedding_engine(&self, engine: LocalEmbeddingEngine) {
+        *self.local_embedding.lock().expect("lock") = Some(engine);
     }
 
     pub fn set_badge_config(&self, config: BadgeConfig) -> Result<(), AppError> {
@@ -1073,22 +1141,6 @@ impl AppState {
         })
     }
 
-    pub fn set_agent_llm_config(&self, config: LlmProviderConfig) {
-        let mut cfg = self.agent_llm_config.lock().expect("lock");
-        *cfg = Some(config.clone());
-        let path = self.paths.app_data_dir.join("agent_llm_config.json");
-        if let Ok(json) = serde_json::to_string_pretty(&config) {
-            if let Err(e) = std::fs::write(&path, json) {
-                error!("Failed to persist Agent LLM config: {e}");
-            }
-        }
-        info!("Agent LLM config updated");
-    }
-
-    pub fn get_agent_llm_config(&self) -> Option<LlmProviderConfig> {
-        self.agent_llm_config.lock().expect("lock").clone()
-    }
-
     pub fn set_llm_audit_enabled(&self, enabled: bool) {
         *self.llm_audit_enabled.lock().expect("lock") = enabled;
         let path = self.paths.app_data_dir.join("audit_config.json");
@@ -1117,12 +1169,13 @@ impl AppState {
         Ok(self.chroma_config.lock().expect("lock").enabled)
     }
 
-    pub async fn test_embedding_connection(&self) -> Result<EmbeddingTestResult, AppError> {
-        let config = self.embedding_config.lock().expect("lock").clone();
-        Ok(run_embedding_test(&config).await?)
+    pub fn test_embedding_connection(&self) -> Result<EmbeddingTestResult, AppError> {
+        let mut guard = self.local_embedding.lock().expect("lock");
+        let engine = guard.as_mut().ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
+        Ok(run_embedding_test(engine)?)
     }
 
-    pub async fn search_invoices_semantic(
+    pub fn search_invoices_semantic(
         &self,
         query: String,
         limit: usize,
@@ -1130,8 +1183,9 @@ impl AppState {
         if !self.chroma_config.lock().expect("lock").enabled {
             return Err(AppError::Chroma(chroma::ChromaError::NotConfigured));
         }
-        let emb_config = self.embedding_config.lock().expect("lock").clone();
-        let result = generate_embedding(&emb_config, &query).await?;
+        let mut guard = self.local_embedding.lock().expect("lock");
+        let engine = guard.as_mut().ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
+        let result = generate_embedding(engine, &query)?;
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(chroma::query_similar(&db, &result.embedding, limit)?)
     }
@@ -1322,7 +1376,7 @@ impl AppState {
         // Add config files
         for config_name in &[
             "llm_config.json",
-            "embedding_config.json",
+            "embedding_enabled.json",
             "recognition_config.json",
             "badge_config.json",
         ] {

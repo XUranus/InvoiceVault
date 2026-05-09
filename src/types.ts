@@ -394,11 +394,11 @@ export type ChromaConfig = {
   enabled: boolean;
 };
 
-export type EmbeddingConfig = {
-  base_url: string;
-  api_key: string;
-  model: string;
+export type LocalEmbeddingStatus = {
   enabled: boolean;
+  model_loaded: boolean;
+  model_dir: string | null;
+  dimensions: number | null;
 };
 
 export type EmbeddingTestResult = {

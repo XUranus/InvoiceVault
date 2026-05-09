@@ -25,7 +25,7 @@ use app_core::{
 };
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest, ResolveDuplicateResult};
-use embedding::{EmbeddingConfig, EmbeddingTestResult};
+use embedding::{EmbeddingTestResult, LocalEmbeddingEngine};
 use event::EventListResult;
 use exporter::{ExportInvoicesRequest, ExportResult};
 use extractor::{
@@ -660,16 +660,49 @@ fn get_chroma_config(state: State<'_, AppState>) -> Result<ChromaConfig, String>
     Ok(state.get_chroma_config())
 }
 
+#[derive(Serialize)]
+struct LocalEmbeddingStatus {
+    enabled: bool,
+    model_loaded: bool,
+    model_dir: Option<String>,
+    dimensions: Option<usize>,
+}
+
 #[tauri::command]
-fn set_embedding_config(state: State<'_, AppState>, config: EmbeddingConfig) -> Result<(), String> {
+fn set_embedding_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     state
-        .set_embedding_config(config)
+        .set_embedding_enabled(enabled)
         .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-fn get_embedding_config(state: State<'_, AppState>) -> Result<EmbeddingConfig, String> {
-    Ok(state.get_embedding_config())
+fn get_embedding_status(state: State<'_, AppState>) -> Result<LocalEmbeddingStatus, String> {
+    let (enabled, model_loaded, model_dir, dimensions) = state.embedding_status();
+    Ok(LocalEmbeddingStatus {
+        enabled,
+        model_loaded,
+        model_dir,
+        dimensions,
+    })
+}
+
+#[tauri::command]
+async fn download_embedding_model(state: State<'_, AppState>) -> Result<LocalEmbeddingStatus, String> {
+    let app_data_dir = state.app_data_dir().to_path_buf();
+    let model_dir = embedding::ensure_model(&app_data_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    let engine = LocalEmbeddingEngine::load(&model_dir).map_err(|e| e.to_string())?;
+    state.set_embedding_engine(engine);
+    // Auto-enable after successful download
+    state.set_embedding_enabled(true).map_err(|e| e.to_string())?;
+    let (enabled, model_loaded, model_dir_path, dimensions) = state.embedding_status();
+    Ok(LocalEmbeddingStatus {
+        enabled,
+        model_loaded,
+        model_dir: model_dir_path,
+        dimensions,
+    })
 }
 
 #[tauri::command]
@@ -704,24 +737,22 @@ fn test_chroma_connection(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn test_embedding_connection(
+fn test_embedding_connection(
     state: State<'_, AppState>,
 ) -> Result<EmbeddingTestResult, String> {
     state
         .test_embedding_connection()
-        .await
         .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-async fn search_invoices_semantic(
+fn search_invoices_semantic(
     state: State<'_, AppState>,
     query: String,
     limit: usize,
 ) -> Result<Vec<SimilarResult>, String> {
     state
         .search_invoices_semantic(query, limit)
-        .await
         .map_err(|err| err.to_string())
 }
 
@@ -978,17 +1009,6 @@ fn get_llm_config(state: State<'_, AppState>) -> Result<Option<LlmProviderConfig
 }
 
 #[tauri::command]
-fn set_agent_llm_config(state: State<'_, AppState>, config: LlmProviderConfig) -> Result<(), String> {
-    state.set_agent_llm_config(config);
-    Ok(())
-}
-
-#[tauri::command]
-fn get_agent_llm_config(state: State<'_, AppState>) -> Result<Option<LlmProviderConfig>, String> {
-    Ok(state.get_agent_llm_config())
-}
-
-#[tauri::command]
 fn set_llm_audit_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     state.set_llm_audit_enabled(enabled);
     Ok(())
@@ -1123,19 +1143,13 @@ async fn run_llm_diagnostic(
         .get_llm_config()
         .ok_or("LLM 未配置，请先在设置中填写 API Key。")?;
 
-    let embedding_config = state.get_embedding_config();
-    let emb = if embedding_config.enabled && !embedding_config.base_url.is_empty() {
-        Some(embedding_config)
-    } else {
-        None
-    };
-
+    let emb_test_result = state.test_embedding_connection().ok();
     let audit_config = state.llm_audit_config();
 
     Ok(diag::run_diagnostic(
         &diag_config,
         &llm_config,
-        emb.as_ref(),
+        emb_test_result.as_ref(),
         audit_config.as_ref(),
     )
     .await)
@@ -1176,6 +1190,31 @@ pub fn run() {
                 let app_data_dir = app.path().app_data_dir().expect("app data dir");
                 let resource_dir = app.path().resource_dir().ok();
                 diag::load_config(&app_data_dir, resource_dir.as_deref());
+            }
+
+            // Background model download for local embedding
+            {
+                let app_data_dir = app.path().app_data_dir().expect("app data dir");
+                // Check if model needs downloading (embedding enabled but engine not loaded)
+                let needs_download = {
+                    let enabled_json = std::fs::read_to_string(app_data_dir.join("embedding_enabled.json")).ok();
+                    let enabled = enabled_json
+                        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                        .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
+                        .unwrap_or(true);
+                    let model_dir = app_data_dir.join("models").join("bge-small-zh-v1.5");
+                    enabled && !model_dir.join("onnx").join("model_q4.onnx").exists()
+                };
+                if needs_download {
+                    tauri::async_runtime::spawn(async move {
+                        match embedding::ensure_model(&app_data_dir).await {
+                            Ok(_model_dir) => {
+                                info!("Local embedding model downloaded");
+                            }
+                            Err(e) => error!("Failed to download embedding model: {e}"),
+                        }
+                    });
+                }
             }
 
             // Restore and persist window size
@@ -1257,8 +1296,9 @@ pub fn run() {
             test_email_connection,
             set_chroma_config,
             get_chroma_config,
-            set_embedding_config,
-            get_embedding_config,
+            set_embedding_enabled,
+            get_embedding_status,
+            download_embedding_model,
             set_badge_config,
             get_badge_config,
             set_invoice_badge,
@@ -1286,8 +1326,6 @@ pub fn run() {
             mark_all_events_read,
             set_llm_config,
             get_llm_config,
-            set_agent_llm_config,
-            get_agent_llm_config,
             set_llm_audit_enabled,
             get_llm_audit_enabled,
             get_recognition_queue_status,

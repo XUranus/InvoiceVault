@@ -19,7 +19,7 @@ import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 
 export function ImportPage() {
   const isDraggingFiles = useAppStore((s) => s.isDraggingFiles);
-  const ocr = useLlmStore((s) => s.ocr);
+  const llm = useLlmStore((s) => s.llm);
   const auditEnabled = useLlmStore((s) => s.auditEnabled);
   const refreshKey = useRefreshStore((s) => s.importKey);
   const onInvoicesAdded = useAppStore((s) => s.refreshInvoices);
@@ -115,7 +115,7 @@ export function ImportPage() {
       setError("该导入任务没有可识别的 RAW 文件。");
       return;
     }
-    if (!ocr.config.apiKey.trim()) {
+    if (!llm.config.apiKey.trim()) {
       setError("请先在设置中填写 LLM API Key。");
       return;
     }
@@ -124,9 +124,9 @@ export function ImportPage() {
       await recognizeRawFile({
         raw_file_id: job.raw_file_id,
         config: {
-          base_url: ocr.config.baseUrl,
-          api_key: ocr.config.apiKey,
-          model: ocr.config.model,
+          base_url: llm.config.baseUrl,
+          api_key: llm.config.apiKey,
+          model: llm.config.model,
           timeout_seconds: 90,
         },
       });

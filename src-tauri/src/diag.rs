@@ -4,7 +4,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::embedding::{test_embedding_connection as run_embedding_test, EmbeddingConfig};
+use crate::embedding::{EmbeddingTestResult};
 use crate::llm::{
     recognize_invoice_image, test_llm_connection as run_llm_connection_test, LlmAuditConfig,
     LlmProviderConfig,
@@ -120,7 +120,7 @@ pub fn save_config(app_data_dir: &Path, config: &DiagnosticConfig) -> std::io::R
 pub async fn run_diagnostic(
     diag_config: &DiagnosticConfig,
     llm_config: &LlmProviderConfig,
-    embedding_config: Option<&EmbeddingConfig>,
+    emb_test_result: Option<&EmbeddingTestResult>,
     audit: Option<&LlmAuditConfig>,
 ) -> DiagnosticResult {
     let mut steps = Vec::new();
@@ -251,45 +251,24 @@ pub async fn run_diagnostic(
     };
     steps.push(step3);
 
-    // Step 4: Embedding (optional)
-    let step4 = if let Some(emb_config) = embedding_config {
-        if emb_config.enabled && !emb_config.base_url.is_empty() && !emb_config.api_key.is_empty()
-        {
-            let start = Instant::now();
-            match run_embedding_test(emb_config).await {
-                Ok(result) => DiagnosticStep {
-                    name: "Embedding".into(),
-                    passed: true,
-                    duration_ms: start.elapsed().as_millis(),
-                    message: format!(
-                        "模型: {}，维度: {}，耗时: {}ms",
-                        result.model, result.dimensions, result.duration_ms
-                    ),
-                    details: None,
-                },
-                Err(err) => DiagnosticStep {
-                    name: "Embedding".into(),
-                    passed: false,
-                    duration_ms: start.elapsed().as_millis(),
-                    message: format!("失败: {err}"),
-                    details: None,
-                },
-            }
-        } else {
-            DiagnosticStep {
-                name: "Embedding".into(),
-                passed: true,
-                duration_ms: 0,
-                message: "未配置 Embedding，跳过".into(),
-                details: None,
-            }
+    // Step 4: Embedding (optional, local ONNX)
+    let step4 = if let Some(result) = emb_test_result {
+        DiagnosticStep {
+            name: "Embedding".into(),
+            passed: true,
+            duration_ms: result.duration_ms as u128,
+            message: format!(
+                "模型: {}，维度: {}，耗时: {}ms",
+                result.model, result.dimensions, result.duration_ms
+            ),
+            details: None,
         }
     } else {
         DiagnosticStep {
             name: "Embedding".into(),
             passed: true,
             duration_ms: 0,
-            message: "未配置 Embedding，跳过".into(),
+            message: "本地 Embedding 未加载，跳过".into(),
             details: None,
         }
     };

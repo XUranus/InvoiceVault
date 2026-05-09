@@ -1,58 +1,74 @@
 import React from "react";
+import { Eye, EyeOff } from "lucide-react";
 import type {
   LlmConnectionTestResult,
-  EmbeddingConfig,
+  LocalEmbeddingStatus,
   EmbeddingTestResult,
 } from "../../types";
 import {
   testLlmConnection,
   setLlmConfig,
-  setAgentLlmConfig,
-  setEmbeddingConfig,
-  getEmbeddingConfig,
+  setEmbeddingEnabled,
+  getEmbeddingStatus,
+  downloadEmbeddingModel,
   testEmbeddingConnection,
   setLlmAuditEnabled as apiSetLlmAuditEnabled,
 } from "../../api";
 import { useLlmStore } from "../../stores/llmStore";
 import { LlmDiagnosticDialog } from "../LlmDiagnosticDialog";
 
+const LLM_PRESETS = [
+    {
+        label: "MiMo",
+        baseUrl: "https://api.xiaomimimo.com/v1",
+        model: "mimo-v2.5",
+        color: "orange" as const,
+    },
+    {
+        label: "百炼",
+        baseUrl: "https://dashscope.aliyuncs.com/apps/v1",
+        model: "qwen3.6-plus",
+        color: "blue" as const,
+    },
+    {
+        label: "Kimi",
+        baseUrl: "https://api.moonshot.cn/v1",
+        model: "kimi-k2.6",
+        color: "black" as const,
+    },
+    {
+        label: "GLM",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        model: "glm-4.6v",
+        color: "red" as const,
+    }
+];
+
 export function AiProviderPage() {
-  // --- OCR Panel ---
-  const ocr = useLlmStore((s) => s.ocr);
-  const setOcrField = useLlmStore((s) => s.setOcrField);
-  const resetOcr = useLlmStore((s) => s.resetOcr);
-  const markOcrTestPassed = useLlmStore((s) => s.markOcrTestPassed);
-  const [ocrTestResult, setOcrTestResult] = React.useState<LlmConnectionTestResult | null>(null);
-  const [isTestingOcr, setIsTestingOcr] = React.useState(false);
-  const [ocrTestError, setOcrTestError] = React.useState<string | null>(null);
-  const [ocrSaveMsg, setOcrSaveMsg] = React.useState<string | null>(null);
-  const [savingOcr, setSavingOcr] = React.useState(false);
+  // --- LLM Panel ---
+  const llm = useLlmStore((s) => s.llm);
+  const setLlmField = useLlmStore((s) => s.setLlmField);
+  const resetLlm = useLlmStore((s) => s.resetLlm);
+  const markLlmTestPassed = useLlmStore((s) => s.markLlmTestPassed);
+  const [llmTestResult, setLlmTestResult] = React.useState<LlmConnectionTestResult | null>(null);
+  const [isTestingLlm, setIsTestingLlm] = React.useState(false);
+  const [llmTestError, setLlmTestError] = React.useState<string | null>(null);
+  const [llmSaveMsg, setLlmSaveMsg] = React.useState<string | null>(null);
+  const [savingLlm, setSavingLlm] = React.useState(false);
+  const [showApiKey, setShowApiKey] = React.useState(false);
 
-  // --- Agent Panel ---
-  const agent = useLlmStore((s) => s.agent);
-  const setAgentField = useLlmStore((s) => s.setAgentField);
-  const resetAgent = useLlmStore((s) => s.resetAgent);
-  const markAgentTestPassed = useLlmStore((s) => s.markAgentTestPassed);
-  const [agentTestResult, setAgentTestResult] = React.useState<LlmConnectionTestResult | null>(null);
-  const [isTestingAgent, setIsTestingAgent] = React.useState(false);
-  const [agentTestError, setAgentTestError] = React.useState<string | null>(null);
-  const [agentSaveMsg, setAgentSaveMsg] = React.useState<string | null>(null);
-  const [savingAgent, setSavingAgent] = React.useState(false);
-
-  // --- Embedding Panel ---
-  const [embConfig, setEmbConfig] = React.useState<EmbeddingConfig>({
-    base_url: "",
-    api_key: "",
-    model: "text-embedding-v4",
+  // --- Embedding Panel (local model) ---
+  const [embStatus, setEmbStatus] = React.useState<LocalEmbeddingStatus>({
     enabled: true,
+    model_loaded: false,
+    model_dir: null,
+    dimensions: null,
   });
-  const [embDirty, setEmbDirty] = React.useState(false);
-  const [embTestPassed, setEmbTestPassed] = React.useState(false);
   const [embTestResult, setEmbTestResult] = React.useState<EmbeddingTestResult | null>(null);
   const [isTestingEmb, setIsTestingEmb] = React.useState(false);
   const [embTestError, setEmbTestError] = React.useState<string | null>(null);
-  const [embSaveMsg, setEmbSaveMsg] = React.useState<string | null>(null);
-  const [savingEmb, setSavingEmb] = React.useState(false);
+  const [isDownloadingEmb, setIsDownloadingEmb] = React.useState(false);
+  const [embDownloadMsg, setEmbDownloadMsg] = React.useState<string | null>(null);
 
   // --- Audit ---
   const auditEnabled = useLlmStore((s) => s.auditEnabled);
@@ -61,134 +77,103 @@ export function AiProviderPage() {
   // --- Diagnostic ---
   const [showDiagnostic, setShowDiagnostic] = React.useState(false);
 
-  // Load embedding config on mount
+  // Load embedding status on mount
   React.useEffect(() => {
     let cancelled = false;
-    getEmbeddingConfig()
-      .then((emb) => {
-        if (cancelled || !emb) return;
-        setEmbConfig({ ...emb, enabled: emb.enabled !== false });
+    getEmbeddingStatus()
+      .then((status) => {
+        if (cancelled || !status) return;
+        setEmbStatus(status);
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
-  // --- OCR handlers ---
-  const handleTestOcr = async () => {
-    setIsTestingOcr(true);
-    setOcrTestResult(null);
-    setOcrTestError(null);
-    markOcrTestPassed(false);
+  // --- LLM handlers ---
+  const handleTestLlm = async () => {
+    setIsTestingLlm(true);
+    setLlmTestResult(null);
+    setLlmTestError(null);
+    markLlmTestPassed(false);
     try {
       const result = await testLlmConnection({
-        base_url: ocr.config.baseUrl,
-        api_key: ocr.config.apiKey,
-        model: ocr.config.model,
+        base_url: llm.config.baseUrl,
+        api_key: llm.config.apiKey,
+        model: llm.config.model,
         timeout_seconds: 30,
       });
-      setOcrTestResult(result);
-      markOcrTestPassed(true);
+      setLlmTestResult(result);
+      markLlmTestPassed(true);
     } catch (err) {
-      setOcrTestError(String(err));
+      setLlmTestError(String(err));
     } finally {
-      setIsTestingOcr(false);
+      setIsTestingLlm(false);
     }
   };
 
-  const handleSaveOcr = async () => {
-    setSavingOcr(true);
-    setOcrSaveMsg(null);
+  const handleSaveLlm = async () => {
+    setSavingLlm(true);
+    setLlmSaveMsg(null);
     try {
       await setLlmConfig({
-        base_url: ocr.config.baseUrl,
-        api_key: ocr.config.apiKey,
-        model: ocr.config.model,
+        base_url: llm.config.baseUrl,
+        api_key: llm.config.apiKey,
+        model: llm.config.model,
       });
-      resetOcr(ocr.config);
-      setOcrSaveMsg("已保存 OCR 配置");
+      resetLlm(llm.config);
+      setLlmSaveMsg("已保存 LLM 配置");
     } catch (err) {
-      setOcrSaveMsg(String(err));
+      setLlmSaveMsg(String(err));
     } finally {
-      setSavingOcr(false);
+      setSavingLlm(false);
     }
   };
 
-  // --- Agent handlers ---
-  const handleTestAgent = async () => {
-    setIsTestingAgent(true);
-    setAgentTestResult(null);
-    setAgentTestError(null);
-    markAgentTestPassed(false);
-    try {
-      const result = await testLlmConnection({
-        base_url: agent.config.baseUrl,
-        api_key: agent.config.apiKey,
-        model: agent.config.model,
-        timeout_seconds: 30,
-      });
-      setAgentTestResult(result);
-      markAgentTestPassed(true);
-    } catch (err) {
-      setAgentTestError(String(err));
-    } finally {
-      setIsTestingAgent(false);
-    }
-  };
-
-  const handleSaveAgent = async () => {
-    setSavingAgent(true);
-    setAgentSaveMsg(null);
-    try {
-      await setAgentLlmConfig({
-        base_url: agent.config.baseUrl,
-        api_key: agent.config.apiKey,
-        model: agent.config.model,
-      });
-      resetAgent(agent.config);
-      setAgentSaveMsg("已保存 Agent 配置");
-    } catch (err) {
-      setAgentSaveMsg(String(err));
-    } finally {
-      setSavingAgent(false);
-    }
+  const handlePresetClick = (preset: typeof LLM_PRESETS[number]) => {
+    setLlmField("baseUrl", preset.baseUrl);
+    setLlmField("model", preset.model);
+    setLlmTestResult(null);
+    setLlmTestError(null);
   };
 
   // --- Embedding handlers ---
-  const handleEmbFieldChange = (field: keyof EmbeddingConfig, value: string | boolean) => {
-    setEmbConfig((prev) => ({ ...prev, [field]: value }));
-    setEmbDirty(true);
-    setEmbTestPassed(false);
-    setEmbSaveMsg(null);
+  const handleToggleEmbedding = async (checked: boolean) => {
+    setEmbStatus((prev) => ({ ...prev, enabled: checked }));
+    try {
+      await setEmbeddingEnabled(checked);
+    } catch {
+      // revert on error
+      setEmbStatus((prev) => ({ ...prev, enabled: !checked }));
+    }
+  };
+
+  const handleDownloadModel = async () => {
+    setIsDownloadingEmb(true);
+    setEmbDownloadMsg(null);
+    setEmbTestError(null);
+    try {
+      const status = await downloadEmbeddingModel();
+      setEmbStatus(status);
+      setEmbDownloadMsg("模型下载完成");
+    } catch (err) {
+      setEmbDownloadMsg(null);
+      setEmbTestError(String(err));
+    } finally {
+      setIsDownloadingEmb(false);
+    }
   };
 
   const handleTestEmbedding = async () => {
     setIsTestingEmb(true);
     setEmbTestResult(null);
     setEmbTestError(null);
-    setEmbTestPassed(false);
     try {
-      await setEmbeddingConfig(embConfig);
       const result = await testEmbeddingConnection();
       setEmbTestResult(result);
-      setEmbTestPassed(true);
     } catch (err) {
       setEmbTestError(String(err));
     } finally {
       setIsTestingEmb(false);
-    }
-  };
-
-  const handleSaveEmbedding = async () => {
-    setSavingEmb(true);
-    setEmbSaveMsg(null);
-    try {
-      await setEmbeddingConfig(embConfig);
-      setEmbDirty(false);
-      setEmbSaveMsg("已保存 Embedding 配置");
-    } catch (err) {
-      setEmbSaveMsg(String(err));
-    } finally {
-      setSavingEmb(false);
     }
   };
 
@@ -204,19 +189,32 @@ export function AiProviderPage() {
 
   return (
     <>
-      {/* OCR Provider */}
+      {/* LLM Provider */}
       <div className="section">
-        <h3>OCR 识别 Provider（多模态）</h3>
+        <h3>LLM Provider（多模态）</h3>
         <p className="section-desc">
-          配置用于发票图片识别的多模态模型（Vision API）。
+          推荐使用具备视觉和文本能力的多模态模型，同时满足发票图片识别和 AI 助手对话需求。
         </p>
+
+        <div className="preset-badges">
+          {LLM_PRESETS.map((preset) => (
+            <button
+              key={preset.label}
+              className={`preset-badge preset-badge-${preset.color}`}
+              onClick={() => handlePresetClick(preset)}
+              type="button"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
 
         <div className="form-grid">
           <label className="form-field">
             <span>Base URL</span>
             <input
-              value={ocr.config.baseUrl}
-              onChange={(e) => setOcrField("baseUrl", e.target.value)}
+              value={llm.config.baseUrl}
+              onChange={(e) => setLlmField("baseUrl", e.target.value)}
               placeholder="https://api.openai.com/v1"
               spellCheck={false}
             />
@@ -224,188 +222,136 @@ export function AiProviderPage() {
           <label className="form-field">
             <span>Model</span>
             <input
-              value={ocr.config.model}
-              onChange={(e) => setOcrField("model", e.target.value)}
+              value={llm.config.model}
+              onChange={(e) => setLlmField("model", e.target.value)}
               placeholder="qwen-vl-max"
               spellCheck={false}
             />
           </label>
           <label className="form-field">
             <span>API Key</span>
-            <input
-              value={ocr.config.apiKey}
-              onChange={(e) => setOcrField("apiKey", e.target.value)}
-              type="password"
-              placeholder="sk-..."
-              spellCheck={false}
-            />
+            <div className="input-with-toggle">
+              <input
+                value={llm.config.apiKey}
+                onChange={(e) => setLlmField("apiKey", e.target.value)}
+                type={showApiKey ? "text" : "password"}
+                placeholder="sk-..."
+                spellCheck={false}
+              />
+              <button
+                className="input-toggle-btn"
+                type="button"
+                onClick={() => setShowApiKey((v) => !v)}
+                title={showApiKey ? "隐藏" : "显示"}
+              >
+                {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </label>
         </div>
 
         <div className="provider-actions">
-          <button className="btn-primary" onClick={handleTestOcr} disabled={isTestingOcr}>
-            {isTestingOcr ? "测试中..." : "测试连接"}
+          <button className="btn-primary" onClick={handleTestLlm} disabled={isTestingLlm}>
+            {isTestingLlm ? "测试中..." : "测试连接"}
           </button>
           <button
             className="btn-primary"
-            onClick={handleSaveOcr}
-            disabled={savingOcr || !ocr.dirty || !ocr.testPassed}
+            onClick={handleSaveLlm}
+            disabled={savingLlm || !llm.dirty || !llm.testPassed}
           >
-            {savingOcr ? "保存中..." : "保存设置"}
+            {savingLlm ? "保存中..." : "保存设置"}
           </button>
-          {ocrSaveMsg ? <span className="badge-config-message">{ocrSaveMsg}</span> : null}
+          {llmSaveMsg ? <span className="badge-config-message">{llmSaveMsg}</span> : null}
         </div>
 
-        {ocrTestError ? (
+        {llmTestError ? (
           <div className="alert alert-error" style={{ marginTop: 12 }}>
-            {ocrTestError}
+            {llmTestError}
           </div>
         ) : null}
 
-        {ocrTestResult ? (
+        {llmTestResult ? (
           <div className="test-result">
             <div className="test-result-row">
               <span>模型</span>
-              <strong>{ocrTestResult.model}</strong>
+              <strong>{llmTestResult.model}</strong>
             </div>
             <div className="test-result-row">
               <span>延迟</span>
-              <strong>{ocrTestResult.duration_ms} ms</strong>
+              <strong>{llmTestResult.duration_ms} ms</strong>
             </div>
             <div className="test-result-row">
               <span>响应</span>
-              <strong className="mono">{ocrTestResult.response_preview}</strong>
+              <strong className="mono">{llmTestResult.response_preview}</strong>
             </div>
           </div>
         ) : null}
       </div>
 
-      {/* Agent LLM Provider */}
+      {/* Local Embedding Model */}
       <div className="section">
-        <h3>Agent LLM Provider（文本）</h3>
+        <h3>本地 Embedding 模型</h3>
         <p className="section-desc">
-          配置用于 AI 助手对话的文本模型。
+          使用 BAAI/bge-small-zh-v1.5 (ONNX)，用于语义搜索和去重。
+          模型大小 ~23MB，首次使用自动下载。运行时内存约 100-150MB。
         </p>
 
-        <div className="form-grid">
-          <label className="form-field">
-            <span>Base URL</span>
-            <input
-              value={agent.config.baseUrl}
-              onChange={(e) => setAgentField("baseUrl", e.target.value)}
-              placeholder="https://api.openai.com/v1"
-              spellCheck={false}
-            />
-          </label>
-          <label className="form-field">
-            <span>Model</span>
-            <input
-              value={agent.config.model}
-              onChange={(e) => setAgentField("model", e.target.value)}
-              placeholder="qwen3.6-plus"
-              spellCheck={false}
-            />
-          </label>
-          <label className="form-field">
-            <span>API Key</span>
-            <input
-              value={agent.config.apiKey}
-              onChange={(e) => setAgentField("apiKey", e.target.value)}
-              type="password"
-              placeholder="sk-..."
-              spellCheck={false}
-            />
-          </label>
+        <label className="settings-toggle-card">
+          <input
+            type="checkbox"
+            checked={embStatus.model_loaded && embStatus.enabled}
+            disabled={!embStatus.model_loaded}
+            onChange={(e) => handleToggleEmbedding(e.target.checked)}
+          />
+          <span>
+            <strong>启用本地 Embedding</strong>
+            <small>开启后发票导入时自动生成语义向量，支持语义搜索和去重。</small>
+          </span>
+        </label>
+
+        <div className="test-result" style={{ marginTop: 12 }}>
+          <div className="test-result-row">
+            <span>模型状态</span>
+            <strong>
+              {embStatus.model_loaded ? "已加载" : "未下载"}
+            </strong>
+          </div>
+          {embStatus.dimensions != null ? (
+            <div className="test-result-row">
+              <span>向量维度</span>
+              <strong>{embStatus.dimensions}</strong>
+            </div>
+          ) : null}
+          {embStatus.model_dir ? (
+            <div className="test-result-row">
+              <span>模型路径</span>
+              <strong className="mono" style={{ fontSize: "0.75em", wordBreak: "break-all" }}>
+                {embStatus.model_dir}
+              </strong>
+            </div>
+          ) : null}
         </div>
 
-        <div className="provider-actions">
-          <button className="btn-primary" onClick={handleTestAgent} disabled={isTestingAgent}>
-            {isTestingAgent ? "测试中..." : "测试连接"}
-          </button>
+        <div className="provider-actions" style={{ marginTop: 12 }}>
+          {!embStatus.model_loaded ? (
+            <button
+              className="btn-primary"
+              onClick={handleDownloadModel}
+              disabled={isDownloadingEmb}
+            >
+              {isDownloadingEmb ? "下载中..." : "下载模型"}
+            </button>
+          ) : null}
           <button
             className="btn-primary"
-            onClick={handleSaveAgent}
-            disabled={savingAgent || !agent.dirty || !agent.testPassed}
+            onClick={handleTestEmbedding}
+            disabled={isTestingEmb || !embStatus.model_loaded}
           >
-            {savingAgent ? "保存中..." : "保存设置"}
+            {isTestingEmb ? "测试中..." : "测试推理"}
           </button>
-          {agentSaveMsg ? <span className="badge-config-message">{agentSaveMsg}</span> : null}
-        </div>
-
-        {agentTestError ? (
-          <div className="alert alert-error" style={{ marginTop: 12 }}>
-            {agentTestError}
-          </div>
-        ) : null}
-
-        {agentTestResult ? (
-          <div className="test-result">
-            <div className="test-result-row">
-              <span>模型</span>
-              <strong>{agentTestResult.model}</strong>
-            </div>
-            <div className="test-result-row">
-              <span>延迟</span>
-              <strong>{agentTestResult.duration_ms} ms</strong>
-            </div>
-            <div className="test-result-row">
-              <span>响应</span>
-              <strong className="mono">{agentTestResult.response_preview}</strong>
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      {/* Embedding Provider */}
-      <div className="section">
-        <h3>Embedding Provider</h3>
-        <p className="section-desc">
-          配置用于语义搜索和去重的 Embedding 模型。
-        </p>
-
-        <div className="form-grid">
-          <label className="form-field">
-            <span>Base URL</span>
-            <input
-              value={embConfig.base_url}
-              onChange={(e) => handleEmbFieldChange("base_url", e.target.value)}
-              placeholder="https://api.openai.com/v1"
-              spellCheck={false}
-            />
-          </label>
-          <label className="form-field">
-            <span>Model</span>
-            <input
-              value={embConfig.model}
-              onChange={(e) => handleEmbFieldChange("model", e.target.value)}
-              placeholder="text-embedding-v4"
-              spellCheck={false}
-            />
-          </label>
-          <label className="form-field">
-            <span>API Key</span>
-            <input
-              value={embConfig.api_key}
-              onChange={(e) => handleEmbFieldChange("api_key", e.target.value)}
-              type="password"
-              placeholder="sk-..."
-              spellCheck={false}
-            />
-          </label>
-        </div>
-
-        <div className="provider-actions">
-          <button className="btn-primary" onClick={handleTestEmbedding} disabled={isTestingEmb}>
-            {isTestingEmb ? "测试中..." : "测试连接"}
-          </button>
-          <button
-            className="btn-primary"
-            onClick={handleSaveEmbedding}
-            disabled={savingEmb || !embDirty || !embTestPassed}
-          >
-            {savingEmb ? "保存中..." : "保存设置"}
-          </button>
-          {embSaveMsg ? <span className="badge-config-message">{embSaveMsg}</span> : null}
+          {embDownloadMsg ? (
+            <span className="badge-config-message">{embDownloadMsg}</span>
+          ) : null}
         </div>
 
         {embTestError ? (

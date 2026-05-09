@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import {
   getLlmConfig,
-  getAgentLlmConfig,
   getLlmAuditEnabled,
 } from "../api";
 
@@ -18,15 +17,10 @@ type PanelState = {
 };
 
 type LlmStore = {
-  ocr: PanelState;
-  setOcrField: (field: keyof ProviderConfig, value: string) => void;
-  resetOcr: (config: ProviderConfig) => void;
-  markOcrTestPassed: (passed: boolean) => void;
-
-  agent: PanelState;
-  setAgentField: (field: keyof ProviderConfig, value: string) => void;
-  resetAgent: (config: ProviderConfig) => void;
-  markAgentTestPassed: (passed: boolean) => void;
+  llm: PanelState;
+  setLlmField: (field: keyof ProviderConfig, value: string) => void;
+  resetLlm: (config: ProviderConfig) => void;
+  markLlmTestPassed: (passed: boolean) => void;
 
   auditEnabled: boolean;
   setAuditEnabled: (v: boolean) => void;
@@ -35,8 +29,8 @@ type LlmStore = {
 };
 
 const defaultProvider: ProviderConfig = {
-  baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  model: "qwen3.6-plus",
+  baseUrl: "",
+  model: "",
   apiKey: "",
 };
 
@@ -45,59 +39,37 @@ function makePanel(config: ProviderConfig): PanelState {
 }
 
 export const useLlmStore = create<LlmStore>((set) => ({
-  ocr: makePanel({ ...defaultProvider }),
-  agent: makePanel({ ...defaultProvider }),
+  llm: makePanel({ ...defaultProvider }),
   auditEnabled: true,
 
-  setOcrField: (field, value) =>
+  setLlmField: (field, value) =>
     set((s) => ({
-      ocr: {
-        ...s.ocr,
-        config: { ...s.ocr.config, [field]: value },
+      llm: {
+        ...s.llm,
+        config: { ...s.llm.config, [field]: value },
         dirty: true,
         testPassed: false,
       },
     })),
 
-  resetOcr: (config) => set({ ocr: makePanel(config) }),
+  resetLlm: (config) => set({ llm: makePanel(config) }),
 
-  markOcrTestPassed: (passed) =>
-    set((s) => ({ ocr: { ...s.ocr, testPassed: passed } })),
-
-  setAgentField: (field, value) =>
-    set((s) => ({
-      agent: {
-        ...s.agent,
-        config: { ...s.agent.config, [field]: value },
-        dirty: true,
-        testPassed: false,
-      },
-    })),
-
-  resetAgent: (config) => set({ agent: makePanel(config) }),
-
-  markAgentTestPassed: (passed) =>
-    set((s) => ({ agent: { ...s.agent, testPassed: passed } })),
+  markLlmTestPassed: (passed) =>
+    set((s) => ({ llm: { ...s.llm, testPassed: passed } })),
 
   setAuditEnabled: (auditEnabled) => set({ auditEnabled }),
 
   loadConfigFromBackend: async () => {
     try {
-      const [ocrCfg, agentCfg, audit] = await Promise.all([
+      const [llmCfg, audit] = await Promise.all([
         getLlmConfig(),
-        getAgentLlmConfig(),
         getLlmAuditEnabled(),
       ]);
       set({
-        ocr: makePanel({
-          baseUrl: ocrCfg?.base_url ?? defaultProvider.baseUrl,
-          model: ocrCfg?.model ?? defaultProvider.model,
-          apiKey: ocrCfg?.api_key ?? defaultProvider.apiKey,
-        }),
-        agent: makePanel({
-          baseUrl: agentCfg?.base_url ?? defaultProvider.baseUrl,
-          model: agentCfg?.model ?? defaultProvider.model,
-          apiKey: agentCfg?.api_key ?? defaultProvider.apiKey,
+        llm: makePanel({
+          baseUrl: llmCfg?.base_url ?? defaultProvider.baseUrl,
+          model: llmCfg?.model ?? defaultProvider.model,
+          apiKey: llmCfg?.api_key ?? defaultProvider.apiKey,
         }),
         auditEnabled: audit !== false,
       });

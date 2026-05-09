@@ -29,7 +29,7 @@ import type {
   EmailSyncResult,
   DashboardStats,
   ChromaConfig,
-  EmbeddingConfig,
+  LocalEmbeddingStatus,
   EmbeddingTestResult,
   SimilarResult,
   AgentSession,
@@ -215,14 +215,18 @@ export async function getChromaConfig(): Promise<ChromaConfig> {
   return invoke<ChromaConfig>("get_chroma_config");
 }
 
-export async function setEmbeddingConfig(
-  config: EmbeddingConfig,
+export async function setEmbeddingEnabled(
+  enabled: boolean,
 ): Promise<void> {
-  return invoke<void>("set_embedding_config", { config });
+  return invoke<void>("set_embedding_enabled", { enabled });
 }
 
-export async function getEmbeddingConfig(): Promise<EmbeddingConfig> {
-  return invoke<EmbeddingConfig>("get_embedding_config");
+export async function getEmbeddingStatus(): Promise<LocalEmbeddingStatus> {
+  return invoke<LocalEmbeddingStatus>("get_embedding_status");
+}
+
+export async function downloadEmbeddingModel(): Promise<LocalEmbeddingStatus> {
+  return invoke<LocalEmbeddingStatus>("download_embedding_model");
 }
 
 export async function testChromaConnection(): Promise<boolean> {
@@ -464,17 +468,6 @@ export async function getLlmConfig(): Promise<LlmConfigResponse> {
   return invoke<LlmConfigResponse>("get_llm_config");
 }
 
-export async function setAgentLlmConfig(config: {
-  base_url: string;
-  api_key: string;
-  model: string;
-}): Promise<void> {
-  return invoke<void>("set_agent_llm_config", { config });
-}
-
-export async function getAgentLlmConfig(): Promise<LlmConfigResponse> {
-  return invoke<LlmConfigResponse>("get_agent_llm_config");
-}
 
 export async function setLlmAuditEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_llm_audit_enabled", { enabled });
