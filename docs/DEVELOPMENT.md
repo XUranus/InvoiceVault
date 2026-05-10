@@ -26,6 +26,7 @@
 - ChromaDB 向量索引：外部 ChromaDB HTTP sidecar，VectorStore 抽象接口。支持发票文本 embedding 写入、语义相似度去重（0.85/0.92 两档阈值）、自然语言语义搜索。Embedding 通过 OpenAI-compatible `/embeddings` 端点生成。
 - Agent 聊天窗口：支持会话创建/删除、历史消息、OpenAI-compatible tool calling、查询发票、读取详情、读取 Dashboard 统计、CSV/Excel 导出和字段更新。
 - Agent 写操作确认：导出和字段更新需要 UI 确认；工具调用结果写入 `audit_logs`，导出操作也会记录事件。
+- MCP Server：独立二进制 `invoicevault-mcp`，通过 MCP 协议（stdio JSON-RPC）向 Claude Code / Codex 暴露 11 个工具，直接读写 SQLite 数据库，无需启动桌面应用。详见 [MCP 文档](MCP.md)。
 - 事件和通知中心：导入、识别、导出、配置变化、清理等后台行为可记录为事件或通知。
 - 设置页已覆盖 LLM、Embedding、ChromaDB、识别并发、监听目录、外部依赖检查、日志导出、存储清理和自定义 Badge 配置。
 - 自定义 Badge：配置保存在 `badge_config.json`，发票详情页可按分组为单张发票选择一个标签值，选择结果写入 `invoice_badges`。

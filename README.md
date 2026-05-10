@@ -49,12 +49,60 @@ cd src-tauri && cargo test
 
 启动后在设置页配置 LLM Provider（Base URL、Model、API Key），即可开始导入和识别发票。
 
+## MCP Server
+
+InvoiceVault 提供 MCP (Model Context Protocol) 服务器，让 Claude Code、Codex 等外部 AI 工具直接访问发票数据和执行操作。
+
+### 快速配置
+
+```bash
+# 构建 MCP 服务器
+cd src-tauri && cargo build --release --bin invoicevault-mcp
+```
+
+在 `~/.claude/settings.json` 中添加：
+
+```json
+{
+  "mcpServers": {
+    "invoicevault": {
+      "command": "/path/to/InvoiceVault/src-tauri/target/release/invoicevault-mcp"
+    }
+  }
+}
+```
+
+重启 Claude Code 后即可使用，例如：
+
+- "搜索所有发票" / "查找金额大于 1000 的发票"
+- "统计本月发票总额和 Top 供应商"
+- "将发票导出为 CSV 到 /tmp/out.csv"
+- "查看发票 #1 的详情和明细行"
+
+### 可用工具（11 个）
+
+| 工具 | 说明 | 类型 |
+|---|---|---|
+| `search_invoices` | 关键词、日期、金额、状态等多维搜索 | 查询 |
+| `get_invoice_detail` | 获取发票完整详情和明细行 | 查询 |
+| `get_dashboard_stats` | 统计：总额、月度趋势、类型分布、Top 供应商 | 查询 |
+| `get_current_date_context` | 返回当前日期上下文 | 查询 |
+| `get_invoice_field_catalog` | 返回可导出字段字典 | 查询 |
+| `export_invoices` | 导出 CSV / Excel | 写操作 |
+| `create_export_preview` | 预览导出行数和样例 | 查询 |
+| `update_invoice` | 更新发票字段 | 写操作 |
+| `merge_invoices` | 合并多张发票 | 写操作 |
+| `export_pdf_report` | 导出 PDF 报表 | 写操作 |
+
+服务器自动从 `~/.local/share/com.invoicevault.desktop/invoicevault.sqlite3` 读取数据。详细文档见 [MCP 文档](docs/MCP.md)。
+
 ## 文档
 
 - [产品需求 (PRD)](docs/PRD.md)
 - [开发计划](docs/PLAN.md)
 - [开发说明](docs/DEVELOPMENT.md)
 - [Agent 工作流](docs/AGENT_WORKFLOW.md)
+- [MCP Server](docs/MCP.md)
 - [TODO](TODO.md)
 
 ## 截图
