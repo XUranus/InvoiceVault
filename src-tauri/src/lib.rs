@@ -7,12 +7,13 @@ mod document;
 mod email_manager;
 mod embedding;
 mod event;
-mod exporter;
-mod extractor;
+pub mod exporter;
+pub mod extractor;
 mod importer;
 mod llm;
+pub mod mcp;
 mod raw_store;
-mod storage;
+pub mod storage;
 mod watcher;
 
 use agent::{
