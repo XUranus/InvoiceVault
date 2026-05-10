@@ -74,60 +74,29 @@ pub struct DiagnosticResult {
     pub all_passed: bool,
 }
 
-/// Resolve the bundled resource base directory.
-/// In dev mode resource_dir is target/debug/ but resources are in target/debug/_up_/
-fn bundled_base_dir(resource_dir: &Path) -> PathBuf {
-    if resource_dir.join("_up_").is_dir() {
-        resource_dir.join("_up_")
-    } else {
-        resource_dir.to_path_buf()
-    }
-}
+/// Embedded test image for diagnostics — avoids dependency on resource bundling
+const TEST_IMAGE_BYTES: &[u8] = include_bytes!("../../sample/fake-invoice-1.png");
 
-/// Copy bundled sample files (diagnostic_config.json, fake-invoice-1.png, etc.)
-/// from resource_dir to app_data_dir/sample/ on first run.
-pub fn ensure_samples(app_data_dir: &Path, resource_dir: Option<&Path>) {
+/// Write embedded sample files to app_data_dir/sample/ if not already present.
+pub fn ensure_samples(app_data_dir: &Path) {
     let samples_dir = app_data_dir.join("sample");
-    if samples_dir.exists() {
-        // Already copied in a previous run
-        return;
-    }
-    let Some(res_dir) = resource_dir else {
-        return;
-    };
-    let bundled_sample_dir = bundled_base_dir(res_dir).join("sample");
-    if !bundled_sample_dir.is_dir() {
-        warn!("Bundled sample directory not found: {}", bundled_sample_dir.display());
-        return;
-    }
     if let Err(e) = std::fs::create_dir_all(&samples_dir) {
         warn!("Failed to create samples dir: {e}");
         return;
     }
-    let entries = match std::fs::read_dir(&bundled_sample_dir) {
-        Ok(e) => e,
-        Err(e) => {
-            warn!("Failed to read bundled sample dir: {e}");
-            return;
-        }
-    };
-    for entry in entries.flatten() {
-        let src = entry.path();
-        let file_name = match entry.file_name().into_string() {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        let dst = samples_dir.join(&file_name);
-        if let Err(e) = std::fs::copy(&src, &dst) {
-            warn!("Failed to copy sample file {file_name}: {e}");
+    let image_path = samples_dir.join("fake-invoice-1.png");
+    if !image_path.exists() {
+        if let Err(e) = std::fs::write(&image_path, TEST_IMAGE_BYTES) {
+            warn!("Failed to write test image: {e}");
         } else {
-            info!("Copied bundled sample: {file_name}");
+            info!("Wrote embedded test image to {}", image_path.display());
         }
     }
 }
 
 /// Load diagnostic config from app_data_dir.
 /// Rewrites test_image_path to absolute path under app_data_dir/sample/.
+/// If no config exists, creates one with embedded ground truth and image path.
 pub fn load_config(app_data_dir: &Path) -> DiagnosticConfig {
     let config_path = app_data_dir.join("diagnostic_config.json");
     let samples_dir = app_data_dir.join("sample");
@@ -143,21 +112,22 @@ pub fn load_config(app_data_dir: &Path) -> DiagnosticConfig {
         }
     }
 
-    // No config yet — build a default from what's in sample/
-    let mut config = DiagnosticConfig::default();
-    let default_image = samples_dir.join("fake-invoice-1.png");
-    if default_image.exists() {
-        config.test_image_path = default_image.to_string_lossy().into_owned();
-    }
-    // Try loading bundled ground truth
-    let bundled_cfg_path = samples_dir.join("diagnostic_config.json");
-    if let Ok(json) = std::fs::read_to_string(&bundled_cfg_path) {
-        if let Ok(bundled) = serde_json::from_str::<DiagnosticConfig>(&json) {
-            if bundled.ground_truth.invoice_number.is_some() {
-                config.ground_truth = bundled.ground_truth;
-            }
-        }
-    }
+    // No config yet — build default with absolute image path and ground truth
+    let config = DiagnosticConfig {
+        test_image_path: samples_dir.join("fake-invoice-1.png").to_string_lossy().into_owned(),
+        ground_truth: GroundTruth {
+            invoice_number: Some("TEST20250400098765".into()),
+            issue_date: Some("2025-04-30".into()),
+            seller_name: Some("云海智联数码（测试）有限公司".into()),
+            buyer_name: Some("星辰未来科技（测试）有限公司".into()),
+            total_amount: Some(1882.02),
+            amount_without_tax: Some(1665.50),
+            tax_amount: Some(216.52),
+            items_count: Some(2),
+            ..GroundTruth::default()
+        },
+        enabled: true,
+    };
     if let Err(e) = save_config(app_data_dir, &config) {
         warn!("Failed to persist default diagnostic config: {e}");
     }

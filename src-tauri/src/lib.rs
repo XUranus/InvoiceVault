@@ -1253,11 +1253,10 @@ pub fn run() {
             app.manage(state);
             setup_tray(app.handle())?;
 
-            // Ensure diagnostic sample files are copied to app data on first run
+            // Ensure diagnostic sample files are written to app data on first run
             {
                 let app_data_dir = app.path().app_data_dir().expect("app data dir");
-                let resource_dir = app.path().resource_dir().ok();
-                diag::ensure_samples(&app_data_dir, resource_dir.as_deref());
+                diag::ensure_samples(&app_data_dir);
                 diag::load_config(&app_data_dir);
             }
 
