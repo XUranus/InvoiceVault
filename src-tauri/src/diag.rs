@@ -92,16 +92,8 @@ pub fn load_config(app_data_dir: &Path, resource_dir: Option<&Path>) -> Diagnost
         let bundled_config = base_dir.join("sample").join("diagnostic_config.json");
         if bundled_config.exists() {
             if let Ok(json) = std::fs::read_to_string(&bundled_config) {
-                if let Ok(mut config) = serde_json::from_str::<DiagnosticConfig>(&json) {
-                    // Resolve test_image_path relative to resource_dir
-                    if !config.test_image_path.is_empty()
-                        && !Path::new(&config.test_image_path).is_absolute()
-                    {
-                        let resolved = base_dir.join(&config.test_image_path);
-                        if resolved.exists() {
-                            config.test_image_path = resolved.to_string_lossy().into_owned();
-                        }
-                    }
+                if let Ok(config) = serde_json::from_str::<DiagnosticConfig>(&json) {
+                    // Keep test_image_path as relative — resolve at runtime against resource_dir
                     if let Err(e) = save_config(app_data_dir, &config) {
                         warn!("Failed to persist diagnostic config: {e}");
                     }
@@ -128,6 +120,7 @@ pub async fn run_diagnostic(
     llm_config: &LlmProviderConfig,
     emb_test_result: Option<&EmbeddingTestResult>,
     audit: Option<&LlmAuditConfig>,
+    resource_dir: Option<&Path>,
 ) -> DiagnosticResult {
     let mut steps = Vec::new();
     let mut score: Option<f64> = None;
@@ -156,7 +149,22 @@ pub async fn run_diagnostic(
 
     // Step 2: Image recognition
     let mut recognition_json: Option<serde_json::Value> = None;
-    let test_image_path = PathBuf::from(&diag_config.test_image_path);
+    let test_image_path = {
+        let configured = PathBuf::from(&diag_config.test_image_path);
+        if configured.is_absolute() {
+            configured
+        } else if let Some(res_dir) = resource_dir {
+            // In dev mode resource_dir is target/debug/ but resources are in target/debug/_up_/
+            let base_dir = if res_dir.join("_up_").is_dir() {
+                res_dir.join("_up_")
+            } else {
+                res_dir.to_path_buf()
+            };
+            base_dir.join(&configured)
+        } else {
+            configured
+        }
+    };
     let step2 = if test_image_path.exists() {
         let mime = infer_mime(&test_image_path);
         let start = Instant::now();

@@ -1206,6 +1206,7 @@ async fn run_llm_diagnostic(
         &llm_config,
         emb_test_result.as_ref(),
         audit_config.as_ref(),
+        resource_dir.as_deref(),
     )
     .await)
 }
