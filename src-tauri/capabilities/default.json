@@ -7,8 +7,11 @@
   ],
   "permissions": [
     "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
     "dialog:default",
-    "shell:allow-open",
-    "core:event:default"
+    "shell:allow-open"
   ]
 }

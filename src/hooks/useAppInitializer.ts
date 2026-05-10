@@ -79,7 +79,7 @@ export function useAppInitializer() {
       .then((handler) => {
         unlisten = handler;
       })
-      .catch((err) => setError(String(err)));
+      .catch(() => {});
 
     return () => {
       unlisten?.();

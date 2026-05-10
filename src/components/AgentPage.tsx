@@ -137,7 +137,7 @@ export function AgentPage() {
       .then((cleanup) => {
         unlisten = cleanup;
       })
-      .catch((err) => setError(String(err)));
+      .catch(() => {});
 
     return () => {
       unlisten?.();
