@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use rusqlite::{params, Connection};
@@ -151,13 +151,15 @@ impl WatcherManager {
         drop(db);
 
         for (id, path, extensions, recursive, stable_wait_ms) in dirs {
-            let _ = self.start_watching(
+            if let Err(e) = self.start_watching(
                 id,
                 PathBuf::from(&path),
                 recursive,
                 extensions,
                 stable_wait_ms as u64,
-            );
+            ) {
+                warn!("Failed to restore watch dir id={id} path={path}: {e}");
+            }
         }
 
         Ok(())
@@ -184,10 +186,12 @@ impl WatcherManager {
             params![request.path, extensions, recursive as i32, stable_wait_ms, name_keywords, max_file_age_days],
         )?;
         let id = db.last_insert_rowid();
+        info!("Watch dir added: id={id}, path={}", request.path);
         drop(db);
 
-        let _ = self.start_watching(id, path, recursive, extensions, stable_wait_ms as u64);
-
+        if let Err(e) = self.start_watching(id, path, recursive, extensions, stable_wait_ms as u64) {
+            warn!("Failed to start watching newly added dir id={id}: {e}");
+        }
         self.get_status(id)
     }
 
@@ -199,6 +203,7 @@ impl WatcherManager {
         if affected == 0 {
             return Err(WatcherError::NotFound(id));
         }
+        info!("Watch dir removed: id={id}");
         Ok(())
     }
 
@@ -307,13 +312,15 @@ impl WatcherManager {
         // Re-read config and restart if enabled
         let config = self.get_watch_dir(id)?;
         if config.enabled && PathBuf::from(&config.path).exists() {
-            let _ = self.start_watching(
+            if let Err(e) = self.start_watching(
                 id,
                 PathBuf::from(&config.path),
                 config.recursive,
                 config.extensions,
                 config.stable_wait_ms as u64,
-            );
+            ) {
+                warn!("Failed to restart watching after update, id={id}: {e}");
+            }
         }
 
         self.get_status(id)
@@ -325,6 +332,7 @@ impl WatcherManager {
             "UPDATE watch_dirs SET enabled = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
             params![id, enabled as i32],
         )?;
+        info!("Watch dir toggled: id={id}, enabled={enabled}");
         drop(db);
 
         if enabled {
@@ -337,13 +345,15 @@ impl WatcherManager {
                     config,
                 });
             }
-            let _ = self.start_watching(
+            if let Err(e) = self.start_watching(
                 id,
                 path,
                 config.recursive,
                 config.extensions,
                 config.stable_wait_ms as u64,
-            );
+            ) {
+                warn!("Failed to start watching after toggle enable, id={id}: {e}");
+            }
         } else {
             self.stop_watching(id);
         }
@@ -491,7 +501,9 @@ fn watch_loop(
 
     let mut watcher = match notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
         if let Ok(event) = res {
-            let _ = tx.send(event);
+            if tx.send(event).is_err() {
+                // Receiver dropped — watcher thread has stopped
+            }
         }
     }) {
         Ok(w) => w,
@@ -667,14 +679,16 @@ fn process_pending(
             let success = jobs.iter().filter(|j| j.status == "imported").count();
             let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
             let failed = jobs.iter().filter(|j| j.status == "failed").count();
-            let _ = event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
+            if let Err(e) = event::record_import_event(&conn, total, success, dups, failed, &[], &ids) {
+                warn!("Failed to record watcher import event: {e}");
+            }
 
             (jobs, ids)
         }
         Err(_) => return,
     };
 
-    let _ = app_handle.emit(
+    if let Err(e) = app_handle.emit(
         "watcher-import",
         WatcherImportEvent {
             watch_dir_id: watch_id,
@@ -682,7 +696,9 @@ fn process_pending(
             imported_count: count,
             jobs: imported,
         },
-    );
+    ) {
+        warn!("Failed to emit watcher-import event: {e}");
+    }
 
     // Auto-recognize each imported file if LLM is configured
     if !raw_file_ids.is_empty() {
@@ -810,7 +826,7 @@ pub async fn recognize_raw_file_async(
         if let Some(invoice) = invoice {
             let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
             if let Ok(db) = db.lock() {
-                let _ = event::record_recognition_event(
+                if let Err(e) = event::record_recognition_event(
                     &db,
                     invoice.id,
                     &title,
@@ -818,7 +834,9 @@ pub async fn recognize_raw_file_async(
                     recognition.duration_ms,
                     &recognition.model,
                     1,
-                );
+                ) {
+                    warn!("Failed to record recognition event for invoice {}: {e}", invoice.id);
+                }
             }
         }
     }

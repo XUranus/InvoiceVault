@@ -8,7 +8,7 @@ use imap::ClientBuilder;
 use mailparse::{parse_mail, ParsedMail};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     event,
@@ -219,9 +219,11 @@ fn wrap_imap_login_error(e: imap::Error) -> EmailError {
 /// Send ID command after login. Coremail servers (163.com etc.) require this
 /// before SELECT/EXAMINE will be allowed.
 fn imap_send_id(session: &mut imap::Session<imap::Connection>) {
-    let _ = session.run_command_and_read_response(
+    if let Err(e) = session.run_command_and_read_response(
         "ID (\"name\" \"InvoiceVault\" \"version\" \"1.0\")"
-    );
+    ) {
+        debug!("IMAP ID command not supported or failed (non-critical): {e}");
+    }
 }
 
 fn pop3_multiline_cmd(conn: &mut Pop3Stream, cmd: &str) -> Result<Vec<String>, EmailError> {
@@ -311,6 +313,7 @@ impl EmailManager {
                    auth_method, use_ssl as i32, folder, name_keywords, max_email_age_days, poll_interval],
         )?;
         let id = db.last_insert_rowid();
+        info!("Email source added: id={id}, name={name}, protocol={protocol}, host={}", request.imap_host);
         drop(db);
 
         self.get_email_source(id)
@@ -374,6 +377,7 @@ impl EmailManager {
         vals.push(Box::new(id));
         let refs: Vec<&dyn rusqlite::types::ToSql> = vals.iter().map(|v| v.as_ref()).collect();
         db.execute(&sql, refs.as_slice())?;
+        info!("Email source updated: id={id}");
         drop(db);
 
         self.get_email_source(id)
@@ -385,6 +389,7 @@ impl EmailManager {
         if affected == 0 {
             return Err(EmailError::NotFound(id));
         }
+        info!("Email source removed: id={id}");
         Ok(())
     }
 
@@ -529,7 +534,9 @@ impl EmailManager {
 
         let count = mailbox.exists as i64;
 
-        let _ = session.logout();
+        if let Err(e) = session.logout() {
+                    debug!("IMAP logout error (non-critical): {e}");
+                }
 
         Ok(EmailTestResult {
             success: true,
@@ -665,7 +672,9 @@ impl EmailManager {
 
         let fetched_count = uids.len();
         if uids.is_empty() {
-            let _ = session.logout();
+            if let Err(e) = session.logout() {
+                    debug!("IMAP logout error (non-critical): {e}");
+                }
             return Ok(EmailSyncResult {
                 source_id: source.id,
                 fetched_count: 0,
@@ -717,7 +726,9 @@ impl EmailManager {
             self.extract_attachments(&parsed, &keywords, &mut tmp_files);
         }
 
-        let _ = session.logout();
+        if let Err(e) = session.logout() {
+                    debug!("IMAP logout error (non-critical): {e}");
+                }
 
         // Import all extracted attachments
         let imported_count = if !tmp_files.is_empty() {
@@ -740,8 +751,11 @@ impl EmailManager {
                     let success = jobs.iter().filter(|j| j.status == "imported").count();
                     let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
                     let failed = jobs.iter().filter(|j| j.status == "failed").count();
-                    let _ =
-                        event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
+                    if let Err(e) =
+                        event::record_import_event(&conn, total, success, dups, failed, &[], &ids)
+                    {
+                        warn!("Failed to record email import event: {e}");
+                    }
 
                     (jobs, ids)
                 }
@@ -779,7 +793,9 @@ impl EmailManager {
 
             // Clean up temp files
             for tmp in &tmp_files {
-                let _ = std::fs::remove_file(tmp);
+                if let Err(e) = std::fs::remove_file(tmp) {
+                    warn!("Failed to clean up temp file {}: {e}", tmp.display());
+                }
             }
 
             imported
@@ -937,8 +953,11 @@ impl EmailManager {
                     let success = jobs.iter().filter(|j| j.status == "imported").count();
                     let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
                     let failed = jobs.iter().filter(|j| j.status == "failed").count();
-                    let _ =
-                        event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
+                    if let Err(e) =
+                        event::record_import_event(&conn, total, success, dups, failed, &[], &ids)
+                    {
+                        warn!("Failed to record email import event: {e}");
+                    }
 
                     (jobs, ids)
                 }
@@ -975,7 +994,9 @@ impl EmailManager {
             all_jobs = jobs;
 
             for tmp in &tmp_files {
-                let _ = std::fs::remove_file(tmp);
+                if let Err(e) = std::fs::remove_file(tmp) {
+                    warn!("Failed to clean up temp file {}: {e}", tmp.display());
+                }
             }
 
             imported

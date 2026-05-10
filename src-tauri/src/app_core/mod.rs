@@ -64,6 +64,8 @@ use crate::{
     },
 };
 
+const EMBEDDING_MODEL_NAME: &str = "bge-small-zh-v1.5";
+
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("failed to resolve application data directory")]
@@ -339,7 +341,7 @@ impl AppState {
                 .paths
                 .app_data_dir
                 .join("models")
-                .join("bge-small-zh-v1.5");
+                .join(EMBEDDING_MODEL_NAME);
             let onnx_path = model_dir.join("onnx").join("model_q4.onnx");
             let tok_path = model_dir.join("tokenizer.json");
             if onnx_path.exists() && tok_path.exists() {
@@ -409,7 +411,7 @@ impl AppState {
         } else {
             info!("Import completed: {success} success, {dups} duplicates");
         }
-        let _ = event::record_import_event(
+        if let Err(e) = event::record_import_event(
             &db,
             total,
             success,
@@ -417,7 +419,9 @@ impl AppState {
             failed,
             &source_paths,
             &raw_file_ids,
-        );
+        ) {
+            warn!("Failed to record import event: {e}");
+        }
 
         // Auto-trigger recognition for successfully imported files
         let config = self.llm_config.lock().expect("lock").clone();
@@ -479,7 +483,9 @@ impl AppState {
             }
 
             if let Ok(db) = db.lock() {
-                let _ = update_import_job_status(&db, job_id, None, "recognizing", None);
+                if let Err(e) = update_import_job_status(&db, job_id, None, "recognizing", None) {
+                    warn!("Failed to update import job {job_id} status to recognizing: {e}");
+                }
             }
 
             let result: Result<(), String> = async {
@@ -566,7 +572,7 @@ impl AppState {
                     )
                     .map_err(|e| e.to_string())?;
                     let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
-                    let _ = event::record_recognition_event(
+                    if let Err(e) = event::record_recognition_event(
                         &conn,
                         invoice.id,
                         &title,
@@ -574,15 +580,19 @@ impl AppState {
                         recognition.duration_ms,
                         &recognition.model,
                         1,
-                    );
-                    let _ = crate::extractor::insert_usage_log(
+                    ) {
+                        warn!("Failed to record recognition event for invoice {}: {e}", invoice.id);
+                    }
+                    if let Err(e) = crate::extractor::insert_usage_log(
                         &conn,
                         "llm_recognition",
                         &recognition.model,
                         recognition.prompt_tokens,
                         recognition.completion_tokens,
                         recognition.total_tokens,
-                    );
+                    ) {
+                        warn!("Failed to insert LLM usage log: {e}");
+                    }
                 }
                 Ok(())
             }
@@ -598,7 +608,7 @@ impl AppState {
                 error!("Auto recognition failed: {message}");
                 if let Ok(db) = db.lock() {
                     // Record failure event
-                    let _ = event::create_event(
+                    if let Err(e) = event::create_event(
                         &db,
                         "recognition",
                         "自动识别失败",
@@ -607,13 +617,17 @@ impl AppState {
                         None,
                         None,
                         None,
-                    );
+                    ) {
+                        warn!("Failed to record recognition failure event: {e}");
+                    }
                     // Keep import_job as failed with error message, detach from raw_file
                     // so we can delete the raw_file without breaking the history record.
-                    let _ = db.execute(
+                    if let Err(e) = db.execute(
                         "UPDATE import_jobs SET status = 'failed', error_message = ?1, raw_file_id = NULL WHERE id = ?2",
                         rusqlite::params![message, job_id],
-                    );
+                    ) {
+                        error!("Failed to mark import job {job_id} as failed: {e}");
+                    }
                     // Delete the stored file from disk
                     let storage_path: Option<String> = db
                         .query_row(
@@ -623,28 +637,42 @@ impl AppState {
                         )
                         .ok();
                     if let Some(path) = storage_path {
-                        let _ = std::fs::remove_file(&path);
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            warn!("Failed to remove raw file {path}: {e}");
+                        }
                     }
                     // Clean up thumbnail directory
-                    let _ = std::fs::remove_dir_all(
-                        thumbnails_dir
-                            .join("previews")
-                            .join(raw_file_id.to_string()),
-                    );
+                    let thumb_path = thumbnails_dir
+                        .join("previews")
+                        .join(raw_file_id.to_string());
+                    if let Err(e) = std::fs::remove_dir_all(&thumb_path) {
+                        warn!("Failed to remove thumbnail dir {}: {e}", thumb_path.display());
+                    }
                     // Delete dependent DB records, then the raw_file itself
-                    let _ = db.execute(
+                    if let Err(e) = db.execute(
                         "DELETE FROM extraction_runs WHERE raw_file_id = ?1",
                         [raw_file_id],
-                    );
-                    let _ =
-                        db.execute("DELETE FROM invoices WHERE raw_file_id = ?1", [raw_file_id]);
-                    let _ = db.execute("DELETE FROM raw_files WHERE id = ?1", [raw_file_id]);
+                    ) {
+                        error!("Failed to delete extraction_runs for raw_file {raw_file_id}: {e}");
+                    }
+                    if let Err(e) =
+                        db.execute("DELETE FROM invoices WHERE raw_file_id = ?1", [raw_file_id])
+                    {
+                        error!("Failed to delete invoices for raw_file {raw_file_id}: {e}");
+                    }
+                    if let Err(e) = db.execute("DELETE FROM raw_files WHERE id = ?1", [raw_file_id]) {
+                        error!("Failed to delete raw_file {raw_file_id}: {e}");
+                    }
                 }
             } else if let Ok(db) = db.lock() {
-                let _ = update_import_job_status(&db, job_id, None, "imported", None);
+                if let Err(e) = update_import_job_status(&db, job_id, None, "imported", None) {
+                    warn!("Failed to update import job {job_id} status to imported: {e}");
+                }
             }
 
-            let _ = app.emit("recognition-complete", ());
+            if let Err(e) = app.emit("recognition-complete", ()) {
+                warn!("Failed to emit recognition-complete event: {e}");
+            }
         });
     }
 
@@ -674,14 +702,16 @@ impl AppState {
                     .partial_cmp(&b.score)
                     .unwrap_or(std::cmp::Ordering::Equal)
             }) {
-                let _ = event::record_duplicate_event(
+                if let Err(e) = event::record_duplicate_event(
                     &db,
                     invoice.id,
                     invoice.seller_name.as_deref(),
                     invoice.invoice_number.as_deref(),
                     best.candidate_invoice_id,
                     best.score,
-                );
+                ) {
+                    warn!("Failed to record duplicate event for invoice {}: {e}", invoice.id);
+                }
             }
         }
 
@@ -703,25 +733,34 @@ impl AppState {
                         let db_arc = Arc::clone(&self.db);
                         tauri::async_runtime::spawn(async move {
                             if let Ok(db) = db_arc.lock() {
-                                let _ =
-                                    chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
-                                let _ = db.execute(
+                                if let Err(e) =
+                                    chroma::upsert_embedding(&db, invoice_id, &embedding, &text)
+                                {
+                                    warn!("Failed to upsert embedding for invoice {invoice_id}: {e}");
+                                }
+                                if let Err(e) = db.execute(
                                     "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
                                     [invoice_id],
-                                );
-                                if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
-                                    let _ = crate::dedupe::detect_semantic_duplicates(
-                                        &db, invoice_id, &similar,
-                                    );
+                                ) {
+                                    warn!("Failed to mark invoice {invoice_id} as having embedding: {e}");
                                 }
-                                let _ = crate::extractor::insert_usage_log(
+                                if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
+                                    if let Err(e) = crate::dedupe::detect_semantic_duplicates(
+                                        &db, invoice_id, &similar,
+                                    ) {
+                                        warn!("Failed to detect semantic duplicates for invoice {invoice_id}: {e}");
+                                    }
+                                }
+                                if let Err(e) = crate::extractor::insert_usage_log(
                                     &db,
                                     "embedding",
-                                    "bge-small-zh-v1.5",
+                                    EMBEDDING_MODEL_NAME,
                                     prompt_tokens,
                                     total_tokens.saturating_sub(prompt_tokens),
                                     total_tokens,
-                                );
+                                ) {
+                                    warn!("Failed to insert embedding usage log: {e}");
+                                }
                             }
                         });
                     }
@@ -789,14 +828,16 @@ impl AppState {
                     .partial_cmp(&b.score)
                     .unwrap_or(std::cmp::Ordering::Equal)
             }) {
-                let _ = event::record_duplicate_event(
+                if let Err(e) = event::record_duplicate_event(
                     &db,
                     result.invoice.id,
                     result.invoice.seller_name.as_deref(),
                     result.invoice.invoice_number.as_deref(),
                     best.candidate_invoice_id,
                     best.score,
-                );
+                ) {
+                    warn!("Failed to record duplicate event for invoice {}: {e}", result.invoice.id);
+                }
             }
         }
 
@@ -819,25 +860,34 @@ impl AppState {
                         let db_arc = Arc::clone(&self.db);
                         tauri::async_runtime::spawn(async move {
                             if let Ok(db) = db_arc.lock() {
-                                let _ =
-                                    chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
-                                let _ = db.execute(
+                                if let Err(e) =
+                                    chroma::upsert_embedding(&db, invoice_id, &embedding, &text)
+                                {
+                                    warn!("Failed to upsert embedding for invoice {invoice_id}: {e}");
+                                }
+                                if let Err(e) = db.execute(
                                     "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
                                     [invoice_id],
-                                );
-                                if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
-                                    let _ = crate::dedupe::detect_semantic_duplicates(
-                                        &db, invoice_id, &similar,
-                                    );
+                                ) {
+                                    warn!("Failed to mark invoice {invoice_id} as having embedding: {e}");
                                 }
-                                let _ = crate::extractor::insert_usage_log(
+                                if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
+                                    if let Err(e) = crate::dedupe::detect_semantic_duplicates(
+                                        &db, invoice_id, &similar,
+                                    ) {
+                                        warn!("Failed to detect semantic duplicates for invoice {invoice_id}: {e}");
+                                    }
+                                }
+                                if let Err(e) = crate::extractor::insert_usage_log(
                                     &db,
                                     "embedding",
-                                    "bge-small-zh-v1.5",
+                                    EMBEDDING_MODEL_NAME,
                                     prompt_tokens,
                                     total_tokens.saturating_sub(prompt_tokens),
                                     total_tokens,
-                                );
+                                ) {
+                                    warn!("Failed to insert embedding usage log: {e}");
+                                }
                             }
                         });
                     }
@@ -1005,7 +1055,7 @@ impl AppState {
         let mut cfg = self.chroma_config.lock().expect("lock");
         *cfg = config;
         let db = self.db.lock().expect("db lock");
-        let _ = event::create_event(
+        if let Err(e) = event::create_event(
             &db,
             "config_change",
             "更新向量搜索配置",
@@ -1014,7 +1064,9 @@ impl AppState {
             None,
             None,
             None,
-        );
+        ) {
+            warn!("Failed to record config change event: {e}");
+        }
         Ok(())
     }
 
@@ -1031,7 +1083,9 @@ impl AppState {
         let path = self.paths.app_data_dir.join("embedding_enabled.json");
         let json = serde_json::json!({ "enabled": enabled });
         if let Ok(s) = serde_json::to_string_pretty(&json) {
-            let _ = std::fs::write(&path, s);
+            if let Err(e) = std::fs::write(&path, s) {
+                warn!("Failed to persist embedding enabled config: {e}");
+            }
         }
 
         // If enabling and engine not loaded, try to load
@@ -1042,7 +1096,7 @@ impl AppState {
                     .paths
                     .app_data_dir
                     .join("models")
-                    .join("bge-small-zh-v1.5");
+                    .join(EMBEDDING_MODEL_NAME);
                 if model_dir.exists() {
                     match LocalEmbeddingEngine::load(&model_dir) {
                         Ok(engine) => {
@@ -1059,7 +1113,7 @@ impl AppState {
 
         let db = self.db.lock().expect("db lock");
         let label = if enabled { "启用" } else { "禁用" };
-        let _ = event::create_event(
+        if let Err(e) = event::create_event(
             &db,
             "config_change",
             &format!("{label} 本地 Embedding"),
@@ -1068,7 +1122,9 @@ impl AppState {
             None,
             None,
             None,
-        );
+        ) {
+            warn!("Failed to record embedding toggle event: {e}");
+        }
         Ok(())
     }
 
@@ -1103,7 +1159,7 @@ impl AppState {
             }
         }
         let db = self.db.lock().expect("db lock");
-        let _ = event::create_event(
+        if let Err(e) = event::create_event(
             &db,
             "config_change",
             "更新 Badge 配置",
@@ -1112,7 +1168,9 @@ impl AppState {
             None,
             None,
             None,
-        );
+        ) {
+            warn!("Failed to record badge config change event: {e}");
+        }
         Ok(())
     }
 
@@ -1497,7 +1555,7 @@ impl AppState {
 
         // Record event
         let db = self.db.lock().expect("db lock");
-        let _ = event::create_event(
+        if let Err(e) = event::create_event(
             &db,
             "export",
             "导出日志",
@@ -1510,7 +1568,9 @@ impl AppState {
             None,
             None,
             None,
-        );
+        ) {
+            warn!("Failed to record log export event: {e}");
+        }
 
         Ok(ExportLogsResult {
             file_path: output_path.to_string_lossy().into_owned(),
@@ -1539,7 +1599,7 @@ impl AppState {
 
         // Record event
         let db = self.db.lock().expect("db lock");
-        let _ = event::create_event(
+        if let Err(e) = event::create_event(
             &db,
             "export",
             "基础备份",
@@ -1552,7 +1612,9 @@ impl AppState {
             None,
             None,
             None,
-        );
+        ) {
+            warn!("Failed to record backup export event: {e}");
+        }
 
         Ok(ExportLogsResult {
             file_path: output_path.to_string_lossy().into_owned(),
@@ -1608,13 +1670,21 @@ impl AppState {
 
         for raw_id in &orphan_ids {
             // Delete dependent records and the raw_file itself in order
-            let _ = db.execute("DELETE FROM import_jobs WHERE raw_file_id = ?1", [*raw_id]);
-            let _ = db.execute(
+            if let Err(e) = db.execute("DELETE FROM import_jobs WHERE raw_file_id = ?1", [*raw_id]) {
+                warn!("Failed to delete import_jobs for orphan raw_file {raw_id}: {e}");
+            }
+            if let Err(e) = db.execute(
                 "DELETE FROM extraction_runs WHERE raw_file_id = ?1",
                 [*raw_id],
-            );
-            let _ = db.execute("DELETE FROM invoices WHERE raw_file_id = ?1", [*raw_id]);
-            let _ = db.execute("DELETE FROM raw_files WHERE id = ?1", [*raw_id]);
+            ) {
+                warn!("Failed to delete extraction_runs for orphan raw_file {raw_id}: {e}");
+            }
+            if let Err(e) = db.execute("DELETE FROM invoices WHERE raw_file_id = ?1", [*raw_id]) {
+                warn!("Failed to delete invoices for orphan raw_file {raw_id}: {e}");
+            }
+            if let Err(e) = db.execute("DELETE FROM raw_files WHERE id = ?1", [*raw_id]) {
+                warn!("Failed to delete orphan raw_file {raw_id}: {e}");
+            }
             db_records_removed += 1;
         }
 
@@ -1633,7 +1703,7 @@ impl AppState {
         };
 
         // Record event
-        let _ = event::create_event(
+        if let Err(e) = event::create_event(
             &db,
             "agent",
             "存储清理",
@@ -1645,7 +1715,9 @@ impl AppState {
             None,
             None,
             None,
-        );
+        ) {
+            warn!("Failed to record storage cleanup event: {e}");
+        }
 
         Ok(result)
     }
@@ -2261,13 +2333,15 @@ fn make_tool_executor(
                 }
                 Err(e) => {
                     if let Some(task) = task {
-                        let _ = agent::complete_task(
+                        if let Err(e) = agent::complete_task(
                             &conn,
                             task.id,
                             "failed",
                             None,
                             Some(&e.to_string()),
-                        );
+                        ) {
+                            warn!("Failed to mark agent task as failed: {e}");
+                        }
                     }
                     ToolExecResult::Error {
                         message: e.to_string(),
@@ -2369,14 +2443,16 @@ fn make_tool_executor(
                 Ok(result) => {
                     let count = result.row_count;
                     let format = &result.format;
-                    let _ = event::record_agent_event(
+                    if let Err(e) = event::record_agent_event(
                         &conn,
                         "export",
                         &format!("Agent 导出 {count} 张发票为 {format}"),
                         "",
                         None,
                         None,
-                    );
+                    ) {
+                        warn!("Failed to record agent export event: {e}");
+                    }
                     let artifact = record_export_artifact(
                         &conn,
                         session_id,
@@ -2406,13 +2482,15 @@ fn make_tool_executor(
                 }
                 Err(e) => {
                     if let Some(task) = task {
-                        let _ = agent::complete_task(
+                        if let Err(e) = agent::complete_task(
                             &conn,
                             task.id,
                             "failed",
                             None,
                             Some(&e.to_string()),
-                        );
+                        ) {
+                            warn!("Failed to mark agent task as failed: {e}");
+                        }
                     }
                     ToolExecResult::Error {
                         message: e.to_string(),
@@ -2542,14 +2620,16 @@ fn make_tool_executor(
             let invoice_id = request.id;
             match update_invoice(&mut conn, request) {
                 Ok(result) => {
-                    let _ = event::record_agent_event(
+                    if let Err(e) = event::record_agent_event(
                         &conn,
                         "update",
                         &format!("Agent 更新发票 #{invoice_id}"),
                         "",
                         Some("invoice"),
                         Some(invoice_id),
-                    );
+                    ) {
+                        warn!("Failed to record agent update event: {e}");
+                    }
                     let content = serde_json::to_string(&result).unwrap_or_default();
                     ToolExecResult::Success { content }
                 }
@@ -2957,6 +3037,7 @@ fn remove_empty_dirs(dir: &Path) {
             let path = entry.path();
             if path.is_dir() {
                 remove_empty_dirs(&path);
+                // Best-effort: only succeeds if dir is truly empty
                 let _ = std::fs::remove_dir(&path);
             }
         }

@@ -48,7 +48,7 @@ use tauri::{
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent,
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WindowSizeState {
@@ -420,7 +420,9 @@ async fn recognize_raw_file(
         "Starting recognition for {} pages",
         recognition_inputs.len()
     );
-    let _ = state.set_import_job_status_for_raw_file(raw_file.id, "recognizing", None);
+    if let Err(e) = state.set_import_job_status_for_raw_file(raw_file.id, "recognizing", None) {
+        warn!("Failed to set import job status to recognizing: {e}");
+    }
     let page_count = recognition_inputs.len();
     let mut invoices = Vec::new();
     let mut total_duration_ms = 0_u128;
@@ -446,8 +448,11 @@ async fn recognize_raw_file(
             Err(err) => {
                 error!("LLM recognition failed: {err}");
                 let message = import_failure_message(&err.to_string());
-                let _ =
-                    state.set_import_job_status_for_raw_file(raw_file.id, "failed", Some(&message));
+                if let Err(e) =
+                    state.set_import_job_status_for_raw_file(raw_file.id, "failed", Some(&message))
+                {
+                    error!("Failed to mark import job as failed: {e}");
+                }
                 return Err(message);
             }
         };
@@ -476,37 +481,46 @@ async fn recognize_raw_file(
             Err(err) => {
                 error!("Failed to save invoice extraction: {err}");
                 let message = import_failure_message(&err.to_string());
-                let _ =
-                    state.set_import_job_status_for_raw_file(raw_file.id, "failed", Some(&message));
+                if let Err(e) =
+                    state.set_import_job_status_for_raw_file(raw_file.id, "failed", Some(&message))
+                {
+                    error!("Failed to mark import job as failed: {e}");
+                }
                 return Err(message);
             }
         };
 
         let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
-        let _ = state.record_recognition_event(
+        if let Err(e) = state.record_recognition_event(
             invoice.id,
             &title,
             true,
             recognition.duration_ms,
             &rec_model,
             1,
-        );
+        ) {
+            warn!("Failed to record recognition event for invoice {}: {e}", invoice.id);
+        }
         total_prompt_tokens += recognition.prompt_tokens;
         total_completion_tokens += recognition.completion_tokens;
         total_total_tokens += recognition.total_tokens;
-        let _ = state.record_usage_log(
+        if let Err(e) = state.record_usage_log(
             "llm_recognition",
             &rec_model,
             recognition.prompt_tokens,
             recognition.completion_tokens,
             recognition.total_tokens,
-        );
+        ) {
+            warn!("Failed to record LLM usage log: {e}");
+        }
         invoices.push(invoice);
     }
 
     let count = invoices.len();
     info!("Recognition complete: {count} invoices, model {model}, {total_duration_ms}ms");
-    let _ = state.set_import_job_status_for_raw_file(raw_file.id, "imported", None);
+    if let Err(e) = state.set_import_job_status_for_raw_file(raw_file.id, "imported", None) {
+        warn!("Failed to set import job status to imported: {e}");
+    }
 
     Ok(RecognizeRawFileResult {
         invoices,
@@ -855,7 +869,9 @@ fn make_agent_stream_sink(
             session_id,
             event,
         };
-        let _ = app.emit("agent://stream", payload);
+        if let Err(e) = app.emit("agent://stream", payload) {
+            warn!("Failed to emit agent stream event: {e}");
+        }
     })
 }
 

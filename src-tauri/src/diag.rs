@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::embedding::EmbeddingTestResult;
 use crate::llm::{
@@ -102,14 +102,18 @@ pub fn load_config(app_data_dir: &Path, resource_dir: Option<&Path>) -> Diagnost
                             config.test_image_path = resolved.to_string_lossy().into_owned();
                         }
                     }
-                    let _ = save_config(app_data_dir, &config);
+                    if let Err(e) = save_config(app_data_dir, &config) {
+                        warn!("Failed to persist diagnostic config: {e}");
+                    }
                     return config;
                 }
             }
         }
     }
     let config = DiagnosticConfig::default();
-    let _ = save_config(app_data_dir, &config);
+    if let Err(e) = save_config(app_data_dir, &config) {
+        warn!("Failed to persist default diagnostic config: {e}");
+    }
     config
 }
 
