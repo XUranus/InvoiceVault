@@ -3043,6 +3043,12 @@ textarea:focus {
   color: var(--color-on-error);
 }
 
+.btn-small.btn-danger:hover {
+  background: var(--color-alert-error);
+  border-color: var(--color-alert-error);
+  color: var(--color-on-error);
+}
+
 .btn-danger:active {
   transform: scale(0.97);
 }

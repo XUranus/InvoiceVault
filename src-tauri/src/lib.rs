@@ -653,7 +653,7 @@ fn toggle_email_source(
 }
 
 #[tauri::command]
-fn sync_email_source(
+async fn sync_email_source(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<email_manager::EmailSyncResult, String> {
@@ -661,7 +661,7 @@ fn sync_email_source(
 }
 
 #[tauri::command]
-fn sync_all_email_sources(
+async fn sync_all_email_sources(
     state: State<'_, AppState>,
 ) -> Result<Vec<email_manager::EmailSyncResult>, String> {
     state
@@ -670,7 +670,7 @@ fn sync_all_email_sources(
 }
 
 #[tauri::command]
-fn test_email_connection(
+async fn test_email_connection(
     state: State<'_, AppState>,
     protocol: String,
     host: String,

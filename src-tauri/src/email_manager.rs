@@ -184,10 +184,22 @@ fn pop3_send_cmd(conn: &mut Pop3Stream, cmd: &str) -> Result<String, EmailError>
     let resp = pop3_read_line(conn)?;
     if resp.starts_with("+OK") {
         Ok(resp)
-    } else if resp.to_lowercase().contains("err") && (resp.to_lowercase().contains("auth") || resp.to_lowercase().contains("pass") || resp.to_lowercase().contains("user")) {
-        Err(EmailError::Pop3(format!(
-            "认证失败: {resp}。如果使用国内邮箱（163/QQ/Yeah等），请使用「授权码」而非登录密码"
-        )))
+    } else if resp.to_lowercase().contains("err") {
+        let lower = resp.to_lowercase();
+        let is_auth_error = lower.contains("auth")
+            || lower.contains("pass")
+            || lower.contains("user")
+            || lower.contains("log on")
+            || lower.contains("login")
+            || lower.contains("unable");
+        if is_auth_error {
+            Err(EmailError::Pop3(format!(
+                "认证失败: {resp}。可能原因：1) 如果使用国内邮箱（163/QQ/Yeah等），请使用「授权码」而非登录密码；\
+                 2) 163/QQ 等邮箱可能从服务器/云环境屏蔽了 POP3 协议，建议改用 IMAP 协议"
+            )))
+        } else {
+            Err(EmailError::Pop3(format!("command failed: {resp}")))
+        }
     } else {
         Err(EmailError::Pop3(format!("command failed: {resp}")))
     }

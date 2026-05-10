@@ -23,6 +23,9 @@ import {
   testEmailConnection,
   analyzeEmailError,
 } from "../api";
+import { EMAIL_PRESETS, getPresetById } from "../emailPresets";
+import type { EmailProviderPreset } from "../emailPresets";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 // --- Watch Dir Edit Modal ---
 
@@ -165,6 +168,7 @@ function EmailSourceEditModal({
   onSaved: () => void;
 }) {
   const [stage, setStage] = React.useState(source ? 2 : 1);
+  const [selectedPresetId, setSelectedPresetId] = React.useState<string>("");
 
   // Stage 1: connection config
   const [protocol, setProtocol] = React.useState(source?.protocol ?? "imap");
@@ -198,11 +202,30 @@ function EmailSourceEditModal({
   const handleProtocolChange = (p: string) => {
     setProtocol(p);
     if (!source) {
-      setPort(p === "pop3" ? "995" : "993");
+      const preset = getPresetById(selectedPresetId);
+      if (preset) {
+        setHost(p === "pop3" ? preset.pop3.host : preset.imap.host);
+        setPort(String(p === "pop3" ? preset.pop3.port : preset.imap.port));
+      } else {
+        setPort(p === "pop3" ? "995" : "993");
+      }
     }
   };
 
-  const handleTest = () => {
+  const handlePresetSelect = (presetId: string) => {
+    setSelectedPresetId(presetId);
+    const preset = getPresetById(presetId);
+    if (!preset) return;
+    const p = preset.defaultProtocol;
+    setProtocol(p);
+    setHost(p === "pop3" ? preset.pop3.host : preset.imap.host);
+    setPort(String(p === "pop3" ? preset.pop3.port : preset.imap.port));
+    setAuthMethod(preset.defaultAuthMethod);
+    setUseSsl(preset.defaultSsl);
+    setFolder(preset.defaultFolder);
+  };
+
+  const handleTest = async () => {
     if (!host.trim() || !username.trim()) {
       setError("请填写主机和用户名");
       return;
@@ -212,43 +235,38 @@ function EmailSourceEditModal({
     setTestPassed(false);
     setError(null);
     setLlmSuggestion(null);
-    // Wait for the browser to paint the spinner before starting the blocking invoke
-    requestAnimationFrame(() => {
-      requestAnimationFrame(async () => {
-        try {
-          const result = await testEmailConnection({
-            protocol,
-            host: host.trim(),
-            port: parseInt(port) || (protocol === "pop3" ? 995 : 993),
-            username: username.trim(),
-            password,
-            authMethod,
-            useSsl,
-            folder: folder.trim() || "INBOX",
-          });
-          setTestResult(result);
-          if (result.success) {
-            setTestPassed(true);
-          }
-        } catch (err) {
-          const errMsg = String(err);
-          setError(errMsg);
-          setAnalyzing(true);
-          try {
-            const suggestion = await analyzeEmailError(errMsg);
-            if (suggestion) {
-              setLlmSuggestion(suggestion);
-            }
-          } catch {
-            // LLM not available, ignore
-          } finally {
-            setAnalyzing(false);
-          }
-        } finally {
-          setTesting(false);
-        }
+    try {
+      const result = await testEmailConnection({
+        protocol,
+        host: host.trim(),
+        port: parseInt(port) || (protocol === "pop3" ? 995 : 993),
+        username: username.trim(),
+        password,
+        authMethod,
+        useSsl,
+        folder: folder.trim() || "INBOX",
       });
-    });
+      setTestResult(result);
+      if (result.success) {
+        setTestPassed(true);
+      }
+    } catch (err) {
+      const errMsg = String(err);
+      setError(errMsg);
+      setAnalyzing(true);
+      try {
+        const suggestion = await analyzeEmailError(errMsg);
+        if (suggestion) {
+          setLlmSuggestion(suggestion);
+        }
+      } catch {
+        // LLM not available, ignore
+      } finally {
+        setAnalyzing(false);
+      }
+    } finally {
+      setTesting(false);
+    }
   };
 
   const handleSave = async () => {
@@ -309,6 +327,22 @@ function EmailSourceEditModal({
               </label>
             ) : null}
 
+            {!source && stage === 1 ? (
+              <>
+                <label className="form-label">邮件服务商</label>
+                <select
+                  className="form-input"
+                  value={selectedPresetId}
+                  onChange={(e) => handlePresetSelect(e.target.value)}
+                >
+                  <option value="">手动配置</option>
+                  {EMAIL_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </>
+            ) : null}
+
             <label className="form-label">协议</label>
             <div className="form-row">
               <button
@@ -322,6 +356,7 @@ function EmailSourceEditModal({
                 className={`btn-small ${protocol === "pop3" ? "btn-primary" : ""}`}
                 onClick={() => handleProtocolChange("pop3")}
                 type="button"
+                disabled={!!(selectedPresetId && getPresetById(selectedPresetId)?.pop3Unsupported)}
               >
                 POP3
               </button>
@@ -348,7 +383,9 @@ function EmailSourceEditModal({
               className="form-input"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="user@example.com"
+              placeholder={selectedPresetId && getPresetById(selectedPresetId)
+                ? `user@${getPresetById(selectedPresetId)!.emailDomain}`
+                : "user@example.com"}
             />
 
             <label className="form-label">
@@ -361,6 +398,11 @@ function EmailSourceEditModal({
               onChange={(e) => setPassword(e.target.value)}
               placeholder={protocol !== "pop3" && authMethod === "oauth2" ? "粘贴 OAuth2 访问令牌" : ""}
             />
+            {selectedPresetId && getPresetById(selectedPresetId)?.passwordHint ? (
+              <div style={{ fontSize: 12, color: "var(--color-text-secondary, #888)", marginTop: 2, marginBottom: 4 }}>
+                {getPresetById(selectedPresetId)!.passwordHint}
+              </div>
+            ) : null}
 
             {protocol !== "pop3" ? (
               <>
@@ -402,6 +444,9 @@ function EmailSourceEditModal({
                   onChange={(e) => setFolder(e.target.value)}
                   placeholder="INBOX"
                 />
+                <div style={{ fontSize: 12, color: "var(--color-text-secondary, #888)", marginTop: 2, marginBottom: 4 }}>
+                  INBOX 表示收件箱，即只同步收件夹中的邮件。如需同步其他文件夹可修改此处。
+                </div>
               </>
             ) : null}
           </>
@@ -534,37 +579,6 @@ function EmailSourceEditModal({
             </button>
           )}
         </div>
-
-        {/* Overlay spinner for testing */}
-        {testing && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background: "rgba(255,255,255,0.7)",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 8,
-              zIndex: 10,
-              gap: 12,
-            }}
-          >
-            <div
-              style={{
-                width: 32, height: 32,
-                border: "3px solid var(--color-primary, #4f8cf7)",
-                borderTopColor: "transparent",
-                borderRadius: "50%",
-                animation: "nav-spin 0.8s linear infinite",
-              }}
-            />
-            <span style={{ fontSize: 13, color: "var(--color-text-secondary, #666)" }}>
-              正在测试连接...
-            </span>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -581,6 +595,8 @@ export function DataSourcePage() {
   const [editingDir, setEditingDir] = React.useState<WatchDirStatus | null | "new">(null);
   const [editingEmail, setEditingEmail] = React.useState<EmailSource | null | "new">(null);
   const [syncingIds, setSyncingIds] = React.useState<Set<number>>(new Set());
+  const [deletingDirId, setDeletingDirId] = React.useState<number | null>(null);
+  const [deletingEmailId, setDeletingEmailId] = React.useState<number | null>(null);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -611,12 +627,19 @@ export function DataSourcePage() {
     }
   };
 
-  const handleDirRemove = async (id: number) => {
+  const handleDirRemove = (id: number) => {
+    setDeletingDirId(id);
+  };
+
+  const confirmDirRemove = async () => {
+    if (deletingDirId === null) return;
     try {
-      await removeWatchDir(id);
+      await removeWatchDir(deletingDirId);
       await refresh();
     } catch (err) {
       setError(String(err));
+    } finally {
+      setDeletingDirId(null);
     }
   };
 
@@ -629,12 +652,19 @@ export function DataSourcePage() {
     }
   };
 
-  const handleEmailRemove = async (id: number) => {
+  const handleEmailRemove = (id: number) => {
+    setDeletingEmailId(id);
+  };
+
+  const confirmEmailRemove = async () => {
+    if (deletingEmailId === null) return;
     try {
-      await removeEmailSource(id);
+      await removeEmailSource(deletingEmailId);
       await refresh();
     } catch (err) {
       setError(String(err));
+    } finally {
+      setDeletingEmailId(null);
     }
   };
 
@@ -868,6 +898,23 @@ export function DataSourcePage() {
           onSaved={refresh}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={deletingDirId !== null}
+        title="删除监听目录"
+        message="确定要删除此监听目录吗？"
+        danger
+        onConfirm={confirmDirRemove}
+        onCancel={() => setDeletingDirId(null)}
+      />
+      <ConfirmDialog
+        open={deletingEmailId !== null}
+        title="删除邮件源"
+        message="确定要删除此邮件源吗？已同步的邮件不会被删除。"
+        danger
+        onConfirm={confirmEmailRemove}
+        onCancel={() => setDeletingEmailId(null)}
+      />
     </div>
   );
 }
