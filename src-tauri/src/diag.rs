@@ -74,22 +74,56 @@ pub struct DiagnosticResult {
     pub all_passed: bool,
 }
 
+fn bundled_config_path(resource_dir: &Path) -> PathBuf {
+    // In dev mode resource_dir is target/debug/ but resources are in target/debug/_up_/
+    let base_dir = if resource_dir.join("_up_").is_dir() {
+        resource_dir.join("_up_")
+    } else {
+        resource_dir.to_path_buf()
+    };
+    base_dir.join("sample").join("diagnostic_config.json")
+}
+
+fn patch_from_bundled(config: &DiagnosticConfig, resource_dir: &Path) -> Option<DiagnosticConfig> {
+    let bundled_path = bundled_config_path(resource_dir);
+    let json = std::fs::read_to_string(&bundled_path).ok()?;
+    let bundled: DiagnosticConfig = serde_json::from_str(&json).ok()?;
+    let mut patched = config.clone();
+    if patched.test_image_path.is_empty() && !bundled.test_image_path.is_empty() {
+        patched.test_image_path = bundled.test_image_path;
+    }
+    // Also fill in ground truth if user config has none
+    if patched.ground_truth.invoice_number.is_none()
+        && bundled.ground_truth.invoice_number.is_some()
+    {
+        patched.ground_truth = bundled.ground_truth;
+    }
+    Some(patched)
+}
+
 pub fn load_config(app_data_dir: &Path, resource_dir: Option<&Path>) -> DiagnosticConfig {
     let path = app_data_dir.join("diagnostic_config.json");
+    // Try loading existing user config
     if let Ok(json) = std::fs::read_to_string(&path) {
         if let Ok(config) = serde_json::from_str::<DiagnosticConfig>(&json) {
+            if !config.test_image_path.is_empty() {
+                return config;
+            }
+            // test_image_path is empty — try to patch from bundled config
+            if let Some(res_dir) = resource_dir {
+                if let Some(patched) = patch_from_bundled(&config, res_dir) {
+                    if let Err(e) = save_config(app_data_dir, &patched) {
+                        warn!("Failed to persist patched diagnostic config: {e}");
+                    }
+                    return patched;
+                }
+            }
             return config;
         }
     }
     // First run: try to copy bundled diagnostic_config.json from resource_dir
     if let Some(res_dir) = resource_dir {
-        // In dev mode resource_dir is target/debug/ but resources are in target/debug/_up_/
-        let base_dir = if res_dir.join("_up_").is_dir() {
-            res_dir.join("_up_")
-        } else {
-            res_dir.to_path_buf()
-        };
-        let bundled_config = base_dir.join("sample").join("diagnostic_config.json");
+        let bundled_config = bundled_config_path(res_dir);
         if bundled_config.exists() {
             if let Ok(json) = std::fs::read_to_string(&bundled_config) {
                 if let Ok(config) = serde_json::from_str::<DiagnosticConfig>(&json) {
@@ -149,6 +183,16 @@ pub async fn run_diagnostic(
 
     // Step 2: Image recognition
     let mut recognition_json: Option<serde_json::Value> = None;
+    if diag_config.test_image_path.is_empty() {
+        steps.push(DiagnosticStep {
+            name: "图片识别".into(),
+            passed: false,
+            duration_ms: 0,
+            message: "测试图片路径未配置。请在 diagnostic_config.json 中设置 test_image_path。"
+                .into(),
+            details: None,
+        });
+    } else {
     let test_image_path = {
         let configured = PathBuf::from(&diag_config.test_image_path);
         if configured.is_absolute() {
@@ -218,6 +262,7 @@ pub async fn run_diagnostic(
         }
     };
     steps.push(step2);
+    } // close else block for non-empty test_image_path
 
     // Step 3: Ground truth comparison
     let gt = &diag_config.ground_truth;
