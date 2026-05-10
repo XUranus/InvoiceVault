@@ -93,32 +93,38 @@ export function useAppInitializer() {
 
   // Watcher auto-import listener
   useEffect(() => {
-    const unlisten = listen<WatcherImportEvent>(
+    let cleanup: (() => void) | null = null;
+    listen<WatcherImportEvent>(
       "watcher-import",
-      (event) => {
+      (_event) => {
         triggerImportRefresh();
         refreshInvoices();
         triggerDashboardRefresh();
       },
-    );
+    )
+      .then((fn) => {
+        cleanup = fn;
+      })
+      .catch(() => {});
     return () => {
-      unlisten.then((fn) => fn());
+      cleanup?.();
     };
-  }, [
-    triggerImportRefresh,
-    refreshInvoices,
-    triggerDashboardRefresh,
-  ]);
+  }, [triggerImportRefresh, refreshInvoices, triggerDashboardRefresh]);
 
   // Background recognition completion listener
   useEffect(() => {
-    const unlisten = listen("recognition-complete", () => {
+    let cleanup: (() => void) | null = null;
+    listen("recognition-complete", () => {
       refreshInvoices();
       triggerImportRefresh();
       triggerDashboardRefresh();
-    });
+    })
+      .then((fn) => {
+        cleanup = fn;
+      })
+      .catch(() => {});
     return () => {
-      unlisten.then((fn) => fn());
+      cleanup?.();
     };
   }, [refreshInvoices, triggerImportRefresh, triggerDashboardRefresh]);
 

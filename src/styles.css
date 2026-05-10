@@ -2078,6 +2078,11 @@ textarea:focus {
   color: var(--color-badge-neutral-text);
 }
 
+.badge-source {
+  background: var(--color-tag-blue-bg);
+  color: var(--color-tag-blue-text);
+}
+
 .badge-custom {
   background: var(--color-tag-blue-bg);
   color: var(--color-tag-blue-text);

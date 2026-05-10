@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::{
-    document::render_pdf_pages,
+    document::{prepare_image_for_recognition, render_pdf_pages},
     event,
     extractor::{save_invoice_extraction, SaveInvoiceExtractionRequest},
     importer::{import_files, ImportJobSummary},
@@ -762,8 +762,29 @@ pub async fn recognize_raw_file_async(
         };
 
     for (page_range, image_path, mime) in recognition_inputs {
+        let page_number = page_range.as_ref().and_then(|s| s.parse::<usize>().ok());
+
+        // Prepare normalized image + thumbnail (same as app_core flow)
+        let prepared = match prepare_image_for_recognition(
+            &image_path,
+            &thumb_dir,
+            raw_file_id,
+            page_number,
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Watcher: image prepare failed for raw_file {raw_file_id}: {e}");
+                // Fall back to original image
+                crate::document::PreparedImage {
+                    image_path,
+                    thumbnail_path: PathBuf::new(),
+                    mime_type: mime.clone(),
+                }
+            }
+        };
+
         let recognition =
-            match recognize_invoice_image(config.clone(), &image_path, &mime, audit).await {
+            match recognize_invoice_image(config.clone(), &prepared.image_path, &prepared.mime_type, audit).await {
                 Ok(r) => r,
                 Err(e) => {
                     error!("Watcher: recognition failed for raw_file {raw_file_id}: {e}");

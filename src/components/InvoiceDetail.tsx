@@ -197,6 +197,11 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               {detail.source_page_range}
             </span>
           )}
+          {detail.source_type && (
+            <span className="badge badge-source">
+              {sourceTypeLabel(detail.source_type)}
+            </span>
+          )}
           {detail.badges.map((badge) => (
             <span className="badge badge-custom" key={badge.group_name}>
               {badge.group_name}: {badge.value}
@@ -302,7 +307,6 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               <Field label="价税合计" value={detail.total_amount} />
               <Field label="类别" value={detail.category} />
               <Field label="备注" value={detail.remarks} />
-              <Field label="来源" value={detail.source_type ? sourceTypeLabel(detail.source_type) : null} />
               {parseExtraFields(detail.extra_fields).map(([label, value]) => (
                 <Field key={label} label={label} value={value} />
               ))}

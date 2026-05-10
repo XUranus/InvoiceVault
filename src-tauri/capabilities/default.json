@@ -2,6 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default InvoiceVault desktop permissions",
-  "windows": ["main"],
-  "permissions": ["core:default", "core:event-all", "dialog:default", "shell:allow-open"]
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "shell:allow-open",
+    "core:event:default"
+  ]
 }
