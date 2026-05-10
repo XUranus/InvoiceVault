@@ -13,7 +13,9 @@ fn main() {
         };
 
         // Try to find the dylib in the ort cache directory
-        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
         let ort_cache = PathBuf::from(&home).join(".cache/ort.pyke.io/dfbin");
 
         let target_triple = if cfg!(target_os = "macos") {
@@ -30,7 +32,10 @@ fn main() {
 
         let target_dir = ort_cache.join(target_triple);
         if !target_dir.exists() {
-            println!("cargo:warning=ort cache not found at {}", target_dir.display());
+            println!(
+                "cargo:warning=ort cache not found at {}",
+                target_dir.display()
+            );
             return;
         }
 
@@ -46,7 +51,10 @@ fn main() {
             .filter(|p| p.exists());
 
         let Some(real_path) = real_path else {
-            println!("cargo:warning={lib_name} not found in {}", target_dir.display());
+            println!(
+                "cargo:warning={lib_name} not found in {}",
+                target_dir.display()
+            );
             return;
         };
 
@@ -57,7 +65,9 @@ fn main() {
         let dest = resources_dir.join(lib_name);
 
         let should_copy = if dest.exists() {
-            let src_modified = std::fs::metadata(&real_path).and_then(|m| m.modified()).ok();
+            let src_modified = std::fs::metadata(&real_path)
+                .and_then(|m| m.modified())
+                .ok();
             let dst_modified = std::fs::metadata(&dest).and_then(|m| m.modified()).ok();
             match (src_modified, dst_modified) {
                 (Some(s), Some(d)) => s > d,
@@ -71,7 +81,10 @@ fn main() {
             if let Err(e) = std::fs::copy(&real_path, &dest) {
                 println!("cargo:warning=Failed to copy {lib_name}: {e}");
             } else {
-                println!("cargo:warning=Bundled {lib_name} from {}", real_path.display());
+                println!(
+                    "cargo:warning=Bundled {lib_name} from {}",
+                    real_path.display()
+                );
             }
         }
 

@@ -21,6 +21,7 @@ import {
   toggleEmailSource,
   syncEmailSource,
   testEmailConnection,
+  analyzeEmailError,
 } from "../api";
 
 // --- Watch Dir Edit Modal ---
@@ -152,7 +153,7 @@ function WatchDirEditModal({
   );
 }
 
-// --- Email Source Edit Modal ---
+// --- Email Source Edit Modal (Two-Stage) ---
 
 function EmailSourceEditModal({
   source,
@@ -163,7 +164,9 @@ function EmailSourceEditModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [name, setName] = React.useState(source?.name ?? "");
+  const [stage, setStage] = React.useState(source ? 2 : 1);
+
+  // Stage 1: connection config
   const [protocol, setProtocol] = React.useState(source?.protocol ?? "imap");
   const [host, setHost] = React.useState(source?.imap_host ?? "");
   const [port, setPort] = React.useState(
@@ -171,17 +174,26 @@ function EmailSourceEditModal({
   );
   const [username, setUsername] = React.useState(source?.username ?? "");
   const [password, setPassword] = React.useState(source?.password ?? "");
+  const [authMethod, setAuthMethod] = React.useState(source?.auth_method ?? "password");
   const [useSsl, setUseSsl] = React.useState(source?.use_ssl ?? true);
   const [folder, setFolder] = React.useState(source?.folder ?? "INBOX");
+
+  // Stage 2: advanced
+  const [name, setName] = React.useState(source?.name ?? "");
   const [nameKeywords, setNameKeywords] = React.useState(source?.name_keywords ?? "");
-  const [maxAgeDays, setMaxAgeDays] = React.useState(String(source?.max_email_age_days ?? 0));
+  const [maxAgeDays, setMaxAgeDays] = React.useState(String(source?.max_email_age_days ?? 30));
   const [pollInterval, setPollInterval] = React.useState(
-    String(source?.poll_interval_seconds ?? 60),
+    String(source?.poll_interval_seconds ?? 300),
   );
+
+  // UI state
   const [saving, setSaving] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<EmailTestResult | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [testPassed, setTestPassed] = React.useState(!!source);
+  const [analyzing, setAnalyzing] = React.useState(false);
+  const [llmSuggestion, setLlmSuggestion] = React.useState<string | null>(null);
 
   const handleProtocolChange = (p: string) => {
     setProtocol(p);
@@ -190,37 +202,56 @@ function EmailSourceEditModal({
     }
   };
 
-  const handleTest = async () => {
+  const handleTest = () => {
     if (!host.trim() || !username.trim()) {
       setError("请填写主机和用户名");
       return;
     }
     setTesting(true);
     setTestResult(null);
+    setTestPassed(false);
     setError(null);
-    try {
-      const result = await testEmailConnection({
-        protocol,
-        host: host.trim(),
-        port: parseInt(port) || (protocol === "pop3" ? 995 : 993),
-        username: username.trim(),
-        password,
-        use_ssl: useSsl,
-        folder: folder.trim() || "INBOX",
+    setLlmSuggestion(null);
+    // Wait for the browser to paint the spinner before starting the blocking invoke
+    requestAnimationFrame(() => {
+      requestAnimationFrame(async () => {
+        try {
+          const result = await testEmailConnection({
+            protocol,
+            host: host.trim(),
+            port: parseInt(port) || (protocol === "pop3" ? 995 : 993),
+            username: username.trim(),
+            password,
+            authMethod,
+            useSsl,
+            folder: folder.trim() || "INBOX",
+          });
+          setTestResult(result);
+          if (result.success) {
+            setTestPassed(true);
+          }
+        } catch (err) {
+          const errMsg = String(err);
+          setError(errMsg);
+          setAnalyzing(true);
+          try {
+            const suggestion = await analyzeEmailError(errMsg);
+            if (suggestion) {
+              setLlmSuggestion(suggestion);
+            }
+          } catch {
+            // LLM not available, ignore
+          } finally {
+            setAnalyzing(false);
+          }
+        } finally {
+          setTesting(false);
+        }
       });
-      setTestResult(result);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setTesting(false);
-    }
+    });
   };
 
   const handleSave = async () => {
-    if (!host.trim() || !username.trim()) {
-      setError("请填写主机和用户名");
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
@@ -231,11 +262,12 @@ function EmailSourceEditModal({
         imap_port: parseInt(port) || (protocol === "pop3" ? 995 : 993),
         username: username.trim(),
         password,
+        auth_method: protocol === "pop3" ? undefined : authMethod,
         use_ssl: useSsl,
         folder: protocol === "pop3" ? "" : (folder.trim() || "INBOX"),
         name_keywords: nameKeywords.trim() || undefined,
         max_email_age_days: parseInt(maxAgeDays) || 0,
-        poll_interval_seconds: parseInt(pollInterval) || 60,
+        poll_interval_seconds: parseInt(pollInterval) || 300,
       };
       if (source) {
         await updateEmailSource(source.id, data);
@@ -253,143 +285,286 @@ function EmailSourceEditModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">{source ? "编辑邮件源" : "添加邮件源"}</h3>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ position: "relative" }}>
+        <h3 className="modal-title">
+          {source ? "编辑邮件源" : "添加邮件源"}
+          {!source && stage === 1 && (
+            <span style={{ fontSize: 13, fontWeight: "normal", color: "var(--color-text-secondary, #888)", marginLeft: 8 }}>
+              第 1 步：连接配置
+            </span>
+          )}
+          {!source && stage === 2 && (
+            <span style={{ fontSize: 13, fontWeight: "normal", color: "var(--color-text-secondary, #888)", marginLeft: 8 }}>
+              第 2 步：同步设置
+            </span>
+          )}
+        </h3>
 
-        <label className="form-label">名称（可选，显示用）</label>
-        <input
-          className="form-input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="财务邮箱"
-        />
-
-        <label className="form-label">协议</label>
-        <div className="form-row">
-          <button
-            className={`btn-small ${protocol === "imap" ? "btn-primary" : ""}`}
-            onClick={() => handleProtocolChange("imap")}
-            type="button"
-          >
-            IMAP
-          </button>
-          <button
-            className={`btn-small ${protocol === "pop3" ? "btn-primary" : ""}`}
-            onClick={() => handleProtocolChange("pop3")}
-            type="button"
-          >
-            POP3
-          </button>
-        </div>
-
-        <label className="form-label">{protocol === "pop3" ? "POP3" : "IMAP"} 主机</label>
-        <input
-          className="form-input"
-          value={host}
-          onChange={(e) => setHost(e.target.value)}
-          placeholder={protocol === "pop3" ? "pop.example.com" : "imap.example.com"}
-        />
-
-        <label className="form-label">端口</label>
-        <input
-          className="form-input"
-          type="number"
-          value={port}
-          onChange={(e) => setPort(e.target.value)}
-        />
-
-        <label className="form-label">用户名</label>
-        <input
-          className="form-input"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="user@example.com"
-        />
-
-        <label className="form-label">密码</label>
-        <input
-          className="form-input"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-
-        <label className="toggle-label">
-          <input
-            type="checkbox"
-            checked={useSsl}
-            onChange={(e) => setUseSsl(e.target.checked)}
-          />
-          使用 SSL
-        </label>
-
-        {protocol !== "pop3" ? (
+        {/* Stage 1: Connection Config */}
+        {stage === 1 || source ? (
           <>
-            <label className="form-label">邮件文件夹</label>
+            {stage === 2 && source ? (
+              <label className="form-label" style={{ marginBottom: 4, fontSize: 13, color: "var(--color-text-secondary, #888)" }}>
+                连接配置（修改后需重新测试）
+              </label>
+            ) : null}
+
+            <label className="form-label">协议</label>
+            <div className="form-row">
+              <button
+                className={`btn-small ${protocol === "imap" ? "btn-primary" : ""}`}
+                onClick={() => handleProtocolChange("imap")}
+                type="button"
+              >
+                IMAP
+              </button>
+              <button
+                className={`btn-small ${protocol === "pop3" ? "btn-primary" : ""}`}
+                onClick={() => handleProtocolChange("pop3")}
+                type="button"
+              >
+                POP3
+              </button>
+            </div>
+
+            <label className="form-label">{protocol === "pop3" ? "POP3" : "IMAP"} 主机</label>
             <input
               className="form-input"
-              value={folder}
-              onChange={(e) => setFolder(e.target.value)}
-              placeholder="INBOX"
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              placeholder={protocol === "pop3" ? "pop.example.com" : "imap.example.com"}
+            />
+
+            <label className="form-label">端口</label>
+            <input
+              className="form-input"
+              type="number"
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+            />
+
+            <label className="form-label">用户名</label>
+            <input
+              className="form-input"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="user@example.com"
+            />
+
+            <label className="form-label">
+              {protocol !== "pop3" && authMethod === "oauth2" ? "OAuth2 访问令牌" : "密码"}
+            </label>
+            <input
+              className="form-input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={protocol !== "pop3" && authMethod === "oauth2" ? "粘贴 OAuth2 访问令牌" : ""}
+            />
+
+            {protocol !== "pop3" ? (
+              <>
+                <label className="form-label">认证方式</label>
+                <div className="form-row">
+                  <button
+                    className={`btn-small ${authMethod === "password" ? "btn-primary" : ""}`}
+                    onClick={() => setAuthMethod("password")}
+                    type="button"
+                  >
+                    密码
+                  </button>
+                  <button
+                    className={`btn-small ${authMethod === "oauth2" ? "btn-primary" : ""}`}
+                    onClick={() => setAuthMethod("oauth2")}
+                    type="button"
+                  >
+                    OAuth2 / 现代认证
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            <label className="toggle-label" style={{ marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={useSsl}
+                onChange={(e) => setUseSsl(e.target.checked)}
+              />
+              使用 SSL
+            </label>
+
+            {protocol !== "pop3" ? (
+              <>
+                <label className="form-label">邮件文件夹</label>
+                <input
+                  className="form-input"
+                  value={folder}
+                  onChange={(e) => setFolder(e.target.value)}
+                  placeholder="INBOX"
+                />
+              </>
+            ) : null}
+          </>
+        ) : null}
+
+        {/* Stage 2: Advanced Settings */}
+        {stage === 2 ? (
+          <>
+            <label className="form-label" style={{ marginTop: 12, marginBottom: 4, fontSize: 13, color: "var(--color-text-secondary, #888)" }}>
+              同步设置
+            </label>
+
+            <label className="form-label">名称（可选，显示用）</label>
+            <input
+              className="form-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="财务邮箱"
+            />
+
+            <label className="form-label">附件文件名关键词过滤（空格分隔，留空=不过滤）</label>
+            <input
+              className="form-input"
+              value={nameKeywords}
+              onChange={(e) => setNameKeywords(e.target.value)}
+              placeholder="发票 invoice"
+            />
+
+            <label className="form-label">邮件最大天数（0=不限制）</label>
+            <input
+              className="form-input"
+              type="number"
+              min={0}
+              value={maxAgeDays}
+              onChange={(e) => setMaxAgeDays(e.target.value)}
+            />
+
+            <label className="form-label">轮询间隔（秒）</label>
+            <input
+              className="form-input"
+              type="number"
+              min={10}
+              value={pollInterval}
+              onChange={(e) => setPollInterval(e.target.value)}
             />
           </>
         ) : null}
 
-        <label className="form-label">附件文件名关键词过滤（逗号分隔，留空=不过滤）</label>
-        <input
-          className="form-input"
-          value={nameKeywords}
-          onChange={(e) => setNameKeywords(e.target.value)}
-          placeholder="发票,invoice"
-        />
-
-        <label className="form-label">邮件最大天数（0=不限制）</label>
-        <input
-          className="form-input"
-          type="number"
-          min={0}
-          value={maxAgeDays}
-          onChange={(e) => setMaxAgeDays(e.target.value)}
-        />
-
-        <label className="form-label">轮询间隔（秒）</label>
-        <input
-          className="form-input"
-          type="number"
-          min={10}
-          value={pollInterval}
-          onChange={(e) => setPollInterval(e.target.value)}
-        />
-
+        {/* Alerts */}
         {testResult ? (
-          <div
-            className={`alert ${testResult.success ? "alert-success" : "alert-error"}`}
-          >
+          <div className={`alert ${testResult.success ? "alert-success" : "alert-error"}`}>
             {testResult.message}
           </div>
         ) : null}
         {error ? <div className="alert alert-error">{error}</div> : null}
+        {analyzing ? (
+          <div className="alert" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div
+              style={{
+                width: 14, height: 14, flexShrink: 0,
+                border: "2px solid var(--color-primary, #4f8cf7)",
+                borderTopColor: "transparent",
+                borderRadius: "50%",
+                animation: "nav-spin 0.8s linear infinite",
+              }}
+            />
+            <span>正在分析错误原因...</span>
+          </div>
+        ) : null}
+        {llmSuggestion ? (
+          <div className="alert alert-success" style={{ whiteSpace: "pre-wrap" }}>
+            <strong>AI 建议：</strong>{llmSuggestion}
+          </div>
+        ) : null}
 
-        <div className="modal-actions">
-          <button
-            className="btn-small"
-            onClick={handleTest}
-            disabled={testing}
-          >
-            {testing ? "测试中..." : "测试连接"}
-          </button>
+        {/* Actions */}
+        <div className="modal-actions" style={{ marginTop: 12 }}>
+          {stage === 1 || source ? (
+            <button
+              className="btn-small"
+              onClick={handleTest}
+              disabled={testing}
+              style={testing ? { position: "relative", minWidth: 100 } : undefined}
+            >
+              {testing ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 14, height: 14,
+                      border: "2px solid currentColor",
+                      borderTopColor: "transparent",
+                      borderRadius: "50%",
+                      animation: "nav-spin 0.8s linear infinite",
+                    }}
+                  />
+                  测试中...
+                </span>
+              ) : "测试连接"}
+            </button>
+          ) : null}
+          {!source && stage === 1 && error && !testing ? (
+            <button
+              className="btn-small"
+              onClick={() => setTestPassed(true)}
+              style={{ fontSize: 12, opacity: 0.7 }}
+            >
+              跳过测试
+            </button>
+          ) : null}
           <div style={{ flex: 1 }} />
           <button className="btn-small" onClick={onClose}>
             取消
           </button>
-          <button
-            className="btn-small btn-primary"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? "保存中..." : "保存"}
-          </button>
+          {!source && stage === 1 ? (
+            <button
+              className="btn-small btn-primary"
+              onClick={() => setStage(2)}
+              disabled={!testPassed}
+            >
+              下一步
+            </button>
+          ) : (
+            <button
+              className="btn-small btn-primary"
+              onClick={handleSave}
+              disabled={saving || (!source && !testPassed)}
+            >
+              {saving ? "保存中..." : "保存"}
+            </button>
+          )}
         </div>
+
+        {/* Overlay spinner for testing */}
+        {testing && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(255,255,255,0.7)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 8,
+              zIndex: 10,
+              gap: 12,
+            }}
+          >
+            <div
+              style={{
+                width: 32, height: 32,
+                border: "3px solid var(--color-primary, #4f8cf7)",
+                borderTopColor: "transparent",
+                borderRadius: "50%",
+                animation: "nav-spin 0.8s linear infinite",
+              }}
+            />
+            <span style={{ fontSize: 13, color: "var(--color-text-secondary, #666)" }}>
+              正在测试连接...
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

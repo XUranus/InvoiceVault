@@ -7,6 +7,8 @@ import {
   batchUpdateInvoices,
   batchDeleteInvoices,
   markInvoiceViewed,
+  mergeInvoices,
+  exportPdfReport,
 } from "../api";
 import { InvoiceListControls } from "./InvoiceListControls";
 import { ExportButton } from "./ExportButton";
@@ -250,6 +252,39 @@ export function InvoicesPage() {
     }
   };
 
+  const handleMerge = async () => {
+    const ids = Array.from(selected);
+    if (ids.length < 2) return;
+    const targetId = ids[0];
+    const sourceIds = ids.slice(1);
+    if (!confirm(`将发票 ${sourceIds.join(", ")} 合并到发票 #${targetId}，是否确认？`)) return;
+    try {
+      await mergeInvoices(targetId, sourceIds);
+      setSelected(new Set());
+      doSearch(params);
+      refreshInvoices();
+    } catch (err) {
+      showError(String(err));
+    }
+  };
+
+  const handleExportPdfReport = async () => {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const outputPath = await save({
+      defaultPath: "invoice-report.pdf",
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (!outputPath) return;
+    try {
+      await exportPdfReport({
+        output_path: outputPath,
+        invoice_ids: selected.size > 0 ? Array.from(selected) : undefined,
+      });
+    } catch (err) {
+      showError(String(err));
+    }
+  };
+
   const handleSelectInvoice = (id: number) => {
     setSelectedId(id);
     setView("detail");
@@ -396,6 +431,14 @@ export function InvoicesPage() {
             }}
           >
             取消选择
+          </button>
+          {selected.size >= 2 && (
+            <button className="btn-small" onClick={handleMerge}>
+              合并发票
+            </button>
+          )}
+          <button className="btn-small" onClick={handleExportPdfReport}>
+            导出 PDF 报表
           </button>
         </div>
       )}

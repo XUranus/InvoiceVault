@@ -88,7 +88,13 @@ pub fn resolve_duplicate(
     conn: &Connection,
     request: ResolveDuplicateRequest,
 ) -> Result<ResolveDuplicateResult, DedupeError> {
-    let valid_actions = ["confirm", "ignore", "keep_current", "keep_other", "keep_both"];
+    let valid_actions = [
+        "confirm",
+        "ignore",
+        "keep_current",
+        "keep_other",
+        "keep_both",
+    ];
     if !valid_actions.contains(&request.action.as_str()) {
         return Ok(ResolveDuplicateResult {
             action: request.action,

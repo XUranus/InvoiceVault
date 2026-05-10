@@ -947,6 +947,8 @@ pub enum ExtractorError {
     InvalidConfidence,
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
+    #[error("合并失败: {0}")]
+    MergeError(String),
 }
 
 pub fn save_invoice_extraction(
@@ -1755,6 +1757,237 @@ pub fn batch_delete_invoices(conn: &Connection, ids: &[i64]) -> Result<usize, Ex
     Ok(count)
 }
 
+// ---- Invoice Merging ----
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MergeInvoicesResult {
+    pub merged_invoice: InvoiceSummary,
+    pub merged_from_ids: Vec<i64>,
+    pub total_items_merged: usize,
+}
+
+pub fn merge_invoices(
+    conn: &mut Connection,
+    target_invoice_id: i64,
+    source_invoice_ids: Vec<i64>,
+) -> Result<MergeInvoicesResult, ExtractorError> {
+    if source_invoice_ids.is_empty() {
+        return Err(ExtractorError::MergeError(
+            "至少需要选择一张要合并的发票".into(),
+        ));
+    }
+
+    let mut all_ids = source_invoice_ids.clone();
+    all_ids.push(target_invoice_id);
+    all_ids.sort();
+    all_ids.dedup();
+
+    if all_ids.len() < 2 {
+        return Err(ExtractorError::MergeError(
+            "至少需要两张发票才能合并".into(),
+        ));
+    }
+
+    if source_invoice_ids.contains(&target_invoice_id) {
+        return Err(ExtractorError::MergeError(
+            "目标发票不能在合并来源列表中".into(),
+        ));
+    }
+
+    // Validate all invoices exist and belong to the same raw_file_id
+    let target_raw_file_id: i64 = conn
+        .query_row(
+            "SELECT raw_file_id FROM invoices WHERE id = ?1",
+            [target_invoice_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| ExtractorError::NotFound(target_invoice_id))?;
+
+    for &source_id in &source_invoice_ids {
+        let source_raw_file_id: i64 = conn
+            .query_row(
+                "SELECT raw_file_id FROM invoices WHERE id = ?1",
+                [source_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| ExtractorError::NotFound(source_id))?;
+
+        if source_raw_file_id != target_raw_file_id {
+            return Err(ExtractorError::MergeError(format!(
+                "发票 {} 和 {} 来自不同的文件，无法合并",
+                target_invoice_id, source_id
+            )));
+        }
+    }
+
+    let tx = conn.transaction()?;
+
+    // Collect page ranges from all invoices to compute merged range
+    let mut all_page_numbers: Vec<usize> = Vec::new();
+
+    // Get target page range
+    let target_page_range: Option<String> = tx.query_row(
+        "SELECT source_page_range FROM invoices WHERE id = ?1",
+        [target_invoice_id],
+        |row| row.get(0),
+    )?;
+    if let Some(ref pr) = target_page_range {
+        for p in parse_page_range(pr) {
+            if !all_page_numbers.contains(&p) {
+                all_page_numbers.push(p);
+            }
+        }
+    }
+
+    // Get source page ranges and collect items count
+    let mut total_items_merged: usize = 0;
+    for &source_id in &source_invoice_ids {
+        let source_page_range: Option<String> = tx.query_row(
+            "SELECT source_page_range FROM invoices WHERE id = ?1",
+            [source_id],
+            |row| row.get(0),
+        )?;
+        if let Some(ref pr) = source_page_range {
+            for p in parse_page_range(pr) {
+                if !all_page_numbers.contains(&p) {
+                    all_page_numbers.push(p);
+                }
+            }
+        }
+
+        // Count items being merged
+        let item_count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM invoice_items WHERE invoice_id = ?1",
+            [source_id],
+            |row| row.get(0),
+        )?;
+        total_items_merged += item_count as usize;
+    }
+
+    // Merge page range
+    all_page_numbers.sort();
+    let merged_page_range = if all_page_numbers.is_empty() {
+        None
+    } else if all_page_numbers.len() == 1 {
+        Some(all_page_numbers[0].to_string())
+    } else {
+        let min_page = all_page_numbers[0];
+        let max_page = all_page_numbers[all_page_numbers.len() - 1];
+        Some(format!("{}-{}", min_page, max_page))
+    };
+
+    // Sum amount fields
+    let sum_amount = |col: &str| -> Result<Option<String>, ExtractorError> {
+        let sql = format!(
+            "SELECT SUM(CASE WHEN {} IS NULL OR {} = '' THEN 0 ELSE CAST({} AS REAL) END)
+             FROM invoices WHERE id IN ({})",
+            col,
+            col,
+            col,
+            all_ids
+                .iter()
+                .map(|_| "?".to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let refs: Vec<&dyn rusqlite::types::ToSql> = all_ids.iter().map(|id| id as _).collect();
+        let total: Option<f64> = tx.query_row(&sql, refs.as_slice(), |row| row.get(0))?;
+        Ok(total.map(|v| format!("{:.2}", v)))
+    };
+
+    let merged_total_amount = sum_amount("total_amount")?;
+    let merged_amount_without_tax = sum_amount("amount_without_tax")?;
+    let merged_tax_amount = sum_amount("tax_amount")?;
+
+    // Move items from source invoices to target
+    tx.execute(
+        &format!(
+            "UPDATE invoice_items SET invoice_id = ?1 WHERE invoice_id IN ({})",
+            source_invoice_ids
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        rusqlite::params_from_iter(
+            std::iter::once(&target_invoice_id as &dyn rusqlite::types::ToSql)
+                .chain(source_invoice_ids.iter().map(|id| id as _)),
+        ),
+    )?;
+
+    // Update target invoice
+    tx.execute(
+        "UPDATE invoices SET
+            source_page_range = ?1,
+            total_amount = COALESCE(?2, total_amount),
+            amount_without_tax = COALESCE(?3, amount_without_tax),
+            tax_amount = COALESCE(?4, tax_amount),
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?5",
+        rusqlite::params![
+            merged_page_range,
+            merged_total_amount,
+            merged_amount_without_tax,
+            merged_tax_amount,
+            target_invoice_id,
+        ],
+    )?;
+
+    // Delete extraction_runs for source invoices
+    tx.execute(
+        &format!(
+            "DELETE FROM extraction_runs WHERE invoice_id IN ({})",
+            source_invoice_ids
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        rusqlite::params_from_iter(source_invoice_ids.iter()),
+    )?;
+
+    // Delete dedupe_candidates referencing source invoices
+    tx.execute(
+        &format!(
+            "DELETE FROM dedupe_candidates WHERE invoice_id IN ({0}) OR candidate_invoice_id IN ({0})",
+            source_invoice_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",")
+        ),
+        rusqlite::params_from_iter(source_invoice_ids.iter()),
+    )?;
+
+    // Delete source invoices
+    tx.execute(
+        &format!(
+            "DELETE FROM invoices WHERE id IN ({})",
+            source_invoice_ids
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        rusqlite::params_from_iter(source_invoice_ids.iter()),
+    )?;
+
+    tx.commit()?;
+
+    let merged_invoice = load_invoice_summary(conn, target_invoice_id)?;
+    Ok(MergeInvoicesResult {
+        merged_invoice,
+        merged_from_ids: all_ids,
+        total_items_merged,
+    })
+}
+
+fn parse_page_range(range: &str) -> Vec<usize> {
+    let range = range.trim();
+    if let Some((start, end)) = range.split_once('-') {
+        if let (Ok(s), Ok(e)) = (start.parse::<usize>(), end.parse::<usize>()) {
+            return (s..=e).collect();
+        }
+    }
+    range.parse::<usize>().ok().into_iter().collect()
+}
+
 pub fn insert_usage_log(
     conn: &Connection,
     operation: &str,
@@ -1766,7 +1999,13 @@ pub fn insert_usage_log(
     conn.execute(
         "INSERT INTO usage_log (operation, model, prompt_tokens, completion_tokens, total_tokens)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![operation, model, prompt_tokens, completion_tokens, total_tokens],
+        rusqlite::params![
+            operation,
+            model,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens
+        ],
     )?;
     Ok(())
 }

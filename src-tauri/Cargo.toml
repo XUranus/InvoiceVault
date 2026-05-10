@@ -47,6 +47,7 @@ ndarray = { version = "0.17", features = ["std"] }
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 hf-hub = { version = "0.4", features = ["tokio", "rustls-tls"] }
 dirs = "6"
+printpdf = { version = "0.9", default-features = false, features = ["images", "jpeg", "png", "text_layout"] }
 
 # On macOS/Windows, use load-dynamic (runtime ONNX Runtime loading via ORT_DYLIB_PATH).
 # On Linux, the base ort dep is used (static linking via download-binaries).

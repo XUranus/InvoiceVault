@@ -1,6 +1,12 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use printpdf::{
+    BuiltinFont, Color, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, PdfWarnMsg,
+    Point, Pt, RawImage, Rect, Rgb, TextItem, XObjectTransform,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct ExportInvoicesRequest {
@@ -564,4 +570,336 @@ fn export_xlsx(
         byte_size,
         columns: columns.iter().map(|c| c.label.into()).collect(),
     })
+}
+
+// --- PDF Report Export ---
+
+const A4_WIDTH_MM: f32 = 297.0;
+const A4_HEIGHT_MM: f32 = 210.0;
+const MARGIN_MM: f32 = 15.0;
+
+const TABLE_HEADER_FIELDS: &[(&str, f32)] = &[
+    ("Invoice No.", 30.0),
+    ("Date", 25.0),
+    ("Seller", 40.0),
+    ("Buyer", 40.0),
+    ("Total", 25.0),
+    ("Tax", 22.0),
+    ("Type", 25.0),
+];
+
+#[derive(Debug, Deserialize)]
+pub struct PdfReportRequest {
+    pub output_path: String,
+    pub invoice_ids: Option<Vec<i64>>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub thumbnails_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PdfReportResult {
+    pub file_path: String,
+    pub invoice_count: usize,
+    pub byte_size: u64,
+}
+
+pub fn export_pdf_report(
+    conn: &Connection,
+    request: PdfReportRequest,
+) -> Result<PdfReportResult, ExportError> {
+    let rows = load_invoices_for_export(
+        conn,
+        request.invoice_ids.as_deref(),
+        request.date_from.as_deref(),
+        request.date_to.as_deref(),
+    )?;
+
+    if rows.is_empty() {
+        return Err(ExportError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no invoices to export",
+        )));
+    }
+
+    let thumbnails_dir = request
+        .thumbnails_dir
+        .as_deref()
+        .map(Path::new)
+        .filter(|p| p.exists());
+    let mut warnings: Vec<PdfWarnMsg> = Vec::new();
+
+    let mut doc = PdfDocument::new("InvoiceVault Report");
+
+    // Summary table page
+    let summary_ops = build_summary_ops(&rows);
+    let summary_page = PdfPage::new(Mm(A4_WIDTH_MM), Mm(A4_HEIGHT_MM), summary_ops);
+    doc.pages.push(summary_page);
+
+    // Detail pages — one per invoice
+    for row in &rows {
+        let mut ops = build_detail_ops(row);
+        if let Some(thumb_path) = find_thumbnail_for_invoice(row, thumbnails_dir) {
+            if let Some(xobj_op) = load_thumbnail_xobject(&mut doc, &thumb_path) {
+                ops.push(xobj_op);
+            }
+        }
+        let page = PdfPage::new(Mm(A4_WIDTH_MM), Mm(A4_HEIGHT_MM), ops);
+        doc.pages.push(page);
+    }
+
+    let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
+
+    std::fs::write(&request.output_path, &bytes)?;
+    let byte_size = bytes.len() as u64;
+
+    Ok(PdfReportResult {
+        file_path: request.output_path,
+        invoice_count: rows.len(),
+        byte_size,
+    })
+}
+
+fn ascii_filter(s: &str) -> String {
+    s.chars()
+        .map(|ch| if ch.is_ascii() { ch } else { '?' })
+        .collect()
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max - 3])
+    }
+}
+
+fn text_ops(text: &str, x: Mm, y: Mm, size: Pt) -> Vec<Op> {
+    vec![
+        Op::StartTextSection,
+        Op::SetFont {
+            font: PdfFontHandle::Builtin(BuiltinFont::Helvetica),
+            size,
+        },
+        Op::SetTextCursor {
+            pos: Point {
+                x: x.into_pt(),
+                y: y.into_pt(),
+            },
+        },
+        Op::ShowText {
+            items: vec![TextItem::Text(text.to_string())],
+        },
+        Op::EndTextSection,
+    ]
+}
+
+fn mm_rect(x_mm: f32, y_mm: f32, w_mm: f32, h_mm: f32) -> Rect {
+    Rect {
+        x: Mm(x_mm).into_pt(),
+        y: Mm(y_mm).into_pt(),
+        width: Mm(w_mm).into_pt(),
+        height: Mm(h_mm).into_pt(),
+        mode: None,
+        winding_order: None,
+    }
+}
+
+fn build_summary_ops(rows: &[InvoiceRow]) -> Vec<Op> {
+    let mut ops = Vec::new();
+    let row_height: f32 = 6.0;
+    let header_y: f32 = A4_HEIGHT_MM - MARGIN_MM;
+
+    // Title
+    ops.extend(text_ops(
+        "Invoice Report",
+        Mm(MARGIN_MM),
+        Mm(A4_HEIGHT_MM - 10.0),
+        Pt(14.0),
+    ));
+
+    // Table header background
+    ops.push(Op::SetFillColor {
+        col: Color::Rgb(Rgb {
+            r: 0.88,
+            g: 0.88,
+            b: 0.88,
+            icc_profile: None,
+        }),
+    });
+    ops.push(Op::DrawRectangle {
+        rectangle: mm_rect(
+            MARGIN_MM,
+            header_y - row_height,
+            A4_WIDTH_MM - 2.0 * MARGIN_MM,
+            row_height,
+        ),
+    });
+
+    // Table header text
+    let mut cx = MARGIN_MM + 1.0;
+    for (label, width) in TABLE_HEADER_FIELDS {
+        let filtered = truncate_str(&ascii_filter(label), (*width / 2.5) as usize);
+        ops.extend(text_ops(&filtered, Mm(cx), Mm(header_y - 4.5), Pt(9.0)));
+        cx += width;
+    }
+
+    // Data rows
+    let mut row_y = header_y - row_height - 2.0;
+    for (idx, row) in rows.iter().enumerate() {
+        if row_y < MARGIN_MM + 10.0 {
+            break;
+        }
+
+        // Alternating row background
+        if idx % 2 == 1 {
+            ops.push(Op::SetFillColor {
+                col: Color::Rgb(Rgb {
+                    r: 0.95,
+                    g: 0.95,
+                    b: 0.95,
+                    icc_profile: None,
+                }),
+            });
+            ops.push(Op::DrawRectangle {
+                rectangle: mm_rect(
+                    MARGIN_MM,
+                    row_y - row_height,
+                    A4_WIDTH_MM - 2.0 * MARGIN_MM,
+                    row_height,
+                ),
+            });
+        }
+
+        ops.push(Op::SetFillColor {
+            col: Color::Rgb(Rgb {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                icc_profile: None,
+            }),
+        });
+
+        let values: Vec<String> = vec![
+            truncate_str(&ascii_filter(&row.field_by_key("invoice_number")), 12),
+            truncate_str(&ascii_filter(&row.field_by_key("issue_date")), 10),
+            truncate_str(&ascii_filter(&row.field_by_key("seller_name")), 16),
+            truncate_str(&ascii_filter(&row.field_by_key("buyer_name")), 16),
+            truncate_str(&ascii_filter(&row.field_by_key("total_amount")), 10),
+            truncate_str(&ascii_filter(&row.field_by_key("tax_amount")), 8),
+            truncate_str(&ascii_filter(&row.field_by_key("invoice_type")), 10),
+        ];
+
+        let mut cx = MARGIN_MM + 1.0;
+        for (i, (_, width)) in TABLE_HEADER_FIELDS.iter().enumerate() {
+            ops.extend(text_ops(&values[i], Mm(cx), Mm(row_y - 4.5), Pt(8.0)));
+            cx += width;
+        }
+
+        row_y -= row_height + 1.0;
+    }
+
+    ops
+}
+
+fn build_detail_ops(row: &InvoiceRow) -> Vec<Op> {
+    let mut ops = Vec::new();
+
+    // Title
+    ops.extend(text_ops(
+        &format!(
+            "Invoice {}",
+            ascii_filter(&row.field_by_key("invoice_number"))
+        ),
+        Mm(MARGIN_MM),
+        Mm(A4_HEIGHT_MM - 10.0),
+        Pt(12.0),
+    ));
+
+    // Field list
+    let fields: Vec<(&str, String)> = vec![
+        ("Type", row.field_by_key("invoice_type")),
+        ("Code", row.field_by_key("invoice_code")),
+        ("Number", row.field_by_key("invoice_number")),
+        ("Date", row.field_by_key("issue_date")),
+        ("Seller", row.field_by_key("seller_name")),
+        ("Seller Tax ID", row.field_by_key("seller_tax_id")),
+        ("Buyer", row.field_by_key("buyer_name")),
+        ("Buyer Tax ID", row.field_by_key("buyer_tax_id")),
+        ("Currency", row.field_by_key("currency")),
+        ("Amount (excl. tax)", row.field_by_key("amount_without_tax")),
+        ("Tax Amount", row.field_by_key("tax_amount")),
+        ("Total", row.field_by_key("total_amount")),
+        ("Category", row.field_by_key("category")),
+        ("Remarks", row.field_by_key("remarks")),
+        ("Status", row.field_by_key("status")),
+        ("Duplicate", row.field_by_key("duplicate_status")),
+        ("Confidence", row.field_by_key("confidence")),
+        ("Pages", row.field_by_key("source_page_range")),
+    ];
+
+    let mut field_y = A4_HEIGHT_MM - 22.0;
+    for (label, value) in &fields {
+        if field_y < MARGIN_MM + 5.0 {
+            break;
+        }
+        let display = format!("{}: {}", label, truncate_str(&ascii_filter(value), 60));
+        ops.extend(text_ops(&display, Mm(MARGIN_MM), Mm(field_y), Pt(9.0)));
+        field_y -= 5.5;
+    }
+
+    ops
+}
+
+fn load_thumbnail_xobject(doc: &mut PdfDocument, thumb_path: &Path) -> Option<Op> {
+    let data = std::fs::read(thumb_path).ok()?;
+    let mut warnings: Vec<PdfWarnMsg> = Vec::new();
+    let image = RawImage::decode_from_bytes(&data, &mut warnings).ok()?;
+    let x_object_name = doc.add_image(&image);
+    Some(Op::UseXobject {
+        id: x_object_name,
+        transform: XObjectTransform {
+            translate_x: Some(Mm(A4_WIDTH_MM - MARGIN_MM - 50.0).into_pt()),
+            translate_y: Some(Mm(A4_HEIGHT_MM - 25.0).into_pt()),
+            scale_x: Some(0.5),
+            scale_y: Some(0.5),
+            ..Default::default()
+        },
+    })
+}
+
+fn find_thumbnail_for_invoice(row: &InvoiceRow, thumbnails_dir: Option<&Path>) -> Option<PathBuf> {
+    let thumbnails_dir = thumbnails_dir?;
+    let previews_dir = thumbnails_dir.join("previews");
+    if !previews_dir.exists() {
+        return None;
+    }
+    let number = row.field_by_key("invoice_number");
+    if number.is_empty() {
+        return None;
+    }
+    let extensions = ["jpg", "jpeg", "png"];
+    for ext in &extensions {
+        if let Ok(entries) = std::fs::read_dir(&previews_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                        for sub_entry in sub_entries.flatten() {
+                            let sub_path = sub_entry.path();
+                            if sub_path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .map(|n| n.contains(&number) && n.ends_with(ext))
+                                .unwrap_or(false)
+                            {
+                                return Some(sub_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }

@@ -69,10 +69,7 @@ impl LocalEmbeddingEngine {
         let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path.to_str().unwrap())
             .map_err(|e| EmbeddingError::Load(format!("Failed to load tokenizer: {e}")))?;
 
-        info!(
-            "Local embedding engine loaded from {}",
-            model_dir.display()
-        );
+        info!("Local embedding engine loaded from {}", model_dir.display());
 
         Ok(Self {
             session,
@@ -121,13 +118,11 @@ pub async fn ensure_model(app_data_dir: &Path) -> Result<PathBuf, EmbeddingError
         .map_err(|e| EmbeddingError::Download(format!("Failed to download ONNX model: {e}")))?;
     if onnx_remote != onnx_path {
         if let Some(parent) = onnx_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                EmbeddingError::Download(format!("Failed to create onnx dir: {e}"))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| EmbeddingError::Download(format!("Failed to create onnx dir: {e}")))?;
         }
-        std::fs::copy(&onnx_remote, &onnx_path).map_err(|e| {
-            EmbeddingError::Download(format!("Failed to copy ONNX model: {e}"))
-        })?;
+        std::fs::copy(&onnx_remote, &onnx_path)
+            .map_err(|e| EmbeddingError::Download(format!("Failed to copy ONNX model: {e}")))?;
     }
 
     // Download tokenizer
@@ -136,9 +131,8 @@ pub async fn ensure_model(app_data_dir: &Path) -> Result<PathBuf, EmbeddingError
         .await
         .map_err(|e| EmbeddingError::Download(format!("Failed to download tokenizer: {e}")))?;
     if tok_remote != tokenizer_path {
-        std::fs::copy(&tok_remote, &tokenizer_path).map_err(|e| {
-            EmbeddingError::Download(format!("Failed to copy tokenizer: {e}"))
-        })?;
+        std::fs::copy(&tok_remote, &tokenizer_path)
+            .map_err(|e| EmbeddingError::Download(format!("Failed to copy tokenizer: {e}")))?;
     }
 
     info!("Embedding model download complete");
@@ -170,11 +164,11 @@ pub fn generate_embedding(
     let seq_len = token_ids.len();
 
     // Build input tensors: shape [1, seq_len]
-    let input_ids_tensor = ort::value::Tensor::from_array((
-        vec![1i64, seq_len as i64],
-        token_ids.into_boxed_slice(),
-    ))
-    .map_err(|e| EmbeddingError::Inference(format!("Failed to create input_ids tensor: {e}")))?;
+    let input_ids_tensor =
+        ort::value::Tensor::from_array((vec![1i64, seq_len as i64], token_ids.into_boxed_slice()))
+            .map_err(|e| {
+                EmbeddingError::Inference(format!("Failed to create input_ids tensor: {e}"))
+            })?;
 
     let attention_mask_tensor = ort::value::Tensor::from_array((
         vec![1i64, seq_len as i64],

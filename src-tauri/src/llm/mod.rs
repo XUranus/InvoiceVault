@@ -395,7 +395,10 @@ pub async fn recognize_invoice_image(
         .inspect_err(|e| error!("Failed to extract JSON from recognition response: {e}"))?;
 
     let prompt_tokens = response_body.usage.as_ref().map_or(0, |u| u.prompt_tokens);
-    let completion_tokens = response_body.usage.as_ref().map_or(0, |u| u.completion_tokens);
+    let completion_tokens = response_body
+        .usage
+        .as_ref()
+        .map_or(0, |u| u.completion_tokens);
     let total_tokens = response_body.usage.as_ref().map_or(0, |u| u.total_tokens);
 
     info!(
@@ -716,4 +719,57 @@ mod tests {
             Some(true)
         );
     }
+}
+
+pub async fn analyze_error_with_llm(
+    config: LlmProviderConfig,
+    error_message: &str,
+) -> Result<String, LlmError> {
+    let base_url = config.base_url.trim().trim_end_matches('/');
+    let api_key = config.api_key.trim();
+    let model = config.model.trim();
+
+    if base_url.is_empty() || api_key.is_empty() || model.is_empty() {
+        return Err(LlmError::MissingBaseUrl);
+    }
+
+    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(30).clamp(1, 60));
+    let client = reqwest::Client::builder().timeout(timeout).build()?;
+
+    let prompt = format!(
+        r#"你是一个邮件系统技术支持助手。用户在配置邮箱数据源时遇到了连接错误，请根据错误信息分析原因并给出简洁的解决建议（中文回答，不超过3句话）。
+
+错误信息：
+{error_message}"#
+    );
+
+    let request = ChatCompletionRequest {
+        model,
+        messages: vec![ChatMessage {
+            role: "user",
+            content: &prompt,
+        }],
+        temperature: 0.3,
+        max_tokens: 256,
+    };
+    let endpoint = format!("{base_url}/chat/completions");
+
+    let response = client
+        .post(&endpoint)
+        .headers(headers(api_key)?)
+        .json(&request)
+        .send()
+        .await?;
+
+    let body = response.text().await?;
+    let api_response: ChatCompletionResponse = serde_json::from_str(&body)?;
+
+    let content = api_response
+        .choices
+        .first()
+        .and_then(|c| c.message.content.as_deref())
+        .unwrap_or("无法分析错误原因")
+        .to_owned();
+
+    Ok(content)
 }

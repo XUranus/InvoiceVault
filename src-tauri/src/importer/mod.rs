@@ -65,7 +65,12 @@ pub fn import_files(
 
     let mut summaries = Vec::with_capacity(paths.len());
     for source_path in paths {
-        summaries.push(import_one(conn, raw_dir, PathBuf::from(source_path), source_type)?);
+        summaries.push(import_one(
+            conn,
+            raw_dir,
+            PathBuf::from(source_path),
+            source_type,
+        )?);
     }
     Ok(summaries)
 }
@@ -137,7 +142,14 @@ fn import_one(
     source_type: &str,
 ) -> Result<ImportJobSummary, ImportError> {
     let source_path_text = source_path.to_string_lossy().into_owned();
-    let job_id = insert_import_job(conn, None, &source_path_text, "importing", None, source_type)?;
+    let job_id = insert_import_job(
+        conn,
+        None,
+        &source_path_text,
+        "importing",
+        None,
+        source_type,
+    )?;
 
     match inspect_file(&source_path) {
         Ok(raw_file) => {
@@ -235,7 +247,14 @@ fn insert_import_job(
             created_at,
             updated_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-        params![raw_file_id, source_path, status, error_message, source_type, now],
+        params![
+            raw_file_id,
+            source_path,
+            status,
+            error_message,
+            source_type,
+            now
+        ],
     )?;
 
     Ok(conn.last_insert_rowid())
@@ -422,8 +441,13 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("open sqlite");
         run_migrations(&mut conn).expect("migrate");
 
-        let jobs = import_files(&mut conn, &temp_dir.path().join("raw"), sample_paths, "manual")
-            .expect("import sample receipts");
+        let jobs = import_files(
+            &mut conn,
+            &temp_dir.path().join("raw"),
+            sample_paths,
+            "manual",
+        )
+        .expect("import sample receipts");
 
         assert_eq!(jobs.len(), 2);
         assert!(jobs.iter().all(|job| job.status == "imported"));
@@ -435,8 +459,9 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("open sqlite");
         run_migrations(&mut conn).expect("migrate");
 
-        let importing_id = insert_import_job(&conn, None, "/tmp/a.pdf", "importing", None, "manual")
-            .expect("insert importing job");
+        let importing_id =
+            insert_import_job(&conn, None, "/tmp/a.pdf", "importing", None, "manual")
+                .expect("insert importing job");
 
         let raw_file_id = {
             conn.execute(
@@ -448,9 +473,15 @@ mod tests {
             .expect("insert raw file");
             conn.last_insert_rowid()
         };
-        let recognizing_id =
-            insert_import_job(&conn, Some(raw_file_id), "/tmp/b.pdf", "recognizing", None, "manual")
-                .expect("insert recognizing job");
+        let recognizing_id = insert_import_job(
+            &conn,
+            Some(raw_file_id),
+            "/tmp/b.pdf",
+            "recognizing",
+            None,
+            "manual",
+        )
+        .expect("insert recognizing job");
         conn.execute(
             "INSERT INTO invoices (raw_file_id, currency, status, duplicate_status)
              VALUES (?1, 'CNY', 'recognized', 'unknown')",

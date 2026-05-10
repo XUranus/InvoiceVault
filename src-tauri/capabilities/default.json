@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default InvoiceVault desktop permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "shell:allow-open"]
+  "permissions": ["core:default", "core:event-all", "dialog:default", "shell:allow-open"]
 }

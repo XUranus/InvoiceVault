@@ -4,8 +4,8 @@ use std::{
 };
 
 use chrono::{Duration as ChronoDuration, Utc};
-use mailparse::{parse_mail, ParsedMail};
 use imap::ClientBuilder;
+use mailparse::{parse_mail, ParsedMail};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
@@ -15,6 +15,21 @@ use crate::{
     importer::{import_files, ImportJobSummary},
     llm::LlmProviderConfig,
 };
+
+struct OAuth2Authenticator {
+    user: String,
+    access_token: String,
+}
+
+impl imap::Authenticator for OAuth2Authenticator {
+    type Response = String;
+    fn process(&self, _challenge: &[u8]) -> Self::Response {
+        format!(
+            "user={}\x01auth=Bearer {}\x01\x01",
+            self.user, self.access_token
+        )
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum EmailError {
@@ -39,6 +54,7 @@ pub struct EmailSource {
     pub imap_port: i64,
     pub username: String,
     pub password: String,
+    pub auth_method: String,
     pub use_ssl: bool,
     pub folder: String,
     pub name_keywords: String,
@@ -62,6 +78,7 @@ pub struct AddEmailSourceRequest {
     pub imap_port: Option<i64>,
     pub username: String,
     pub password: String,
+    pub auth_method: Option<String>,
     pub use_ssl: Option<bool>,
     pub folder: Option<String>,
     pub name_keywords: Option<String>,
@@ -77,6 +94,7 @@ pub struct UpdateEmailSourceRequest {
     pub imap_port: Option<i64>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub auth_method: Option<String>,
     pub use_ssl: Option<bool>,
     pub folder: Option<String>,
     pub name_keywords: Option<String>,
@@ -161,20 +179,45 @@ fn pop3_send_cmd(conn: &mut Pop3Stream, cmd: &str) -> Result<String, EmailError>
     use std::io::Write;
     conn.write_all(cmd.as_bytes())
         .map_err(|e| EmailError::Pop3(format!("write: {e}")))?;
-    conn.flush().map_err(|e| EmailError::Pop3(format!("flush: {e}")))?;
+    conn.flush()
+        .map_err(|e| EmailError::Pop3(format!("flush: {e}")))?;
     let resp = pop3_read_line(conn)?;
     if resp.starts_with("+OK") {
         Ok(resp)
+    } else if resp.to_lowercase().contains("err") && (resp.to_lowercase().contains("auth") || resp.to_lowercase().contains("pass") || resp.to_lowercase().contains("user")) {
+        Err(EmailError::Pop3(format!(
+            "认证失败: {resp}。如果使用国内邮箱（163/QQ/Yeah等），请使用「授权码」而非登录密码"
+        )))
     } else {
         Err(EmailError::Pop3(format!("command failed: {resp}")))
     }
+}
+
+fn wrap_imap_login_error(e: imap::Error) -> EmailError {
+    let msg = e.to_string();
+    if msg.contains("LOGIN") || msg.contains("login") || msg.contains("AUTHENTICATE") || msg.contains("authenticate") {
+        EmailError::Imap(format!(
+            "{msg}。如果使用国内邮箱（163/QQ/Yeah等），请使用「授权码」而非登录密码"
+        ))
+    } else {
+        EmailError::Imap(format!("login: {msg}"))
+    }
+}
+
+/// Send ID command after login. Coremail servers (163.com etc.) require this
+/// before SELECT/EXAMINE will be allowed.
+fn imap_send_id(session: &mut imap::Session<imap::Connection>) {
+    let _ = session.run_command_and_read_response(
+        "ID (\"name\" \"InvoiceVault\" \"version\" \"1.0\")"
+    );
 }
 
 fn pop3_multiline_cmd(conn: &mut Pop3Stream, cmd: &str) -> Result<Vec<String>, EmailError> {
     use std::io::{BufRead, Write};
     conn.write_all(cmd.as_bytes())
         .map_err(|e| EmailError::Pop3(format!("write: {e}")))?;
-    conn.flush().map_err(|e| EmailError::Pop3(format!("flush: {e}")))?;
+    conn.flush()
+        .map_err(|e| EmailError::Pop3(format!("flush: {e}")))?;
 
     let mut reader = std::io::BufReader::new(conn);
     let mut first_line = String::new();
@@ -238,19 +281,22 @@ impl EmailManager {
     ) -> Result<EmailSource, EmailError> {
         let name = request.name.unwrap_or_default();
         let protocol = request.protocol.unwrap_or_else(|| "imap".into());
-        let imap_port = request.imap_port.unwrap_or(if protocol == "pop3" { 995 } else { 993 });
+        let imap_port = request
+            .imap_port
+            .unwrap_or(if protocol == "pop3" { 995 } else { 993 });
+        let auth_method = request.auth_method.unwrap_or_else(|| "password".into());
         let use_ssl = request.use_ssl.unwrap_or(true);
         let folder = request.folder.unwrap_or_else(|| "INBOX".into());
         let name_keywords = request.name_keywords.unwrap_or_default();
-        let max_email_age_days = request.max_email_age_days.unwrap_or(0);
-        let poll_interval = request.poll_interval_seconds.unwrap_or(60);
+        let max_email_age_days = request.max_email_age_days.unwrap_or(30);
+        let poll_interval = request.poll_interval_seconds.unwrap_or(300);
 
         let db = self.db.lock().expect("db lock");
         db.execute(
-            "INSERT INTO email_sources (name, protocol, imap_host, imap_port, username, password, use_ssl, folder, name_keywords, max_email_age_days, poll_interval_seconds)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO email_sources (name, protocol, imap_host, imap_port, username, password, auth_method, use_ssl, folder, name_keywords, max_email_age_days, poll_interval_seconds)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![name, protocol, request.imap_host, imap_port, request.username, request.password,
-                   use_ssl as i32, folder, name_keywords, max_email_age_days, poll_interval],
+                   auth_method, use_ssl as i32, folder, name_keywords, max_email_age_days, poll_interval],
         )?;
         let id = db.last_insert_rowid();
         drop(db);
@@ -290,6 +336,7 @@ impl EmailManager {
         set_field!(request.imap_port, "imap_port");
         set_str!(request.username, "username");
         set_str!(request.password, "password");
+        set_str!(request.auth_method, "auth_method");
         if let Some(v) = request.use_ssl {
             vals.push(Box::new(v as i32));
             sets.push(format!("use_ssl = ?{}", vals.len()));
@@ -332,7 +379,7 @@ impl EmailManager {
     pub fn list_email_sources(&self) -> Result<Vec<EmailSource>, EmailError> {
         let db = self.db.lock().expect("db lock");
         let mut stmt = db.prepare(
-            "SELECT id, name, protocol, imap_host, imap_port, username, password, use_ssl, folder,
+            "SELECT id, name, protocol, imap_host, imap_port, username, password, auth_method, use_ssl, folder,
                     name_keywords, max_email_age_days, enabled, last_uid, poll_interval_seconds,
                     processed_uidls, last_sync_at, status, error_message, created_at, updated_at
              FROM email_sources ORDER BY id",
@@ -347,19 +394,20 @@ impl EmailManager {
                     imap_port: row.get(4)?,
                     username: row.get(5)?,
                     password: row.get(6)?,
-                    use_ssl: row.get::<_, i32>(7)? != 0,
-                    folder: row.get(8)?,
-                    name_keywords: row.get(9)?,
-                    max_email_age_days: row.get(10)?,
-                    enabled: row.get::<_, i32>(11)? != 0,
-                    last_uid: row.get(12)?,
-                    poll_interval_seconds: row.get(13)?,
-                    processed_uidls: row.get(14)?,
-                    last_sync_at: row.get(15)?,
-                    status: row.get(16)?,
-                    error_message: row.get(17)?,
-                    created_at: row.get(18)?,
-                    updated_at: row.get(19)?,
+                    auth_method: row.get(7)?,
+                    use_ssl: row.get::<_, i32>(8)? != 0,
+                    folder: row.get(9)?,
+                    name_keywords: row.get(10)?,
+                    max_email_age_days: row.get(11)?,
+                    enabled: row.get::<_, i32>(12)? != 0,
+                    last_uid: row.get(13)?,
+                    poll_interval_seconds: row.get(14)?,
+                    processed_uidls: row.get(15)?,
+                    last_sync_at: row.get(16)?,
+                    status: row.get(17)?,
+                    error_message: row.get(18)?,
+                    created_at: row.get(19)?,
+                    updated_at: row.get(20)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -380,7 +428,7 @@ impl EmailManager {
     fn get_email_source(&self, id: i64) -> Result<EmailSource, EmailError> {
         let db = self.db.lock().expect("db lock");
         let source = db.query_row(
-            "SELECT id, name, protocol, imap_host, imap_port, username, password, use_ssl, folder,
+            "SELECT id, name, protocol, imap_host, imap_port, username, password, auth_method, use_ssl, folder,
                     name_keywords, max_email_age_days, enabled, last_uid, poll_interval_seconds,
                     processed_uidls, last_sync_at, status, error_message, created_at, updated_at
              FROM email_sources WHERE id = ?1",
@@ -394,19 +442,20 @@ impl EmailManager {
                     imap_port: row.get(4)?,
                     username: row.get(5)?,
                     password: row.get(6)?,
-                    use_ssl: row.get::<_, i32>(7)? != 0,
-                    folder: row.get(8)?,
-                    name_keywords: row.get(9)?,
-                    max_email_age_days: row.get(10)?,
-                    enabled: row.get::<_, i32>(11)? != 0,
-                    last_uid: row.get(12)?,
-                    poll_interval_seconds: row.get(13)?,
-                    processed_uidls: row.get(14)?,
-                    last_sync_at: row.get(15)?,
-                    status: row.get(16)?,
-                    error_message: row.get(17)?,
-                    created_at: row.get(18)?,
-                    updated_at: row.get(19)?,
+                    auth_method: row.get(7)?,
+                    use_ssl: row.get::<_, i32>(8)? != 0,
+                    folder: row.get(9)?,
+                    name_keywords: row.get(10)?,
+                    max_email_age_days: row.get(11)?,
+                    enabled: row.get::<_, i32>(12)? != 0,
+                    last_uid: row.get(13)?,
+                    poll_interval_seconds: row.get(14)?,
+                    processed_uidls: row.get(15)?,
+                    last_sync_at: row.get(16)?,
+                    status: row.get(17)?,
+                    error_message: row.get(18)?,
+                    created_at: row.get(19)?,
+                    updated_at: row.get(20)?,
                 })
             },
         )?;
@@ -422,6 +471,7 @@ impl EmailManager {
         port: i64,
         username: &str,
         password: &str,
+        auth_method: &str,
         use_ssl: bool,
         folder: &str,
     ) -> Result<EmailTestResult, EmailError> {
@@ -445,9 +495,21 @@ impl EmailManager {
             .connect()
             .map_err(|e| EmailError::Imap(format!("connect: {e}")))?;
 
-        let mut session = client
-            .login(username, password)
-            .map_err(|(e, _)| EmailError::Imap(format!("login: {e}")))?;
+        let mut session = if auth_method == "oauth2" {
+            let auth = OAuth2Authenticator {
+                user: username.to_string(),
+                access_token: password.to_string(),
+            };
+            client
+                .authenticate("XOAUTH2", &auth)
+                .map_err(|(e, _)| EmailError::Imap(format!("OAuth2 认证失败: {e}")))?
+        } else {
+            client
+                .login(username, password)
+                .map_err(|(e, _)| wrap_imap_login_error(e))?
+        };
+
+        imap_send_id(&mut session);
 
         let mailbox = session
             .select(folder)
@@ -540,9 +602,21 @@ impl EmailManager {
             .connect()
             .map_err(|e| EmailError::Imap(format!("connect: {e}")))?;
 
-        let mut session = client
-            .login(&source.username, &source.password)
-            .map_err(|(e, _)| EmailError::Imap(format!("login: {e}")))?;
+        let mut session = if source.auth_method == "oauth2" {
+            let auth = OAuth2Authenticator {
+                user: source.username.clone(),
+                access_token: source.password.clone(),
+            };
+            client
+                .authenticate("XOAUTH2", &auth)
+                .map_err(|(e, _)| EmailError::Imap(format!("OAuth2 认证失败: {e}")))?
+        } else {
+            client
+                .login(&source.username, &source.password)
+                .map_err(|(e, _)| wrap_imap_login_error(e))?
+        };
+
+        imap_send_id(&mut session);
 
         session
             .select(&source.folder)
@@ -591,8 +665,8 @@ impl EmailManager {
         // Parse keywords for attachment filtering
         let keywords: Vec<String> = source
             .name_keywords
-            .split(',')
-            .map(|s| s.trim().to_lowercase())
+            .split_whitespace()
+            .map(|s| s.to_lowercase())
             .filter(|s| !s.is_empty())
             .collect();
 
@@ -642,7 +716,8 @@ impl EmailManager {
 
             let (jobs, raw_file_ids) = match self.db.lock() {
                 Ok(mut conn) => {
-                    let jobs = import_files(&mut conn, &self.raw_dir, path_strs, "email").unwrap_or_default();
+                    let jobs = import_files(&mut conn, &self.raw_dir, path_strs, "email")
+                        .unwrap_or_default();
                     let ids: Vec<i64> = jobs
                         .iter()
                         .filter(|j| j.status == "imported" && j.raw_file_id.is_some())
@@ -653,7 +728,8 @@ impl EmailManager {
                     let success = jobs.iter().filter(|j| j.status == "imported").count();
                     let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
                     let failed = jobs.iter().filter(|j| j.status == "failed").count();
-                    let _ = event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
+                    let _ =
+                        event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
 
                     (jobs, ids)
                 }
@@ -665,8 +741,10 @@ impl EmailManager {
                 if let Some(config) = self.llm_config.lock().ok().and_then(|c| c.clone()) {
                     let db = Arc::clone(&self.db);
                     let thumbnails_dir = self.thumbnails_dir.clone();
-                    let audit = (*self.llm_audit_enabled.lock().expect("lock")).then(|| crate::llm::LlmAuditConfig {
-                        dir: std::path::PathBuf::from("audit"), // placeholder
+                    let audit = (*self.llm_audit_enabled.lock().expect("lock")).then(|| {
+                        crate::llm::LlmAuditConfig {
+                            dir: std::path::PathBuf::from("audit"), // placeholder
+                        }
                     });
 
                     tauri::async_runtime::spawn(async move {
@@ -764,8 +842,8 @@ impl EmailManager {
 
         let keywords: Vec<String> = source
             .name_keywords
-            .split(',')
-            .map(|s| s.trim().to_lowercase())
+            .split_whitespace()
+            .map(|s| s.to_lowercase())
             .filter(|s| !s.is_empty())
             .collect();
 
@@ -777,9 +855,12 @@ impl EmailManager {
             // Check age filter
             if source.max_email_age_days > 0 {
                 // POP3 doesn't have server-side date filter, try to get headers with TOP
-                if let Ok(top_lines) = pop3_multiline_cmd(&mut conn, &format!("TOP {} 30\r\n", msg_num)) {
+                if let Ok(top_lines) =
+                    pop3_multiline_cmd(&mut conn, &format!("TOP {} 30\r\n", msg_num))
+                {
                     let header_text = top_lines.join("\n");
-                    if let Some(date_str) = header_text.lines()
+                    if let Some(date_str) = header_text
+                        .lines()
                         .find(|l| l.to_lowercase().starts_with("date:"))
                         .map(|l| l[5..].trim())
                     {
@@ -787,7 +868,8 @@ impl EmailManager {
                             let email_date = chrono::DateTime::from_timestamp(parsed_date, 0)
                                 .map(|d| d.naive_utc());
                             if let Some(email_date) = email_date {
-                                let cutoff = Utc::now().naive_utc() - ChronoDuration::days(source.max_email_age_days);
+                                let cutoff = Utc::now().naive_utc()
+                                    - ChronoDuration::days(source.max_email_age_days);
                                 if email_date < cutoff {
                                     new_processed.insert(uidl.clone());
                                     continue;
@@ -831,7 +913,8 @@ impl EmailManager {
 
             let (jobs, raw_file_ids) = match self.db.lock() {
                 Ok(mut conn) => {
-                    let jobs = import_files(&mut conn, &self.raw_dir, path_strs, "email").unwrap_or_default();
+                    let jobs = import_files(&mut conn, &self.raw_dir, path_strs, "email")
+                        .unwrap_or_default();
                     let ids: Vec<i64> = jobs
                         .iter()
                         .filter(|j| j.status == "imported" && j.raw_file_id.is_some())
@@ -842,7 +925,8 @@ impl EmailManager {
                     let success = jobs.iter().filter(|j| j.status == "imported").count();
                     let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
                     let failed = jobs.iter().filter(|j| j.status == "failed").count();
-                    let _ = event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
+                    let _ =
+                        event::record_import_event(&conn, total, success, dups, failed, &[], &ids);
 
                     (jobs, ids)
                 }
@@ -854,8 +938,10 @@ impl EmailManager {
                 if let Some(config) = self.llm_config.lock().ok().and_then(|c| c.clone()) {
                     let db = Arc::clone(&self.db);
                     let thumbnails_dir = self.thumbnails_dir.clone();
-                    let audit = (*self.llm_audit_enabled.lock().expect("lock")).then(|| crate::llm::LlmAuditConfig {
-                        dir: std::path::PathBuf::from("audit"),
+                    let audit = (*self.llm_audit_enabled.lock().expect("lock")).then(|| {
+                        crate::llm::LlmAuditConfig {
+                            dir: std::path::PathBuf::from("audit"),
+                        }
                     });
 
                     tauri::async_runtime::spawn(async move {
@@ -943,7 +1029,10 @@ impl EmailManager {
                     .and_then(|e| e.to_str())
                     .unwrap_or_default()
                     .to_lowercase();
-                if !matches!(ext.as_str(), "pdf" | "png" | "jpg" | "jpeg" | "bmp" | "tiff" | "tif") {
+                if !matches!(
+                    ext.as_str(),
+                    "pdf" | "png" | "jpg" | "jpeg" | "bmp" | "tiff" | "tif"
+                ) {
                     return;
                 }
 

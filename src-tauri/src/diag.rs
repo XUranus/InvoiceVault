@@ -4,7 +4,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::embedding::{EmbeddingTestResult};
+use crate::embedding::EmbeddingTestResult;
 use crate::llm::{
     recognize_invoice_image, test_llm_connection as run_llm_connection_test, LlmAuditConfig,
     LlmProviderConfig,
@@ -94,7 +94,9 @@ pub fn load_config(app_data_dir: &Path, resource_dir: Option<&Path>) -> Diagnost
             if let Ok(json) = std::fs::read_to_string(&bundled_config) {
                 if let Ok(mut config) = serde_json::from_str::<DiagnosticConfig>(&json) {
                     // Resolve test_image_path relative to resource_dir
-                    if !config.test_image_path.is_empty() && !Path::new(&config.test_image_path).is_absolute() {
+                    if !config.test_image_path.is_empty()
+                        && !Path::new(&config.test_image_path).is_absolute()
+                    {
                         let resolved = base_dir.join(&config.test_image_path);
                         if resolved.exists() {
                             config.test_image_path = resolved.to_string_lossy().into_owned();
@@ -291,9 +293,11 @@ fn compare_ground_truth(
     let mut lines = Vec::new();
 
     let get_f64 = |obj: &serde_json::Value, key: &str| -> Option<f64> {
-        obj.get(key)
-            .and_then(|v| v.as_f64())
-            .or_else(|| obj.get(key).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()))
+        obj.get(key).and_then(|v| v.as_f64()).or_else(|| {
+            obj.get(key)
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+        })
     };
 
     // String fields: contains match
@@ -320,7 +324,9 @@ fn compare_ground_truth(
                     // Check nested object if specified
                     if found.is_none() {
                         if let Some(nested_name) = $nested {
-                            if let Some(obj) = recognized.get(nested_name).and_then(|v| v.as_object()) {
+                            if let Some(obj) =
+                                recognized.get(nested_name).and_then(|v| v.as_object())
+                            {
                                 for key in $keys {
                                     if let Some(v) = obj.get(*key).and_then(|v| v.as_str()) {
                                         let s = v.trim();
@@ -337,7 +343,9 @@ fn compare_ground_truth(
                 };
                 let got = recognized_val.as_deref().unwrap_or("(空)");
                 let name = stringify!($field);
-                if recognized_val.as_ref().map_or(false, |v| v.contains(expected.as_str()) || expected.contains(v.as_str())) {
+                if recognized_val.as_ref().map_or(false, |v| {
+                    v.contains(expected.as_str()) || expected.contains(v.as_str())
+                }) {
                     matched += 1;
                     lines.push(format!("{name}: ✓ ({got})"));
                 } else {
@@ -392,10 +400,14 @@ fn compare_ground_truth(
                 matched += 1;
                 lines.push(format!("items_count: ✓ ({got})"));
             } else {
-                lines.push(format!("items_count: ✗ (期望: {expected_count}, 实际: {got})"));
+                lines.push(format!(
+                    "items_count: ✗ (期望: {expected_count}, 实际: {got})"
+                ));
             }
         } else {
-            lines.push(format!("items_count: ✗ (期望: {expected_count}, 实际: (空))"));
+            lines.push(format!(
+                "items_count: ✗ (期望: {expected_count}, 实际: (空))"
+            ));
         }
     }
 

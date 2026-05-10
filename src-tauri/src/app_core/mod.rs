@@ -33,23 +33,23 @@ use crate::{
         EmailTestResult, UpdateEmailSourceRequest,
     },
     embedding::{
-        generate_embedding, test_embedding_connection as run_embedding_test,
-        EmbeddingError, EmbeddingTestResult, LocalEmbeddingEngine,
+        generate_embedding, test_embedding_connection as run_embedding_test, EmbeddingError,
+        EmbeddingTestResult, LocalEmbeddingEngine,
     },
     event::{self, EventError, EventListResult},
     exporter::{
-        export_column_catalog, export_invoices, preview_export,
+        export_column_catalog, export_invoices, export_pdf_report, preview_export,
         resolve_export_column_keys_from_labels, ExportError, ExportInvoicesRequest,
-        ExportPreviewRequest, ExportResult,
+        ExportPreviewRequest, ExportResult, PdfReportRequest, PdfReportResult,
     },
     extractor::invoice_to_embedding_text,
     extractor::{
         batch_delete_invoices, batch_update_invoices, count_unviewed_invoices, get_dashboard_stats,
-        get_invoice_detail, list_invoices, mark_invoice_viewed, save_invoice_extraction,
-        search_invoices, set_invoice_badge, update_invoice, update_invoice_items, BadgeConfig,
-        BadgeGroupConfig, BatchUpdateRequest, DashboardStats, ExtractorError,
-        InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
-        InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest,
+        get_invoice_detail, list_invoices, mark_invoice_viewed, merge_invoices,
+        save_invoice_extraction, search_invoices, set_invoice_badge, update_invoice,
+        update_invoice_items, BadgeConfig, BadgeGroupConfig, BatchUpdateRequest, DashboardStats,
+        ExtractorError, InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
+        InvoiceSearchResult, InvoiceSummary, MergeInvoicesResult, SaveInvoiceExtractionRequest,
         UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
     },
     importer::{
@@ -279,9 +279,10 @@ impl AppState {
         };
 
         let llm_audit_enabled: Arc<Mutex<bool>> = {
-            let saved = Self::load_config_raw::<serde_json::Value>(&app_data_dir, "audit_config.json")
-                .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
-                .unwrap_or(true);
+            let saved =
+                Self::load_config_raw::<serde_json::Value>(&app_data_dir, "audit_config.json")
+                    .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
+                    .unwrap_or(true);
             Arc::new(Mutex::new(saved))
         };
 
@@ -334,7 +335,11 @@ impl AppState {
 
         // Load local embedding engine if enabled and model exists
         if embedding_enabled {
-            let model_dir = state.paths.app_data_dir.join("models").join("bge-small-zh-v1.5");
+            let model_dir = state
+                .paths
+                .app_data_dir
+                .join("models")
+                .join("bge-small-zh-v1.5");
             let onnx_path = model_dir.join("onnx").join("model_q4.onnx");
             let tok_path = model_dir.join("tokenizer.json");
             if onnx_path.exists() && tok_path.exists() {
@@ -348,7 +353,10 @@ impl AppState {
                     }
                 }
             } else {
-                info!("Embedding model not found at {}, will download on first use", model_dir.display());
+                info!(
+                    "Embedding model not found at {}, will download on first use",
+                    model_dir.display()
+                );
             }
         }
 
@@ -378,7 +386,11 @@ impl AppState {
         &self.paths.app_data_dir
     }
 
-    pub fn import_files(&self, paths: Vec<String>, app: &AppHandle) -> Result<Vec<ImportJobSummary>, AppError> {
+    pub fn import_files(
+        &self,
+        paths: Vec<String>,
+        app: &AppHandle,
+    ) -> Result<Vec<ImportJobSummary>, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let source_paths: Vec<String> = paths.iter().map(|p| p.clone()).collect();
         info!("Importing {} files", paths.len());
@@ -615,11 +627,17 @@ impl AppState {
                     }
                     // Clean up thumbnail directory
                     let _ = std::fs::remove_dir_all(
-                        thumbnails_dir.join("previews").join(raw_file_id.to_string()),
+                        thumbnails_dir
+                            .join("previews")
+                            .join(raw_file_id.to_string()),
                     );
                     // Delete dependent DB records, then the raw_file itself
-                    let _ = db.execute("DELETE FROM extraction_runs WHERE raw_file_id = ?1", [raw_file_id]);
-                    let _ = db.execute("DELETE FROM invoices WHERE raw_file_id = ?1", [raw_file_id]);
+                    let _ = db.execute(
+                        "DELETE FROM extraction_runs WHERE raw_file_id = ?1",
+                        [raw_file_id],
+                    );
+                    let _ =
+                        db.execute("DELETE FROM invoices WHERE raw_file_id = ?1", [raw_file_id]);
                     let _ = db.execute("DELETE FROM raw_files WHERE id = ?1", [raw_file_id]);
                 }
             } else if let Ok(db) = db.lock() {
@@ -652,7 +670,9 @@ impl AppState {
         let invoice = save_invoice_extraction(&mut db, request)?;
         if let Ok(dedupe_result) = run_dedupe_check(&db, invoice.id) {
             if let Some(best) = dedupe_result.candidates.iter().max_by(|a, b| {
-                a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal)
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             }) {
                 let _ = event::record_duplicate_event(
                     &db,
@@ -683,7 +703,8 @@ impl AppState {
                         let db_arc = Arc::clone(&self.db);
                         tauri::async_runtime::spawn(async move {
                             if let Ok(db) = db_arc.lock() {
-                                let _ = chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
+                                let _ =
+                                    chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
                                 let _ = db.execute(
                                     "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
                                     [invoice_id],
@@ -764,7 +785,9 @@ impl AppState {
         let result = update_invoice(&mut db, request)?;
         if let Ok(dedupe_result) = run_dedupe_check(&db, result.invoice.id) {
             if let Some(best) = dedupe_result.candidates.iter().max_by(|a, b| {
-                a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal)
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             }) {
                 let _ = event::record_duplicate_event(
                     &db,
@@ -796,7 +819,8 @@ impl AppState {
                         let db_arc = Arc::clone(&self.db);
                         tauri::async_runtime::spawn(async move {
                             if let Ok(db) = db_arc.lock() {
-                                let _ = chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
+                                let _ =
+                                    chroma::upsert_embedding(&db, invoice_id, &embedding, &text);
                                 let _ = db.execute(
                                     "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
                                     [invoice_id],
@@ -864,6 +888,27 @@ impl AppState {
     ) -> Result<ExportResult, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(export_invoices(&db, request)?)
+    }
+
+    pub fn merge_invoices(
+        &self,
+        target_invoice_id: i64,
+        source_invoice_ids: Vec<i64>,
+    ) -> Result<MergeInvoicesResult, AppError> {
+        let mut db = self.db.lock().expect("database mutex poisoned");
+        Ok(merge_invoices(
+            &mut db,
+            target_invoice_id,
+            source_invoice_ids,
+        )?)
+    }
+
+    pub fn export_pdf_report(
+        &self,
+        request: PdfReportRequest,
+    ) -> Result<PdfReportResult, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(export_pdf_report(&db, request)?)
     }
 
     pub fn add_watch_dir(&self, request: AddWatchDirRequest) -> Result<WatchDirStatus, AppError> {
@@ -934,10 +979,13 @@ impl AppState {
         port: i64,
         username: &str,
         password: &str,
+        auth_method: &str,
         use_ssl: bool,
         folder: &str,
     ) -> Result<EmailTestResult, AppError> {
-        Ok(self.email_manager.test_connection(protocol, host, port, username, password, use_ssl, folder)?)
+        Ok(self
+            .email_manager
+            .test_connection(protocol, host, port, username, password, auth_method, use_ssl, folder)?)
     }
 
     pub fn get_dashboard_stats(
@@ -990,7 +1038,11 @@ impl AppState {
         if enabled {
             let mut engine_guard = self.local_embedding.lock().expect("lock");
             if engine_guard.is_none() {
-                let model_dir = self.paths.app_data_dir.join("models").join("bge-small-zh-v1.5");
+                let model_dir = self
+                    .paths
+                    .app_data_dir
+                    .join("models")
+                    .join("bge-small-zh-v1.5");
                 if model_dir.exists() {
                     match LocalEmbeddingEngine::load(&model_dir) {
                         Ok(engine) => {
@@ -1162,7 +1214,9 @@ impl AppState {
 
     pub fn test_embedding_connection(&self) -> Result<EmbeddingTestResult, AppError> {
         let mut guard = self.local_embedding.lock().expect("lock");
-        let engine = guard.as_mut().ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
+        let engine = guard
+            .as_mut()
+            .ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
         Ok(run_embedding_test(engine)?)
     }
 
@@ -1175,7 +1229,9 @@ impl AppState {
             return Err(AppError::Chroma(chroma::ChromaError::NotConfigured));
         }
         let mut guard = self.local_embedding.lock().expect("lock");
-        let engine = guard.as_mut().ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
+        let engine = guard
+            .as_mut()
+            .ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
         let result = generate_embedding(engine, &query)?;
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(chroma::query_similar(&db, &result.embedding, limit)?)
@@ -2362,6 +2418,99 @@ fn make_tool_executor(
                         message: e.to_string(),
                     }
                 }
+            }
+        }
+        "merge_invoices" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                let target_id = args
+                    .get("target_invoice_id")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let source_ids: Vec<i64> = args
+                    .get("source_invoice_ids")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect())
+                    .unwrap_or_default();
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "merge_invoices".to_owned(),
+                    arguments: args.clone(),
+                    message: format!(
+                        "将发票 {:?} 合并到发票 #{}，是否确认？",
+                        source_ids, target_id
+                    ),
+                };
+            }
+            let target_id = args
+                .get("target_invoice_id")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let source_ids: Vec<i64> = args
+                .get("source_invoice_ids")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect())
+                .unwrap_or_default();
+            let mut conn = db.lock().expect("db lock");
+            match merge_invoices(&mut conn, target_id, source_ids) {
+                Ok(result) => {
+                    let content = serde_json::to_string(&result).unwrap_or_default();
+                    ToolExecResult::Success { content }
+                }
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "export_pdf_report" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                let count = args
+                    .get("invoice_ids")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "export_pdf_report".to_owned(),
+                    arguments: args.clone(),
+                    message: format!("将导出 {count} 张发票的 PDF 报表，是否确认？"),
+                };
+            }
+            let invoice_ids: Option<Vec<i64>> = args
+                .get("invoice_ids")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect());
+            let request = PdfReportRequest {
+                output_path: args
+                    .get("output_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("/tmp/invoicevault_report.pdf")
+                    .to_string(),
+                invoice_ids,
+                date_from: args
+                    .get("date_from")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                date_to: args
+                    .get("date_to")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                thumbnails_dir: Some(thumbnails_dir.to_string_lossy().to_string()),
+            };
+            let conn = db.lock().expect("db lock");
+            match export_pdf_report(&conn, request) {
+                Ok(result) => {
+                    let content = serde_json::to_string(&result).unwrap_or_default();
+                    ToolExecResult::Success { content }
+                }
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
             }
         }
         "update_invoice" => {

@@ -47,6 +47,9 @@ import type {
   PriceConfig,
   DiagnosticConfig,
   DiagnosticResult,
+  MergeInvoicesResult,
+  PdfReportResult,
+  PdfReportRequest,
 } from "./types";
 
 export async function getAppHealth(): Promise<AppHealth> {
@@ -174,6 +177,22 @@ export async function exportInvoices(
   return invoke<ExportResult>("export_invoices", { request });
 }
 
+export async function mergeInvoices(
+  targetInvoiceId: number,
+  sourceInvoiceIds: number[],
+): Promise<MergeInvoicesResult> {
+  return invoke<MergeInvoicesResult>("merge_invoices", {
+    target_invoice_id: targetInvoiceId,
+    source_invoice_ids: sourceInvoiceIds,
+  });
+}
+
+export async function exportPdfReport(
+  request: PdfReportRequest,
+): Promise<PdfReportResult> {
+  return invoke<PdfReportResult>("export_pdf_report", { request });
+}
+
 export async function addWatchDir(
   request: AddWatchDirRequest,
 ): Promise<WatchDirStatus> {
@@ -295,10 +314,17 @@ export async function testEmailConnection(config: {
   port: number;
   username: string;
   password: string;
-  use_ssl: boolean;
+  authMethod: string;
+  useSsl: boolean;
   folder: string;
 }): Promise<EmailTestResult> {
   return invoke<EmailTestResult>("test_email_connection", config);
+}
+
+export async function analyzeEmailError(
+  errorMessage: string,
+): Promise<string | null> {
+  return invoke<string | null>("analyze_email_error", { errorMessage });
 }
 
 // Agent APIs

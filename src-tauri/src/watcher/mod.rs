@@ -550,7 +550,8 @@ fn watch_loop(
                     continue;
                 }
                 for p in event.paths {
-                    if p.is_file() && matches_filter(&p, &ext_filter, &kw_filter, max_file_age_days) {
+                    if p.is_file() && matches_filter(&p, &ext_filter, &kw_filter, max_file_age_days)
+                    {
                         pending_paths.insert(p);
                     }
                 }

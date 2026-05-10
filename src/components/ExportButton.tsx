@@ -1,6 +1,6 @@
 import React from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { exportInvoices } from "../api";
+import { exportInvoices, exportPdfReport } from "../api";
 import type { ExportResult } from "../types";
 
 type Props = {
@@ -98,6 +98,31 @@ export function ExportButton({ onError, invoiceIds }: Props) {
     }
   };
 
+  const handleExportPdf = async () => {
+    setExporting(true);
+    try {
+      const filePath = await save({
+        defaultPath: "invoice-report.pdf",
+        filters: [{ name: "PDF 文件", extensions: ["pdf"] }],
+      });
+      if (!filePath) {
+        setExporting(false);
+        return;
+      }
+      await exportPdfReport({
+        output_path: filePath,
+        invoice_ids: invoiceIds,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+      });
+      setShowPanel(false);
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="export-group">
       <button
@@ -125,6 +150,13 @@ export function ExportButton({ onError, invoiceIds }: Props) {
               disabled={exporting || columns.length === 0}
             >
               {exporting ? "导出中..." : "导出 Excel"}
+            </button>
+            <button
+              className="btn-small"
+              onClick={handleExportPdf}
+              disabled={exporting}
+            >
+              {exporting ? "导出中..." : "导出 PDF 报表"}
             </button>
           </div>
 

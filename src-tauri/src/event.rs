@@ -111,11 +111,10 @@ pub fn list_events(
         conn.query_row(&count_sql, [], |row| row.get(0))?
     };
 
-    let unread_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM events WHERE is_read = 0",
-        [],
-        |row| row.get(0),
-    )?;
+    let unread_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM events WHERE is_read = 0", [], |row| {
+            row.get(0)
+        })?;
 
     let total_pages = (total_count + page_size - 1) / page_size;
     let offset = (page - 1) * page_size;
@@ -152,11 +151,10 @@ fn map_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
 // ---------------------------------------------------------------------------
 
 pub fn get_unread_event_count(conn: &Connection) -> Result<i64, EventError> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM events WHERE is_read = 0",
-        [],
-        |row| row.get(0),
-    )?;
+    let count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM events WHERE is_read = 0", [], |row| {
+            row.get(0)
+        })?;
     Ok(count)
 }
 
@@ -354,8 +352,10 @@ mod tests {
     #[test]
     fn events_read_unread_crud() {
         let conn = setup();
-        let id1 = create_event(&conn, "import", "t1", "d", "completed", None, None, None).expect("create");
-        let _id2 = create_event(&conn, "import", "t2", "d", "completed", None, None, None).expect("create");
+        let id1 = create_event(&conn, "import", "t1", "d", "completed", None, None, None)
+            .expect("create");
+        let _id2 = create_event(&conn, "import", "t2", "d", "completed", None, None, None)
+            .expect("create");
         assert_eq!(get_unread_event_count(&conn).expect("count"), 2);
 
         mark_event_read(&conn, id1).expect("mark");

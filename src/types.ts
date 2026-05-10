@@ -245,6 +245,25 @@ export type ExportResult = {
   columns: string[];
 };
 
+export type MergeInvoicesResult = {
+  merged_invoice: Invoice;
+  merged_from_ids: number[];
+  total_items_merged: number;
+};
+
+export type PdfReportResult = {
+  file_path: string;
+  invoice_count: number;
+  byte_size: number;
+};
+
+export type PdfReportRequest = {
+  output_path: string;
+  invoice_ids?: number[];
+  date_from?: string;
+  date_to?: string;
+};
+
 export type WatchDirConfig = {
   id: number;
   path: string;
@@ -300,6 +319,7 @@ export type EmailSource = {
   imap_port: number;
   username: string;
   password: string;
+  auth_method: string;
   use_ssl: boolean;
   folder: string;
   name_keywords: string;
@@ -322,6 +342,7 @@ export type AddEmailSourceRequest = {
   imap_port?: number;
   username: string;
   password: string;
+  auth_method?: string;
   use_ssl?: boolean;
   folder?: string;
   name_keywords?: string;
@@ -336,6 +357,7 @@ export type UpdateEmailSourceRequest = {
   imap_port?: number;
   username?: string;
   password?: string;
+  auth_method?: string;
   use_ssl?: boolean;
   folder?: string;
   name_keywords?: string;

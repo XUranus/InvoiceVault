@@ -221,6 +221,42 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
             is_read_only: false,
             requires_confirmation: true,
         },
+        ToolDefinition {
+            name: "merge_invoices",
+            description: "将多张发票合并为一张。用于多页 PDF 识别后将多个页面合并为一张完整发票。要求所有发票属于同一文件。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "target_invoice_id": {"type": "integer", "description": "目标发票 ID（合并后的保留对象）"},
+                    "source_invoice_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "要合并到目标的源发票 ID 列表"
+                    }
+                },
+                "required": ["target_invoice_id", "source_invoice_ids"]
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "export_pdf_report",
+            description: "将选中发票导出为 PDF 报表。报表包含汇总表和每张发票的详情页（含缩略图）。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "invoice_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "要导出的发票 ID 列表。为空时按日期范围或全部导出"
+                    },
+                    "date_from": {"type": "string", "description": "开始日期 YYYY-MM-DD"},
+                    "date_to": {"type": "string", "description": "结束日期 YYYY-MM-DD"}
+                }
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
     ]
 }
 

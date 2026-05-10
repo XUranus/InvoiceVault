@@ -27,17 +27,18 @@ use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest, ResolveDuplicateResult};
 use embedding::{EmbeddingTestResult, LocalEmbeddingEngine};
 use event::EventListResult;
-use exporter::{ExportInvoicesRequest, ExportResult};
+use exporter::{ExportInvoicesRequest, ExportResult, PdfReportRequest, PdfReportResult};
 use extractor::{
     BadgeConfig, DashboardStats, InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow,
-    InvoiceSearchParams, InvoiceSearchResult, InvoiceSummary, SaveInvoiceExtractionRequest,
-    UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
+    InvoiceSearchParams, InvoiceSearchResult, InvoiceSummary, MergeInvoicesResult,
+    SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
+    UpdateInvoiceResult,
 };
 use importer::{ImportJobListResult, ImportJobSummary, ImportRequest};
 use llm::LlmProviderConfig;
 use llm::{
-    recognize_invoice_image, test_llm_connection as run_llm_connection_test,
-    LlmConnectionTestResult,
+    analyze_error_with_llm, recognize_invoice_image,
+    test_llm_connection as run_llm_connection_test, LlmConnectionTestResult,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -324,6 +325,27 @@ fn export_invoices(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn merge_invoices(
+    state: State<'_, AppState>,
+    target_invoice_id: i64,
+    source_invoice_ids: Vec<i64>,
+) -> Result<MergeInvoicesResult, String> {
+    state
+        .merge_invoices(target_invoice_id, source_invoice_ids)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn export_pdf_report(
+    state: State<'_, AppState>,
+    request: PdfReportRequest,
+) -> Result<PdfReportResult, String> {
+    state
+        .export_pdf_report(request)
+        .map_err(|err| err.to_string())
+}
+
 #[derive(Debug, Deserialize)]
 struct RecognizeRawFileRequest {
     raw_file_id: i64,
@@ -530,6 +552,21 @@ async fn test_llm_connection(
 }
 
 #[tauri::command]
+async fn analyze_email_error(
+    state: State<'_, AppState>,
+    error_message: String,
+) -> Result<Option<String>, String> {
+    let config = match state.get_llm_config() {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+    match analyze_error_with_llm(config, &error_message).await {
+        Ok(suggestion) => Ok(Some(suggestion)),
+        Err(_) => Ok(None),
+    }
+}
+
+#[tauri::command]
 fn add_watch_dir(
     state: State<'_, AppState>,
     request: AddWatchDirRequest,
@@ -598,7 +635,9 @@ fn remove_email_source(state: State<'_, AppState>, id: i64) -> Result<(), String
 }
 
 #[tauri::command]
-fn list_email_sources(state: State<'_, AppState>) -> Result<Vec<email_manager::EmailSource>, String> {
+fn list_email_sources(
+    state: State<'_, AppState>,
+) -> Result<Vec<email_manager::EmailSource>, String> {
     state.list_email_sources().map_err(|err| err.to_string())
 }
 
@@ -618,9 +657,7 @@ fn sync_email_source(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<email_manager::EmailSyncResult, String> {
-    state
-        .sync_email_source(id)
-        .map_err(|err| err.to_string())
+    state.sync_email_source(id).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -640,11 +677,14 @@ fn test_email_connection(
     port: i64,
     username: String,
     password: String,
+    auth_method: String,
     use_ssl: bool,
     folder: String,
 ) -> Result<email_manager::EmailTestResult, String> {
     state
-        .test_email_connection(&protocol, &host, port, &username, &password, use_ssl, &folder)
+        .test_email_connection(
+            &protocol, &host, port, &username, &password, &auth_method, use_ssl, &folder,
+        )
         .map_err(|err| err.to_string())
 }
 
@@ -687,7 +727,9 @@ fn get_embedding_status(state: State<'_, AppState>) -> Result<LocalEmbeddingStat
 }
 
 #[tauri::command]
-async fn download_embedding_model(state: State<'_, AppState>) -> Result<LocalEmbeddingStatus, String> {
+async fn download_embedding_model(
+    state: State<'_, AppState>,
+) -> Result<LocalEmbeddingStatus, String> {
     let app_data_dir = state.app_data_dir().to_path_buf();
     let model_dir = embedding::ensure_model(&app_data_dir)
         .await
@@ -695,7 +737,9 @@ async fn download_embedding_model(state: State<'_, AppState>) -> Result<LocalEmb
     let engine = LocalEmbeddingEngine::load(&model_dir).map_err(|e| e.to_string())?;
     state.set_embedding_engine(engine);
     // Auto-enable after successful download
-    state.set_embedding_enabled(true).map_err(|e| e.to_string())?;
+    state
+        .set_embedding_enabled(true)
+        .map_err(|e| e.to_string())?;
     let (enabled, model_loaded, model_dir_path, dimensions) = state.embedding_status();
     Ok(LocalEmbeddingStatus {
         enabled,
@@ -737,9 +781,7 @@ fn test_chroma_connection(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn test_embedding_connection(
-    state: State<'_, AppState>,
-) -> Result<EmbeddingTestResult, String> {
+fn test_embedding_connection(state: State<'_, AppState>) -> Result<EmbeddingTestResult, String> {
     state
         .test_embedding_connection()
         .map_err(|err| err.to_string())
@@ -983,7 +1025,9 @@ fn list_events(
 
 #[tauri::command]
 fn get_unread_event_count(state: State<'_, AppState>) -> Result<i64, String> {
-    state.get_unread_event_count().map_err(|err| err.to_string())
+    state
+        .get_unread_event_count()
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -993,9 +1037,7 @@ fn mark_event_read(state: State<'_, AppState>, id: i64) -> Result<(), String> {
 
 #[tauri::command]
 fn mark_all_events_read(state: State<'_, AppState>) -> Result<(), String> {
-    state
-        .mark_all_events_read()
-        .map_err(|err| err.to_string())
+    state.mark_all_events_read().map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -1084,7 +1126,6 @@ fn delete_import_job(state: State<'_, AppState>, job_id: i64) -> Result<(), Stri
     state.delete_import_job(job_id).map_err(|e| e.to_string())
 }
 
-
 #[tauri::command]
 fn get_llm_usage(
     state: State<'_, AppState>,
@@ -1106,9 +1147,7 @@ fn set_price_config(
     state: State<'_, AppState>,
     config: app_core::PriceConfig,
 ) -> Result<(), String> {
-    state
-        .set_price_config(config)
-        .map_err(|e| e.to_string())
+    state.set_price_config(config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1214,7 +1253,8 @@ pub fn run() {
                 let app_data_dir = app.path().app_data_dir().expect("app data dir");
                 // Check if model needs downloading (embedding enabled but engine not loaded)
                 let needs_download = {
-                    let enabled_json = std::fs::read_to_string(app_data_dir.join("embedding_enabled.json")).ok();
+                    let enabled_json =
+                        std::fs::read_to_string(app_data_dir.join("embedding_enabled.json")).ok();
                     let enabled = enabled_json
                         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
                         .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
@@ -1295,8 +1335,11 @@ pub fn run() {
             check_invoice_duplicates,
             resolve_duplicate,
             export_invoices,
+            merge_invoices,
+            export_pdf_report,
             recognize_raw_file,
             test_llm_connection,
+            analyze_email_error,
             get_dashboard_stats,
             add_watch_dir,
             remove_watch_dir,
