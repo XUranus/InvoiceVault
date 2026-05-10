@@ -1168,12 +1168,10 @@ fn set_price_config(
 
 #[tauri::command]
 fn get_diagnostic_config(
-    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<diag::DiagnosticConfig, String> {
     let app_data_dir = state.app_data_dir();
-    let resource_dir = app.path().resource_dir().ok();
-    Ok(diag::load_config(app_data_dir, resource_dir.as_deref()))
+    Ok(diag::load_config(app_data_dir))
 }
 
 #[tauri::command]
@@ -1187,12 +1185,10 @@ fn set_diagnostic_config(
 
 #[tauri::command]
 async fn run_llm_diagnostic(
-    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<diag::DiagnosticResult, String> {
     let app_data_dir = state.app_data_dir();
-    let resource_dir = app.path().resource_dir().ok();
-    let diag_config = diag::load_config(app_data_dir, resource_dir.as_deref());
+    let diag_config = diag::load_config(app_data_dir);
 
     let llm_config = state
         .get_llm_config()
@@ -1206,7 +1202,6 @@ async fn run_llm_diagnostic(
         &llm_config,
         emb_test_result.as_ref(),
         audit_config.as_ref(),
-        resource_dir.as_deref(),
     )
     .await)
 }
@@ -1258,11 +1253,12 @@ pub fn run() {
             app.manage(state);
             setup_tray(app.handle())?;
 
-            // Ensure diagnostic config is created from bundled resource on first run
+            // Ensure diagnostic sample files are copied to app data on first run
             {
                 let app_data_dir = app.path().app_data_dir().expect("app data dir");
                 let resource_dir = app.path().resource_dir().ok();
-                diag::load_config(&app_data_dir, resource_dir.as_deref());
+                diag::ensure_samples(&app_data_dir, resource_dir.as_deref());
+                diag::load_config(&app_data_dir);
             }
 
             // Background model download for local embedding

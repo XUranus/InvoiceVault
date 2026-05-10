@@ -74,69 +74,90 @@ pub struct DiagnosticResult {
     pub all_passed: bool,
 }
 
-fn bundled_config_path(resource_dir: &Path) -> PathBuf {
-    // In dev mode resource_dir is target/debug/ but resources are in target/debug/_up_/
-    let base_dir = if resource_dir.join("_up_").is_dir() {
+/// Resolve the bundled resource base directory.
+/// In dev mode resource_dir is target/debug/ but resources are in target/debug/_up_/
+fn bundled_base_dir(resource_dir: &Path) -> PathBuf {
+    if resource_dir.join("_up_").is_dir() {
         resource_dir.join("_up_")
     } else {
         resource_dir.to_path_buf()
+    }
+}
+
+/// Copy bundled sample files (diagnostic_config.json, fake-invoice-1.png, etc.)
+/// from resource_dir to app_data_dir/sample/ on first run.
+pub fn ensure_samples(app_data_dir: &Path, resource_dir: Option<&Path>) {
+    let samples_dir = app_data_dir.join("sample");
+    if samples_dir.exists() {
+        // Already copied in a previous run
+        return;
+    }
+    let Some(res_dir) = resource_dir else {
+        return;
     };
-    base_dir.join("sample").join("diagnostic_config.json")
+    let bundled_sample_dir = bundled_base_dir(res_dir).join("sample");
+    if !bundled_sample_dir.is_dir() {
+        warn!("Bundled sample directory not found: {}", bundled_sample_dir.display());
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(&samples_dir) {
+        warn!("Failed to create samples dir: {e}");
+        return;
+    }
+    let entries = match std::fs::read_dir(&bundled_sample_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            warn!("Failed to read bundled sample dir: {e}");
+            return;
+        }
+    };
+    for entry in entries.flatten() {
+        let src = entry.path();
+        let file_name = match entry.file_name().into_string() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        let dst = samples_dir.join(&file_name);
+        if let Err(e) = std::fs::copy(&src, &dst) {
+            warn!("Failed to copy sample file {file_name}: {e}");
+        } else {
+            info!("Copied bundled sample: {file_name}");
+        }
+    }
 }
 
-fn patch_from_bundled(config: &DiagnosticConfig, resource_dir: &Path) -> Option<DiagnosticConfig> {
-    let bundled_path = bundled_config_path(resource_dir);
-    let json = std::fs::read_to_string(&bundled_path).ok()?;
-    let bundled: DiagnosticConfig = serde_json::from_str(&json).ok()?;
-    let mut patched = config.clone();
-    if patched.test_image_path.is_empty() && !bundled.test_image_path.is_empty() {
-        patched.test_image_path = bundled.test_image_path;
-    }
-    // Also fill in ground truth if user config has none
-    if patched.ground_truth.invoice_number.is_none()
-        && bundled.ground_truth.invoice_number.is_some()
-    {
-        patched.ground_truth = bundled.ground_truth;
-    }
-    Some(patched)
-}
+/// Load diagnostic config from app_data_dir.
+/// Rewrites test_image_path to absolute path under app_data_dir/sample/.
+pub fn load_config(app_data_dir: &Path) -> DiagnosticConfig {
+    let config_path = app_data_dir.join("diagnostic_config.json");
+    let samples_dir = app_data_dir.join("sample");
 
-pub fn load_config(app_data_dir: &Path, resource_dir: Option<&Path>) -> DiagnosticConfig {
-    let path = app_data_dir.join("diagnostic_config.json");
-    // Try loading existing user config
-    if let Ok(json) = std::fs::read_to_string(&path) {
-        if let Ok(config) = serde_json::from_str::<DiagnosticConfig>(&json) {
-            if !config.test_image_path.is_empty() {
-                return config;
-            }
-            // test_image_path is empty — try to patch from bundled config
-            if let Some(res_dir) = resource_dir {
-                if let Some(patched) = patch_from_bundled(&config, res_dir) {
-                    if let Err(e) = save_config(app_data_dir, &patched) {
-                        warn!("Failed to persist patched diagnostic config: {e}");
-                    }
-                    return patched;
-                }
+    if let Ok(json) = std::fs::read_to_string(&config_path) {
+        if let Ok(mut config) = serde_json::from_str::<DiagnosticConfig>(&json) {
+            // Rewrite test_image_path to absolute under app_data_dir
+            if !config.test_image_path.is_empty() && !Path::new(&config.test_image_path).is_absolute() {
+                let abs = samples_dir.join(&config.test_image_path);
+                config.test_image_path = abs.to_string_lossy().into_owned();
             }
             return config;
         }
     }
-    // First run: try to copy bundled diagnostic_config.json from resource_dir
-    if let Some(res_dir) = resource_dir {
-        let bundled_config = bundled_config_path(res_dir);
-        if bundled_config.exists() {
-            if let Ok(json) = std::fs::read_to_string(&bundled_config) {
-                if let Ok(config) = serde_json::from_str::<DiagnosticConfig>(&json) {
-                    // Keep test_image_path as relative — resolve at runtime against resource_dir
-                    if let Err(e) = save_config(app_data_dir, &config) {
-                        warn!("Failed to persist diagnostic config: {e}");
-                    }
-                    return config;
-                }
+
+    // No config yet — build a default from what's in sample/
+    let mut config = DiagnosticConfig::default();
+    let default_image = samples_dir.join("fake-invoice-1.png");
+    if default_image.exists() {
+        config.test_image_path = default_image.to_string_lossy().into_owned();
+    }
+    // Try loading bundled ground truth
+    let bundled_cfg_path = samples_dir.join("diagnostic_config.json");
+    if let Ok(json) = std::fs::read_to_string(&bundled_cfg_path) {
+        if let Ok(bundled) = serde_json::from_str::<DiagnosticConfig>(&json) {
+            if bundled.ground_truth.invoice_number.is_some() {
+                config.ground_truth = bundled.ground_truth;
             }
         }
     }
-    let config = DiagnosticConfig::default();
     if let Err(e) = save_config(app_data_dir, &config) {
         warn!("Failed to persist default diagnostic config: {e}");
     }
@@ -154,7 +175,6 @@ pub async fn run_diagnostic(
     llm_config: &LlmProviderConfig,
     emb_test_result: Option<&EmbeddingTestResult>,
     audit: Option<&LlmAuditConfig>,
-    resource_dir: Option<&Path>,
 ) -> DiagnosticResult {
     let mut steps = Vec::new();
     let mut score: Option<f64> = None;
@@ -183,86 +203,71 @@ pub async fn run_diagnostic(
 
     // Step 2: Image recognition
     let mut recognition_json: Option<serde_json::Value> = None;
-    if diag_config.test_image_path.is_empty() {
-        steps.push(DiagnosticStep {
+    let step2 = if diag_config.test_image_path.is_empty() {
+        DiagnosticStep {
             name: "图片识别".into(),
             passed: false,
             duration_ms: 0,
             message: "测试图片路径未配置。请在 diagnostic_config.json 中设置 test_image_path。"
                 .into(),
             details: None,
-        });
-    } else {
-    let test_image_path = {
-        let configured = PathBuf::from(&diag_config.test_image_path);
-        if configured.is_absolute() {
-            configured
-        } else if let Some(res_dir) = resource_dir {
-            // In dev mode resource_dir is target/debug/ but resources are in target/debug/_up_/
-            let base_dir = if res_dir.join("_up_").is_dir() {
-                res_dir.join("_up_")
-            } else {
-                res_dir.to_path_buf()
-            };
-            base_dir.join(&configured)
-        } else {
-            configured
         }
-    };
-    let step2 = if test_image_path.exists() {
-        let mime = infer_mime(&test_image_path);
-        let start = Instant::now();
-        info!("Diagnostic: sending test image to recognition");
-        match recognize_invoice_image(llm_config.clone(), &test_image_path, &mime, audit).await {
-            Ok(result) => {
-                let parsed = serde_json::from_str::<serde_json::Value>(&result.response_json);
-                match parsed {
-                    Ok(val) => {
-                        let is_invoice = val
-                            .get("is_invoice")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        recognition_json = Some(val);
-                        DiagnosticStep {
-                            name: "图片识别".into(),
-                            passed: is_invoice,
-                            duration_ms: start.elapsed().as_millis(),
-                            message: if is_invoice {
-                                "识别为有效发票".into()
-                            } else {
-                                "未识别为发票".into()
-                            },
-                            details: Some(result.response_preview),
+    } else {
+        let test_image_path = PathBuf::from(&diag_config.test_image_path);
+        if test_image_path.exists() {
+            let mime = infer_mime(&test_image_path);
+            let start = Instant::now();
+            info!("Diagnostic: sending test image to recognition");
+            match recognize_invoice_image(llm_config.clone(), &test_image_path, &mime, audit).await {
+                Ok(result) => {
+                    let parsed = serde_json::from_str::<serde_json::Value>(&result.response_json);
+                    match parsed {
+                        Ok(val) => {
+                            let is_invoice = val
+                                .get("is_invoice")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            recognition_json = Some(val);
+                            DiagnosticStep {
+                                name: "图片识别".into(),
+                                passed: is_invoice,
+                                duration_ms: start.elapsed().as_millis(),
+                                message: if is_invoice {
+                                    "识别为有效发票".into()
+                                } else {
+                                    "未识别为发票".into()
+                                },
+                                details: Some(result.response_preview),
+                            }
                         }
+                        Err(err) => DiagnosticStep {
+                            name: "图片识别".into(),
+                            passed: false,
+                            duration_ms: start.elapsed().as_millis(),
+                            message: format!("识别结果 JSON 解析失败: {err}"),
+                            details: Some(result.response_preview),
+                        },
                     }
-                    Err(err) => DiagnosticStep {
-                        name: "图片识别".into(),
-                        passed: false,
-                        duration_ms: start.elapsed().as_millis(),
-                        message: format!("识别结果 JSON 解析失败: {err}"),
-                        details: Some(result.response_preview),
-                    },
                 }
+                Err(err) => DiagnosticStep {
+                    name: "图片识别".into(),
+                    passed: false,
+                    duration_ms: start.elapsed().as_millis(),
+                    message: format!("识别失败: {err}"),
+                    details: None,
+                },
             }
-            Err(err) => DiagnosticStep {
+        } else {
+            DiagnosticStep {
                 name: "图片识别".into(),
                 passed: false,
-                duration_ms: start.elapsed().as_millis(),
-                message: format!("识别失败: {err}"),
+                duration_ms: 0,
+                message: format!("测试图片不存在: {}", diag_config.test_image_path),
                 details: None,
-            },
-        }
-    } else {
-        DiagnosticStep {
-            name: "图片识别".into(),
-            passed: false,
-            duration_ms: 0,
-            message: format!("测试图片不存在: {}", diag_config.test_image_path),
-            details: None,
+            }
         }
     };
     steps.push(step2);
-    } // close else block for non-empty test_image_path
 
     // Step 3: Ground truth comparison
     let gt = &diag_config.ground_truth;
