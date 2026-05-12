@@ -2264,22 +2264,28 @@ textarea:focus {
 /* Edit form */
 .edit-form {
   display: grid;
-  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
 }
 
 .edit-field {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .edit-field span {
   color: var(--color-text-muted);
   font-size: 13px;
   font-weight: 600;
+  min-width: 72px;
+  flex-shrink: 0;
 }
 
 .edit-field input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   min-height: 36px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -2298,9 +2304,12 @@ textarea:focus {
   color: var(--color-error-text);
   font-size: 12px;
   font-weight: 400;
+  flex-basis: 100%;
+  padding-left: 78px;
 }
 
 .form-actions {
+  grid-column: 1 / -1;
   display: flex;
   gap: 10px;
   margin-top: 8px;
