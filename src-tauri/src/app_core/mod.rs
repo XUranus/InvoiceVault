@@ -1469,13 +1469,7 @@ impl AppState {
 
         // Add database file
         if self.paths.database_path.exists() {
-            zip_writer
-                .start_file("invoicevault.sqlite3", options)
-                .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            let db_bytes = std::fs::read(&self.paths.database_path)?;
-            zip_writer
-                .write_all(&db_bytes)
-                .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            stream_file_to_zip(&mut zip_writer, "invoicevault.sqlite3", &self.paths.database_path, options)?;
         }
 
         // Add config files
@@ -1487,13 +1481,7 @@ impl AppState {
         ] {
             let config_path = self.paths.app_data_dir.join(config_name);
             if config_path.exists() {
-                zip_writer
-                    .start_file(*config_name, options)
-                    .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-                let bytes = std::fs::read(&config_path)?;
-                zip_writer
-                    .write_all(&bytes)
-                    .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+                stream_file_to_zip(&mut zip_writer, config_name, &config_path, options)?;
             }
         }
 
@@ -1504,15 +1492,7 @@ impl AppState {
                     let path = entry.path();
                     if path.is_file() {
                         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                            zip_writer
-                                .start_file(format!("logs/{}", name), options)
-                                .map_err(|e| {
-                                    AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
-                                })?;
-                            let bytes = std::fs::read(&path)?;
-                            zip_writer.write_all(&bytes).map_err(|e| {
-                                AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
-                            })?;
+                            stream_file_to_zip(&mut zip_writer, &format!("logs/{}", name), &path, options)?;
                         }
                     }
                 }
@@ -2986,6 +2966,31 @@ fn open_path_with_system(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
+fn zip_err(e: zip::result::ZipError) -> AppError {
+    AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
+}
+
+fn io_err(e: std::io::Error) -> AppError {
+    AppError::Io(e)
+}
+
+fn stream_file_to_zip(
+    zip_writer: &mut zip::ZipWriter<std::fs::File>,
+    zip_path: &str,
+    file_path: &Path,
+    options: zip::write::SimpleFileOptions,
+) -> Result<(), AppError> {
+    zip_writer.start_file(zip_path, options).map_err(zip_err)?;
+    let mut reader = std::io::BufReader::new(std::fs::File::open(file_path)?);
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 { break; }
+        zip_writer.write_all(&buf[..n]).map_err(io_err)?;
+    }
+    Ok(())
+}
+
 fn add_dir_to_zip(
     zip_writer: &mut zip::ZipWriter<std::fs::File>,
     base: &Path,
@@ -3001,13 +3006,7 @@ fn add_dir_to_zip(
         if path.is_file() {
             let relative = path.strip_prefix(base).unwrap_or(&path);
             let name = relative.to_string_lossy().replace('\\', "/");
-            zip_writer
-                .start_file(name, options)
-                .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            let bytes = std::fs::read(&path)?;
-            zip_writer
-                .write_all(&bytes)
-                .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            stream_file_to_zip(zip_writer, &name, &path, options)?;
         } else if path.is_dir() {
             add_dir_to_zip(zip_writer, base, &path, options)?;
         }

@@ -1113,7 +1113,7 @@ fn get_invoice_id_by_raw_file(
 }
 
 #[tauri::command]
-fn export_logs(
+async fn export_logs(
     state: State<'_, AppState>,
     output_path: String,
 ) -> Result<ExportLogsResult, String> {
@@ -1121,7 +1121,7 @@ fn export_logs(
 }
 
 #[tauri::command]
-fn export_backup(
+async fn export_backup(
     state: State<'_, AppState>,
     output_path: String,
 ) -> Result<ExportLogsResult, String> {
@@ -1129,7 +1129,7 @@ fn export_backup(
 }
 
 #[tauri::command]
-fn cleanup_storage(state: State<'_, AppState>) -> Result<CleanupStorageResult, String> {
+async fn cleanup_storage(state: State<'_, AppState>) -> Result<CleanupStorageResult, String> {
     state.cleanup_storage().map_err(|e| e.to_string())
 }
 
