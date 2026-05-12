@@ -111,6 +111,14 @@ export async function setBadgeConfig(config: BadgeConfig): Promise<void> {
   return invoke<void>("set_badge_config", { config });
 }
 
+export async function getTheme(): Promise<string> {
+  return invoke<string>("get_theme");
+}
+
+export async function setTheme(theme: string): Promise<void> {
+  return invoke<void>("set_theme", { theme });
+}
+
 export async function setInvoiceBadge(
   invoiceId: number,
   groupName: string,

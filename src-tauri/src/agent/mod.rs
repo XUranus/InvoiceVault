@@ -257,6 +257,176 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
             is_read_only: false,
             requires_confirmation: true,
         },
+        ToolDefinition {
+            name: "get_badge_config",
+            description: "获取当前自定义标签（Badge）配置，包括所有分组名称和可选项。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "set_badge_config",
+            description: "设置自定义标签（Badge）配置，替换所有分组和选项。修改前需要用户确认。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "groups": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "分组名称"},
+                                "options": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "该分组下的选项列表"
+                                }
+                            },
+                            "required": ["name", "options"]
+                        },
+                        "description": "标签分组列表"
+                    }
+                },
+                "required": ["groups"]
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "set_invoice_badge",
+            description: "为指定发票设置标签值。value 传 null 表示取消该标签。修改前需要用户确认。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "invoice_id": {"type": "integer", "description": "发票 ID"},
+                    "group_name": {"type": "string", "description": "标签分组名称"},
+                    "value": {"type": ["string", "null"], "description": "标签值，null 表示取消"}
+                },
+                "required": ["invoice_id", "group_name"]
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "get_price_config",
+            description: "获取当前 LLM 和 Embedding 的价格配置（每千 token 价格）。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "set_price_config",
+            description: "修改 LLM 和 Embedding 的价格配置（每千 token 价格）。修改前需要用户确认。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "llm_input_price_per_1k": {"type": "number", "description": "LLM 输入每千 token 价格（美元）"},
+                    "llm_output_price_per_1k": {"type": "number", "description": "LLM 输出每千 token 价格（美元）"},
+                    "embedding_input_price_per_1k": {"type": "number", "description": "Embedding 输入每千 token 价格（美元）"},
+                    "embedding_output_price_per_1k": {"type": "number", "description": "Embedding 输出每千 token 价格（美元）"}
+                }
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "get_recognition_status",
+            description: "获取识别任务队列状态，包括待处理数、运行中数和最大并发数。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "set_recognition_concurrency",
+            description: "设置识别任务的最大并发数。修改前需要用户确认。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "max_concurrent": {"type": "integer", "description": "最大并发数，建议 1-5"}
+                },
+                "required": ["max_concurrent"]
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "get_theme",
+            description: "获取当前主题设置（亮色/暗色）。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "set_theme",
+            description: "切换主题为亮色或暗色模式。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "theme": {"type": "string", "enum": ["light", "dark"], "description": "主题: light 亮色, dark 暗色"}
+                },
+                "required": ["theme"]
+            }),
+            is_read_only: false,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "export_logs",
+            description: "导出应用日志文件到指定路径。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "output_path": {"type": "string", "description": "导出文件的保存路径"}
+                },
+                "required": ["output_path"]
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "export_backup",
+            description: "导出数据库和配置文件的备份包到指定路径。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "output_path": {"type": "string", "description": "备份文件的保存路径"}
+                },
+                "required": ["output_path"]
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "cleanup_storage",
+            description: "清理孤立文件和过期数据，释放存储空间。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: false,
+            requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "get_app_info",
+            description: "获取应用版本、数据目录路径和数据库状态等系统信息。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
     ]
 }
 
@@ -538,8 +708,12 @@ const SYSTEM_PROMPT: &str = r#"你是 InvoiceVault 发票处理助手，只能�
 - 统计信息使用 get_dashboard_stats 工具
 - 用户要求导出时，先用 get_invoice_field_catalog 映射列名；需要相对日期时先用 get_current_date_context；如果用户上传了表格模板，先用 list_message_attachments 和 inspect_spreadsheet 理解表头
 - 复杂导出前先调用 create_export_preview，向用户说明匹配行数、列和样例；确认后再调用 export_invoices 或 export_invoices_with_template
-- export_invoices 支持 columns，自定义列必须传字段 key。例如“只包含发票代码”应传 columns=["invoice_code"]
+- export_invoices 支持 columns，自定义列必须传字段 key。例如”只包含发票代码”应传 columns=[“invoice_code”]
 - 修改发票信息使用 update_invoice 工具
+- 自定义标签管理：使用 get_badge_config 获取当前配置，set_badge_config 修改配置（增删分组和选项），set_invoice_badge 给发票设置标签
+- 系统设置：使用 get_price_config/set_price_config 管理 LLM 价格配置；get_recognition_status/set_recognition_concurrency 管理识别并发数
+- 主题切换：使用 get_theme/set_theme 切换亮色/暗色主题
+- 维护操作：export_logs 导出日志，export_backup 导出备份，cleanup_storage 清理存储空间，get_app_info 查看系统版本信息
 - 工具返回什么数据就如实汇报，不要虚构或编造数据
 - 如果用户请求超出你的工具能力范围，如实说明并给出建议
 - 回答使用中文，简洁清晰

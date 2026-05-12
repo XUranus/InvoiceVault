@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { AppHealth, Invoice } from "../types";
-import { countUnviewedInvoices, getAppHealth, searchInvoices, getUnreadEventCount } from "../api";
+import { countUnviewedInvoices, getAppHealth, searchInvoices, getUnreadEventCount, getTheme as getThemeApi, setTheme as setThemeApi } from "../api";
 
 type AppStore = {
   health: AppHealth | null;
@@ -18,6 +18,7 @@ type AppStore = {
   setError: (err: string) => void;
   clearError: () => void;
   toggleTheme: () => void;
+  setTheme: (theme: "light" | "dark") => void;
   setInvoices: (list: Invoice[]) => void;
   setIsDraggingFiles: (v: boolean) => void;
   setUnreadEventCount: (n: number) => void;
@@ -51,6 +52,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const next = get().theme === "dark" ? "light" : "dark";
     localStorage.setItem("theme", next);
     set({ theme: next });
+    setThemeApi(next).catch(() => {});
+  },
+  setTheme: (theme) => {
+    localStorage.setItem("theme", theme);
+    set({ theme });
   },
   setInvoices: (invoices) => set({ invoices }),
   setIsDraggingFiles: (isDraggingFiles) => set({ isDraggingFiles }),
@@ -75,6 +81,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ health });
     } catch (err) {
       set({ error: String(err) });
+    }
+    try {
+      const backendTheme = await getThemeApi();
+      if (backendTheme === "light" || backendTheme === "dark") {
+        const current = get().theme;
+        if (backendTheme !== current) {
+          localStorage.setItem("theme", backendTheme);
+          set({ theme: backendTheme });
+        }
+      }
+    } catch {
+      // ignore
     }
     try {
       const [result, invoiceBadgeCount] = await Promise.all([

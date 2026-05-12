@@ -210,6 +210,128 @@ fn tool_definitions() -> Vec<McpTool> {
                 "required": ["output_path"]
             }),
         },
+        McpTool {
+            name: "get_badge_config",
+            description: "获取当前自定义标签（Badge）配置，包括所有分组名称和可选项。",
+            input_schema: json!({"type": "object", "properties": {}}),
+        },
+        McpTool {
+            name: "set_badge_config",
+            description: "设置自定义标签（Badge）配置，替换所有分组和选项。",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "groups": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "分组名称"},
+                                "options": {"type": "array", "items": {"type": "string"}, "description": "该分组下的选项列表"}
+                            },
+                            "required": ["name", "options"]
+                        },
+                        "description": "标签分组列表"
+                    }
+                },
+                "required": ["groups"]
+            }),
+        },
+        McpTool {
+            name: "set_invoice_badge",
+            description: "为指定发票设置标签值。value 传 null 表示取消该标签。",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "invoice_id": {"type": "integer", "description": "发票 ID"},
+                    "group_name": {"type": "string", "description": "标签分组名称"},
+                    "value": {"type": ["string", "null"], "description": "标签值，null 表示取消"}
+                },
+                "required": ["invoice_id", "group_name"]
+            }),
+        },
+        McpTool {
+            name: "get_price_config",
+            description: "获取当前 LLM 和 Embedding 的价格配置（每千 token 价格）。",
+            input_schema: json!({"type": "object", "properties": {}}),
+        },
+        McpTool {
+            name: "set_price_config",
+            description: "修改 LLM 和 Embedding 的价格配置（每千 token 价格）。",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "llm_input_price_per_1k": {"type": "number"},
+                    "llm_output_price_per_1k": {"type": "number"},
+                    "embedding_input_price_per_1k": {"type": "number"},
+                    "embedding_output_price_per_1k": {"type": "number"}
+                }
+            }),
+        },
+        McpTool {
+            name: "get_recognition_status",
+            description: "获取识别任务队列状态，包括待处理数、运行中数和最大并发数。",
+            input_schema: json!({"type": "object", "properties": {}}),
+        },
+        McpTool {
+            name: "set_recognition_concurrency",
+            description: "设置识别任务的最大并发数（1-10）。",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "max_concurrent": {"type": "integer", "description": "最大并发数"}
+                },
+                "required": ["max_concurrent"]
+            }),
+        },
+        McpTool {
+            name: "get_theme",
+            description: "获取当前主题设置（亮色/暗色）。",
+            input_schema: json!({"type": "object", "properties": {}}),
+        },
+        McpTool {
+            name: "set_theme",
+            description: "切换主题为亮色或暗色模式。",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "theme": {"type": "string", "enum": ["light", "dark"]}
+                },
+                "required": ["theme"]
+            }),
+        },
+        McpTool {
+            name: "export_logs",
+            description: "导出应用日志文件到指定路径。",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "output_path": {"type": "string", "description": "导出文件的保存路径"}
+                },
+                "required": ["output_path"]
+            }),
+        },
+        McpTool {
+            name: "export_backup",
+            description: "导出数据库和配置文件的备份包到指定路径。",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "output_path": {"type": "string", "description": "备份文件的保存路径"}
+                },
+                "required": ["output_path"]
+            }),
+        },
+        McpTool {
+            name: "cleanup_storage",
+            description: "清理孤立文件和过期数据，释放存储空间。",
+            input_schema: json!({"type": "object", "properties": {}}),
+        },
+        McpTool {
+            name: "get_app_info",
+            description: "获取应用版本、数据目录路径和数据库状态等系统信息。",
+            input_schema: json!({"type": "object", "properties": {}}),
+        },
     ]
 }
 
@@ -439,6 +561,218 @@ fn execute_tool(
                 Ok(result) => success_text(serde_json::to_string_pretty(&result).unwrap_or_default()),
                 Err(e) => error_text(format!("导出 PDF 失败: {e}")),
             }
+        }
+        "get_badge_config" => {
+            let badge_config: crate::extractor::BadgeConfig =
+                crate::AppState::load_config_raw(app_data_dir, "badge_config.json")
+                    .unwrap_or_default();
+            success_text(serde_json::to_string_pretty(&badge_config).unwrap_or_default())
+        }
+        "set_badge_config" => {
+            let config: crate::extractor::BadgeConfig =
+                match serde_json::from_value(args.get("groups").map(|g| json!({"groups": g})).unwrap_or(args.clone())) {
+                    Ok(c) => c,
+                    Err(e) => return error_text(format!("参数解析失败: {e}")),
+                };
+            let sanitized = crate::app_core::sanitize_badge_config(config);
+            if let Ok(json) = serde_json::to_string_pretty(&sanitized) {
+                if let Err(e) = std::fs::write(app_data_dir.join("badge_config.json"), json) {
+                    return error_text(format!("写入配置失败: {e}"));
+                }
+            }
+            success_text(serde_json::to_string_pretty(&sanitized).unwrap_or_default())
+        }
+        "set_invoice_badge" => {
+            let Some(invoice_id) = args.get("invoice_id").and_then(|v| v.as_i64()) else {
+                return error_text("缺少 invoice_id 参数".into());
+            };
+            let Some(group_name) = args.get("group_name").and_then(|v| v.as_str()) else {
+                return error_text("缺少 group_name 参数".into());
+            };
+            let value = args.get("value").and_then(|v| v.as_str()).map(String::from);
+            let db_path = app_data_dir.join("invoicevault.sqlite3");
+            match rusqlite::Connection::open(&db_path) {
+                Ok(mut write_conn) => {
+                    match extractor::set_invoice_badge(&mut write_conn, invoice_id, group_name.to_owned(), value) {
+                        Ok(badges) => success_text(serde_json::to_string_pretty(&badges).unwrap_or_default()),
+                        Err(e) => error_text(format!("设置标签失败: {e}")),
+                    }
+                }
+                Err(e) => error_text(format!("打开数据库失败: {e}")),
+            }
+        }
+        "get_price_config" => {
+            let price_config: crate::app_core::PriceConfig =
+                crate::AppState::load_config_raw(app_data_dir, "price_config.json")
+                    .unwrap_or_default();
+            success_text(serde_json::to_string_pretty(&price_config).unwrap_or_default())
+        }
+        "set_price_config" => {
+            let config: crate::app_core::PriceConfig = match serde_json::from_value(args.clone()) {
+                Ok(c) => c,
+                Err(e) => return error_text(format!("参数解析失败: {e}")),
+            };
+            if let Ok(json) = serde_json::to_string_pretty(&config) {
+                if let Err(e) = std::fs::write(app_data_dir.join("price_config.json"), json) {
+                    return error_text(format!("写入配置失败: {e}"));
+                }
+            }
+            success_text(serde_json::to_string_pretty(&config).unwrap_or_default())
+        }
+        "get_recognition_status" => {
+            let max_concurrent: usize =
+                crate::AppState::load_config_raw::<serde_json::Value>(app_data_dir, "recognition_config.json")
+                    .and_then(|v| v.get("max_concurrent").and_then(|v| v.as_u64()))
+                    .map(|v| v as usize)
+                    .unwrap_or(3);
+            let pending: i64 = conn
+                .query_row("SELECT COUNT(*) FROM import_jobs WHERE status = 'imported'", [], |row| row.get(0))
+                .unwrap_or(0);
+            let running: i64 = conn
+                .query_row("SELECT COUNT(*) FROM import_jobs WHERE status = 'recognizing'", [], |row| row.get(0))
+                .unwrap_or(0);
+            success_text(json!({
+                "pending": pending,
+                "running": running,
+                "max_concurrent": max_concurrent
+            }).to_string())
+        }
+        "set_recognition_concurrency" => {
+            let Some(max_concurrent) = args.get("max_concurrent").and_then(|v| v.as_u64()) else {
+                return error_text("缺少 max_concurrent 参数".into());
+            };
+            let max = (max_concurrent as usize).clamp(1, 10);
+            if let Ok(json) = serde_json::to_string_pretty(&json!({ "max_concurrent": max })) {
+                if let Err(e) = std::fs::write(app_data_dir.join("recognition_config.json"), json) {
+                    return error_text(format!("写入配置失败: {e}"));
+                }
+            }
+            success_text(json!({ "max_concurrent": max }).to_string())
+        }
+        "get_theme" => {
+            let theme = std::fs::read_to_string(app_data_dir.join("theme.json"))
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| v.get("theme").and_then(|v| v.as_str()).map(String::from))
+                .unwrap_or_else(|| "light".to_owned());
+            success_text(json!({ "theme": theme }).to_string())
+        }
+        "set_theme" => {
+            let Some(theme) = args.get("theme").and_then(|v| v.as_str()) else {
+                return error_text("缺少 theme 参数".into());
+            };
+            if theme != "light" && theme != "dark" {
+                return error_text("theme 必须是 'light' 或 'dark'".into());
+            }
+            if let Ok(json) = serde_json::to_string_pretty(&json!({ "theme": theme })) {
+                if let Err(e) = std::fs::write(app_data_dir.join("theme.json"), json) {
+                    return error_text(format!("写入主题配置失败: {e}"));
+                }
+            }
+            success_text(json!({ "theme": theme }).to_string())
+        }
+        "export_logs" => {
+            let Some(output_path) = json_str(args, "output_path") else {
+                return error_text("缺少 output_path 参数".into());
+            };
+            let logs_dir = app_data_dir.join("logs");
+            let file = match std::fs::File::create(output_path) {
+                Ok(f) => f,
+                Err(e) => return error_text(format!("创建文件失败: {e}")),
+            };
+            let mut zip_writer = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            let db_path = app_data_dir.join("invoicevault.sqlite3");
+            if db_path.exists() {
+                let _ = crate::app_core::stream_file_to_zip(&mut zip_writer, "invoicevault.sqlite3", &db_path, options);
+            }
+            if logs_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&logs_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_file() {
+                            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                                let _ = crate::app_core::stream_file_to_zip(&mut zip_writer, &format!("logs/{name}"), &path, options);
+                            }
+                        }
+                    }
+                }
+            }
+            match zip_writer.finish() {
+                Ok(finished) => match finished.metadata() {
+                    Ok(metadata) => success_text(json!({"file_path": output_path, "byte_size": metadata.len()}).to_string()),
+                    Err(e) => error_text(e.to_string()),
+                },
+                Err(e) => error_text(e.to_string()),
+            }
+        }
+        "export_backup" => {
+            let Some(output_path) = json_str(args, "output_path") else {
+                return error_text("缺少 output_path 参数".into());
+            };
+            let file = match std::fs::File::create(output_path) {
+                Ok(f) => f,
+                Err(e) => return error_text(format!("创建文件失败: {e}")),
+            };
+            let mut zip_writer = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            if let Err(e) = crate::app_core::add_dir_to_zip(&mut zip_writer, app_data_dir, app_data_dir, options) {
+                return error_text(format!("打包备份失败: {e}"));
+            }
+            match zip_writer.finish() {
+                Ok(finished) => match finished.metadata() {
+                    Ok(metadata) => success_text(json!({"file_path": output_path, "byte_size": metadata.len()}).to_string()),
+                    Err(e) => error_text(e.to_string()),
+                },
+                Err(e) => error_text(e.to_string()),
+            }
+        }
+        "cleanup_storage" => {
+            let mut files_removed = 0usize;
+            let mut bytes_freed: u64 = 0;
+            let raw_dir = app_data_dir.join("raw");
+            if raw_dir.exists() {
+                let mut referenced_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+                if let Ok(mut stmt) = conn.prepare("SELECT storage_path FROM raw_files") {
+                    if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                        for row in rows.flatten() {
+                            referenced_paths.insert(row);
+                        }
+                    }
+                }
+                if let Ok(entries) = std::fs::read_dir(&raw_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let path_str = path.to_string_lossy().to_string();
+                        if !referenced_paths.contains(&path_str) {
+                            if let Ok(metadata) = std::fs::metadata(&path) {
+                                bytes_freed += metadata.len();
+                            }
+                            if std::fs::remove_file(&path).is_ok() {
+                                files_removed += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            success_text(json!({
+                "files_removed": files_removed,
+                "db_records_removed": 0,
+                "bytes_freed": bytes_freed
+            }).to_string())
+        }
+        "get_app_info" => {
+            let migration_version: i64 = conn
+                .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_migrations", [], |row| row.get(0))
+                .unwrap_or(0);
+            success_text(json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "app_data_dir": app_data_dir.to_string_lossy(),
+                "database_path": app_data_dir.join("invoicevault.sqlite3").to_string_lossy(),
+                "migration_version": migration_version,
+            }).to_string())
         }
         _ => error_text(format!("未知工具: {tool_name}")),
     }

@@ -182,7 +182,7 @@ pub fn import_failure_message(error: &str) -> String {
     }
 }
 
-fn sanitize_badge_config(config: BadgeConfig) -> BadgeConfig {
+pub fn sanitize_badge_config(config: BadgeConfig) -> BadgeConfig {
     let mut groups = Vec::new();
     for group in config.groups {
         let name = group.name.trim();
@@ -235,6 +235,7 @@ impl Default for PriceConfig {
 }
 
 pub struct AppState {
+    app_handle: AppHandle,
     paths: AppPaths,
     db: Arc<Mutex<Connection>>,
     watcher_manager: WatcherManager,
@@ -242,8 +243,8 @@ pub struct AppState {
     chroma_config: Mutex<ChromaConfig>,
     local_embedding: Mutex<Option<LocalEmbeddingEngine>>,
     embedding_enabled: Mutex<bool>,
-    badge_config: Mutex<BadgeConfig>,
-    price_config: Mutex<PriceConfig>,
+    badge_config: Arc<Mutex<BadgeConfig>>,
+    price_config: Arc<Mutex<PriceConfig>>,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     llm_audit_enabled: Arc<Mutex<bool>>,
     recognition_pending: Arc<Mutex<i64>>,
@@ -319,6 +320,7 @@ impl AppState {
         );
 
         let state = Self {
+            app_handle: app.clone(),
             paths,
             db,
             watcher_manager,
@@ -326,8 +328,8 @@ impl AppState {
             chroma_config: Mutex::new(chroma_config),
             local_embedding: Mutex::new(None),
             embedding_enabled: Mutex::new(embedding_enabled),
-            badge_config: Mutex::new(badge_config),
-            price_config: Mutex::new(price_config),
+            badge_config: Arc::new(Mutex::new(badge_config)),
+            price_config: Arc::new(Mutex::new(price_config)),
             llm_config,
             llm_audit_enabled,
             recognition_pending: Arc::new(Mutex::new(0)),
@@ -1257,7 +1259,7 @@ impl AppState {
         *self.llm_audit_enabled.lock().expect("lock")
     }
 
-    fn load_config_raw<T: serde::de::DeserializeOwned>(
+    pub fn load_config_raw<T: serde::de::DeserializeOwned>(
         app_data_dir: &Path,
         filename: &str,
     ) -> Option<T> {
@@ -1875,7 +1877,12 @@ impl AppState {
         let attachment_context = self.agent_attachment_context(session_id, &attachment_ids)?;
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
+            self.paths.app_data_dir.clone(),
             Arc::clone(&self.db),
+            Arc::clone(&self.badge_config),
+            Arc::clone(&self.price_config),
+            Arc::clone(&self.recognition_max_concurrent),
+            self.app_handle.clone(),
             session_id,
         ));
         Ok(agent::run_agent_turn(
@@ -1902,7 +1909,12 @@ impl AppState {
         let attachment_context = self.agent_attachment_context(session_id, &attachment_ids)?;
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
+            self.paths.app_data_dir.clone(),
             Arc::clone(&self.db),
+            Arc::clone(&self.badge_config),
+            Arc::clone(&self.price_config),
+            Arc::clone(&self.recognition_max_concurrent),
+            self.app_handle.clone(),
             session_id,
         ));
         Ok(agent::run_agent_turn_stream(
@@ -1952,7 +1964,12 @@ impl AppState {
     ) -> Result<AgentResponse, AppError> {
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
+            self.paths.app_data_dir.clone(),
             Arc::clone(&self.db),
+            Arc::clone(&self.badge_config),
+            Arc::clone(&self.price_config),
+            Arc::clone(&self.recognition_max_concurrent),
+            self.app_handle.clone(),
             request.session_id,
         ));
         Ok(agent::continue_agent_turn(
@@ -1975,7 +1992,12 @@ impl AppState {
     ) -> Result<AgentResponse, AppError> {
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
+            self.paths.app_data_dir.clone(),
             Arc::clone(&self.db),
+            Arc::clone(&self.badge_config),
+            Arc::clone(&self.price_config),
+            Arc::clone(&self.recognition_max_concurrent),
+            self.app_handle.clone(),
             request.session_id,
         ));
         Ok(agent::continue_agent_turn_stream(
@@ -1994,7 +2016,12 @@ impl AppState {
 
 fn make_tool_executor(
     thumbnails_dir: std::path::PathBuf,
+    app_data_dir: std::path::PathBuf,
     db: Arc<Mutex<Connection>>,
+    badge_config: Arc<Mutex<BadgeConfig>>,
+    price_config: Arc<Mutex<PriceConfig>>,
+    recognition_max_concurrent: Arc<Mutex<usize>>,
+    app_handle: AppHandle,
     session_id: i64,
 ) -> impl Fn(&str, &serde_json::Value) -> ToolExecResult {
     move |tool_name: &str, args: &serde_json::Value| match tool_name {
@@ -2618,6 +2645,505 @@ fn make_tool_executor(
                 },
             }
         }
+        "get_badge_config" => {
+            let badge_config: BadgeConfig =
+                crate::AppState::load_config_raw(&app_data_dir, "badge_config.json")
+                    .unwrap_or_default();
+            match serde_json::to_string(&badge_config) {
+                Ok(content) => ToolExecResult::Success { content },
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "set_badge_config" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "set_badge_config".to_owned(),
+                    arguments: args.clone(),
+                    message: "将更新自定义标签配置（替换所有分组和选项），是否确认？".to_owned(),
+                };
+            }
+            let config: BadgeConfig = match serde_json::from_value(
+                args.get("config")
+                    .cloned()
+                    .unwrap_or_else(|| args.clone()),
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    return ToolExecResult::Error {
+                        message: format!("参数解析失败: {e}"),
+                    }
+                }
+            };
+            let sanitized = sanitize_badge_config(config);
+            if let Ok(json) = serde_json::to_string_pretty(&sanitized) {
+                if let Err(e) = std::fs::write(app_data_dir.join("badge_config.json"), json) {
+                    return ToolExecResult::Error {
+                        message: format!("写入配置失败: {e}"),
+                    };
+                }
+            }
+            {
+                let mut cfg = badge_config.lock().expect("badge_config lock");
+                *cfg = sanitized.clone();
+            }
+            match serde_json::to_string(&sanitized) {
+                Ok(content) => {
+                    let conn = db.lock().expect("db lock");
+                    if let Err(e) = event::create_event(
+                        &conn,
+                        "config_change",
+                        "Agent 更新 Badge 配置",
+                        "",
+                        "completed",
+                        None,
+                        None,
+                        None,
+                    ) {
+                        warn!("Failed to record badge config change event: {e}");
+                    }
+                    ToolExecResult::Success { content }
+                }
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "set_invoice_badge" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                let invoice_id = args.get("invoice_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                let group = args
+                    .get("group_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("(取消)");
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "set_invoice_badge".to_owned(),
+                    arguments: args.clone(),
+                    message: format!("将设置发票 #{invoice_id} 的标签 {group} = {value}，是否确认？"),
+                };
+            }
+            let Some(invoice_id) = args.get("invoice_id").and_then(|v| v.as_i64()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 invoice_id 参数".to_owned(),
+                };
+            };
+            let Some(group_name) = args.get("group_name").and_then(|v| v.as_str()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 group_name 参数".to_owned(),
+                };
+            };
+            let value = args.get("value").and_then(|v| v.as_str()).map(String::from);
+            let mut conn = db.lock().expect("db lock");
+            match set_invoice_badge(&mut conn, invoice_id, group_name.to_owned(), value) {
+                Ok(badges) => {
+                    let content = serde_json::to_string(&badges).unwrap_or_default();
+                    ToolExecResult::Success { content }
+                }
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "get_price_config" => {
+            let price_config: PriceConfig =
+                crate::AppState::load_config_raw(&app_data_dir, "price_config.json")
+                    .unwrap_or_default();
+            match serde_json::to_string(&price_config) {
+                Ok(content) => ToolExecResult::Success { content },
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "set_price_config" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "set_price_config".to_owned(),
+                    arguments: args.clone(),
+                    message: "将更新 LLM 价格配置，是否确认？".to_owned(),
+                };
+            }
+            let config: PriceConfig = match serde_json::from_value(
+                args.get("config")
+                    .cloned()
+                    .unwrap_or_else(|| args.clone()),
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    return ToolExecResult::Error {
+                        message: format!("参数解析失败: {e}"),
+                    }
+                }
+            };
+            if let Ok(json) = serde_json::to_string_pretty(&config) {
+                if let Err(e) = std::fs::write(app_data_dir.join("price_config.json"), json) {
+                    return ToolExecResult::Error {
+                        message: format!("写入配置失败: {e}"),
+                    };
+                }
+            }
+            {
+                let mut cfg = price_config.lock().expect("price_config lock");
+                *cfg = config.clone();
+            }
+            match serde_json::to_string(&config) {
+                Ok(content) => ToolExecResult::Success { content },
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "get_recognition_status" => {
+            let max_concurrent: usize =
+                crate::AppState::load_config_raw::<serde_json::Value>(
+                    &app_data_dir,
+                    "recognition_config.json",
+                )
+                .and_then(|v| v.get("max_concurrent").and_then(|v| v.as_u64()))
+                .map(|v| v as usize)
+                .unwrap_or(3);
+            let conn = db.lock().expect("db lock");
+            let pending: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM import_jobs WHERE status = 'imported'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            let running: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM import_jobs WHERE status = 'recognizing'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            let content = serde_json::json!({
+                "pending": pending,
+                "running": running,
+                "max_concurrent": max_concurrent
+            })
+            .to_string();
+            ToolExecResult::Success { content }
+        }
+        "set_recognition_concurrency" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                let max = args
+                    .get("max_concurrent")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "set_recognition_concurrency".to_owned(),
+                    arguments: args.clone(),
+                    message: format!("将识别任务并发数设为 {max}，是否确认？"),
+                };
+            }
+            let Some(max_concurrent) = args.get("max_concurrent").and_then(|v| v.as_u64()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 max_concurrent 参数".to_owned(),
+                };
+            };
+            let max = (max_concurrent as usize).clamp(1, 10);
+            if let Ok(json) =
+                serde_json::to_string_pretty(&serde_json::json!({ "max_concurrent": max }))
+            {
+                if let Err(e) =
+                    std::fs::write(app_data_dir.join("recognition_config.json"), json)
+                {
+                    return ToolExecResult::Error {
+                        message: format!("写入配置失败: {e}"),
+                    };
+                }
+            }
+            {
+                let mut curr = recognition_max_concurrent.lock().expect("recognition_max_concurrent lock");
+                *curr = max;
+            }
+            let content = serde_json::json!({ "max_concurrent": max }).to_string();
+            ToolExecResult::Success { content }
+        }
+        "get_theme" => {
+            let theme_path = app_data_dir.join("theme.json");
+            let theme = std::fs::read_to_string(&theme_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| v.get("theme").and_then(|v| v.as_str()).map(String::from))
+                .unwrap_or_else(|| "light".to_owned());
+            let content = serde_json::json!({ "theme": theme }).to_string();
+            ToolExecResult::Success { content }
+        }
+        "set_theme" => {
+            let Some(theme) = args.get("theme").and_then(|v| v.as_str()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 theme 参数".to_owned(),
+                };
+            };
+            if theme != "light" && theme != "dark" {
+                return ToolExecResult::Error {
+                    message: "theme 必须是 'light' 或 'dark'".to_owned(),
+                };
+            }
+            if let Ok(json) =
+                serde_json::to_string_pretty(&serde_json::json!({ "theme": theme }))
+            {
+                if let Err(e) = std::fs::write(app_data_dir.join("theme.json"), json) {
+                    return ToolExecResult::Error {
+                        message: format!("写入主题配置失败: {e}"),
+                    };
+                }
+            }
+            if let Err(e) = app_handle.emit("theme-change", serde_json::json!({ "theme": theme })) {
+                warn!("Failed to emit theme-change event: {e}");
+            }
+            let content = serde_json::json!({ "theme": theme }).to_string();
+            ToolExecResult::Success { content }
+        }
+        "export_logs" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "export_logs".to_owned(),
+                    arguments: args.clone(),
+                    message: "将导出应用日志文件，请选择保存位置。".to_owned(),
+                };
+            }
+            let Some(output_path) = args.get("output_path").and_then(|v| v.as_str()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 output_path 参数".to_owned(),
+                };
+            };
+            let logs_dir = app_data_dir.join("logs");
+            let file = match std::fs::File::create(output_path) {
+                Ok(f) => f,
+                Err(e) => {
+                    return ToolExecResult::Error {
+                        message: format!("创建文件失败: {e}"),
+                    }
+                }
+            };
+            let mut zip_writer = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            let mut ok = true;
+            let mut err_msg = String::new();
+            let db_path = app_data_dir.join("invoicevault.sqlite3");
+            if db_path.exists() {
+                if let Err(e) =
+                    stream_file_to_zip(&mut zip_writer, "invoicevault.sqlite3", &db_path, options)
+                {
+                    ok = false;
+                    err_msg = e.to_string();
+                }
+            }
+            for config_name in &[
+                "llm_config.json",
+                "embedding_enabled.json",
+                "recognition_config.json",
+                "badge_config.json",
+            ] {
+                let config_path = app_data_dir.join(config_name);
+                if config_path.exists() {
+                    let _ = stream_file_to_zip(
+                        &mut zip_writer,
+                        config_name,
+                        &config_path,
+                        options,
+                    );
+                }
+            }
+            if logs_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&logs_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_file() {
+                            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                                let _ = stream_file_to_zip(
+                                    &mut zip_writer,
+                                    &format!("logs/{name}"),
+                                    &path,
+                                    options,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            let llm_audit_dir = app_data_dir.join("llm_audit");
+            if llm_audit_dir.exists() {
+                let _ = add_dir_to_zip(
+                    &mut zip_writer,
+                    &app_data_dir,
+                    &llm_audit_dir,
+                    options,
+                );
+            }
+            if !ok {
+                return ToolExecResult::Error { message: err_msg };
+            }
+            match zip_writer.finish() {
+                Ok(finished) => match finished.metadata() {
+                    Ok(metadata) => {
+                        let content = serde_json::json!({
+                            "file_path": output_path,
+                            "byte_size": metadata.len()
+                        })
+                        .to_string();
+                        ToolExecResult::Success { content }
+                    }
+                    Err(e) => ToolExecResult::Error {
+                        message: e.to_string(),
+                    },
+                },
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "export_backup" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "export_backup".to_owned(),
+                    arguments: args.clone(),
+                    message: "将导出数据库和配置文件的备份包，请选择保存位置。".to_owned(),
+                };
+            }
+            let Some(output_path) = args.get("output_path").and_then(|v| v.as_str()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 output_path 参数".to_owned(),
+                };
+            };
+            let file = match std::fs::File::create(output_path) {
+                Ok(f) => f,
+                Err(e) => {
+                    return ToolExecResult::Error {
+                        message: format!("创建文件失败: {e}"),
+                    }
+                }
+            };
+            let mut zip_writer = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            if let Err(e) =
+                add_dir_to_zip(&mut zip_writer, &app_data_dir, &app_data_dir, options)
+            {
+                return ToolExecResult::Error {
+                    message: format!("打包备份失败: {e}"),
+                };
+            }
+            match zip_writer.finish() {
+                Ok(finished) => match finished.metadata() {
+                    Ok(metadata) => {
+                        let content = serde_json::json!({
+                            "file_path": output_path,
+                            "byte_size": metadata.len()
+                        })
+                        .to_string();
+                        ToolExecResult::Success { content }
+                    }
+                    Err(e) => ToolExecResult::Error {
+                        message: e.to_string(),
+                    },
+                },
+                Err(e) => ToolExecResult::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
+        "cleanup_storage" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                return ToolExecResult::ConfirmationRequired {
+                    tool_name: "cleanup_storage".to_owned(),
+                    arguments: args.clone(),
+                    message: "将清理孤立文件和过期数据以释放存储空间，是否确认？".to_owned(),
+                };
+            }
+            let conn = db.lock().expect("db lock");
+            let mut files_removed = 0usize;
+            let mut bytes_freed: u64 = 0;
+            let raw_dir = app_data_dir.join("raw");
+            if raw_dir.exists() {
+                let mut referenced_paths: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                if let Ok(mut stmt) = conn.prepare("SELECT storage_path FROM raw_files") {
+                    if let Ok(rows) =
+                        stmt.query_map([], |row| row.get::<_, String>(0))
+                    {
+                        for row in rows.flatten() {
+                            referenced_paths.insert(row);
+                        }
+                    }
+                }
+                if let Ok(entries) = std::fs::read_dir(&raw_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let path_str = path.to_string_lossy().to_string();
+                        if !referenced_paths.contains(&path_str) {
+                            if let Ok(metadata) = std::fs::metadata(&path) {
+                                bytes_freed += metadata.len();
+                            }
+                            if std::fs::remove_file(&path).is_ok() {
+                                files_removed += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            let content = serde_json::json!({
+                "files_removed": files_removed,
+                "db_records_removed": 0,
+                "bytes_freed": bytes_freed
+            })
+            .to_string();
+            ToolExecResult::Success { content }
+        }
+        "get_app_info" => {
+            let db_path = app_data_dir.join("invoicevault.sqlite3");
+            let migration_version: i64 = {
+                let conn = db.lock().expect("db lock");
+                conn.query_row(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0)
+            };
+            let content = serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "app_data_dir": app_data_dir.to_string_lossy(),
+                "database_path": db_path.to_string_lossy(),
+                "migration_version": migration_version,
+            })
+            .to_string();
+            ToolExecResult::Success { content }
+        }
         _ => ToolExecResult::Error {
             message: format!("未知工具: {tool_name}"),
         },
@@ -2974,7 +3500,7 @@ fn io_err(e: std::io::Error) -> AppError {
     AppError::Io(e)
 }
 
-fn stream_file_to_zip(
+pub fn stream_file_to_zip(
     zip_writer: &mut zip::ZipWriter<std::fs::File>,
     zip_path: &str,
     file_path: &Path,
@@ -2991,7 +3517,7 @@ fn stream_file_to_zip(
     Ok(())
 }
 
-fn add_dir_to_zip(
+pub fn add_dir_to_zip(
     zip_writer: &mut zip::ZipWriter<std::fs::File>,
     base: &Path,
     dir: &Path,

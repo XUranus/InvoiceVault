@@ -777,6 +777,31 @@ fn get_badge_config(state: State<'_, AppState>) -> Result<BadgeConfig, String> {
 }
 
 #[tauri::command]
+fn get_theme(state: State<'_, AppState>) -> Result<String, String> {
+    let theme_path = state.app_data_dir().join("theme.json");
+    let theme = std::fs::read_to_string(&theme_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("theme").and_then(|v| v.as_str()).map(String::from))
+        .unwrap_or_else(|| "light".to_owned());
+    Ok(theme)
+}
+
+#[tauri::command]
+fn set_theme(app: AppHandle, state: State<'_, AppState>, theme: String) -> Result<(), String> {
+    if theme != "light" && theme != "dark" {
+        return Err("theme must be 'light' or 'dark'".to_owned());
+    }
+    let theme_path = state.app_data_dir().join("theme.json");
+    let json = serde_json::to_string_pretty(&serde_json::json!({ "theme": &theme }))
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&theme_path, json).map_err(|e| e.to_string())?;
+    app.emit("theme-change", serde_json::json!({ "theme": theme }))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn set_invoice_badge(
     state: State<'_, AppState>,
     invoice_id: i64,
@@ -1374,6 +1399,8 @@ pub fn run() {
             download_embedding_model,
             set_badge_config,
             get_badge_config,
+            get_theme,
+            set_theme,
             set_invoice_badge,
             test_chroma_connection,
             test_embedding_connection,

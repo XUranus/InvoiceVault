@@ -17,6 +17,7 @@ export function useAppInitializer() {
   const navigate = useNavigate();
 
   const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
   const initialize = useAppStore((s) => s.initialize);
   const loadConfigFromBackend = useLlmStore((s) => s.loadConfigFromBackend);
   const setIsDraggingFiles = useAppStore((s) => s.setIsDraggingFiles);
@@ -34,6 +35,24 @@ export function useAppInitializer() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+
+  // Listen for theme changes from Agent/backend
+  useEffect(() => {
+    let cleanup: (() => void) | null = null;
+    listen<{ theme: string }>("theme-change", (event) => {
+      const t = event.payload.theme;
+      if (t === "light" || t === "dark") {
+        setTheme(t);
+      }
+    })
+      .then((fn) => {
+        cleanup = fn;
+      })
+      .catch(() => {});
+    return () => {
+      cleanup?.();
+    };
+  }, [setTheme]);
 
   // Initialize data on mount
   useEffect(() => {
