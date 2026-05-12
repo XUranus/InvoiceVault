@@ -459,11 +459,10 @@ function formatExtraFieldValue(value: unknown): string {
 }
 
 function Field({ label, value, fullWidth }: { label: string; value: string | null; fullWidth?: boolean }) {
-  if (!value) return null;
   return (
     <div className={`detail-field${fullWidth ? " field-full" : ""}`}>
       <dt>{label}</dt>
-      <dd>{value}</dd>
+      <dd className={!value ? "muted" : ""}>{value || "—"}</dd>
     </div>
   );
 }
