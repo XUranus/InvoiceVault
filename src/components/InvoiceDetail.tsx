@@ -320,7 +320,7 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
         <div className="items-section detail-items-section">
           <div className="items-section-header">
             <h3>明细行</h3>
-            {itemsDirty && (
+            {isEditing && itemsDirty && (
               <button
                 className="btn-primary btn-small"
                 onClick={handleSaveItems}
@@ -331,7 +331,7 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
             )}
           </div>
           <div className="items-table-wrap">
-            <table className="items-table items-table-editable">
+            <table className={`items-table${isEditing ? " items-table-editable" : ""}`}>
               <thead>
                 <tr>
                   <th>名称</th>
@@ -347,54 +347,29 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               <tbody>
                 {editingItems.map((item, idx) => (
                   <tr key={item.id}>
-                    <td>
-                      <input
-                        value={item.name}
-                        onChange={(e) => handleItemChange(idx, "name", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={item.specification ?? ""}
-                        onChange={(e) => handleItemChange(idx, "specification", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={item.unit ?? ""}
-                        onChange={(e) => handleItemChange(idx, "unit", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={item.quantity ?? ""}
-                        onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={item.unit_price ?? ""}
-                        onChange={(e) => handleItemChange(idx, "unit_price", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={item.amount ?? ""}
-                        onChange={(e) => handleItemChange(idx, "amount", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={item.tax_rate ?? ""}
-                        onChange={(e) => handleItemChange(idx, "tax_rate", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={item.tax_amount ?? ""}
-                        onChange={(e) => handleItemChange(idx, "tax_amount", e.target.value)}
-                      />
-                    </td>
+                    {isEditing ? (
+                      <>
+                        <td><input value={item.name} onChange={(e) => handleItemChange(idx, "name", e.target.value)} /></td>
+                        <td><input value={item.specification ?? ""} onChange={(e) => handleItemChange(idx, "specification", e.target.value)} /></td>
+                        <td><input value={item.unit ?? ""} onChange={(e) => handleItemChange(idx, "unit", e.target.value)} /></td>
+                        <td><input value={item.quantity ?? ""} onChange={(e) => handleItemChange(idx, "quantity", e.target.value)} /></td>
+                        <td><input value={item.unit_price ?? ""} onChange={(e) => handleItemChange(idx, "unit_price", e.target.value)} /></td>
+                        <td><input value={item.amount ?? ""} onChange={(e) => handleItemChange(idx, "amount", e.target.value)} /></td>
+                        <td><input value={item.tax_rate ?? ""} onChange={(e) => handleItemChange(idx, "tax_rate", e.target.value)} /></td>
+                        <td><input value={item.tax_amount ?? ""} onChange={(e) => handleItemChange(idx, "tax_amount", e.target.value)} /></td>
+                      </>
+                    ) : (
+                      <>
+                        <td>{item.name}</td>
+                        <td>{item.specification ?? ""}</td>
+                        <td>{item.unit ?? ""}</td>
+                        <td>{item.quantity ?? ""}</td>
+                        <td>{item.unit_price ?? ""}</td>
+                        <td>{item.amount ?? ""}</td>
+                        <td>{item.tax_rate ?? ""}</td>
+                        <td>{item.tax_amount ?? ""}</td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>
