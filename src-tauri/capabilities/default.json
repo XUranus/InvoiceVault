@@ -12,6 +12,11 @@
     "core:event:allow-unlisten",
     "core:event:allow-emit",
     "dialog:default",
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "dialog:allow-confirm",
     "shell:allow-open"
   ]
 }
