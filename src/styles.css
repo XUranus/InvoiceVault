@@ -2124,23 +2124,32 @@ textarea:focus {
   background: var(--color-input-bg-subtle);
 }
 
+.detail-badge-section {
+  margin-top: 16px;
+}
+
+.detail-badge-section > h3 {
+  margin: 0 0 10px;
+}
+
 .invoice-badge-groups {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
+  align-items: center;
 }
 
 .invoice-badge-group {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .invoice-badge-group-name {
   color: var(--color-text-muted);
   font-size: 13px;
   font-weight: 700;
-  padding-top: 5px;
+  white-space: nowrap;
 }
 
 .invoice-badge-options {

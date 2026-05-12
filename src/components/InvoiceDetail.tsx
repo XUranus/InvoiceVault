@@ -247,40 +247,6 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               <span>暂无预览</span>
             </div>
           )}
-
-          {badgeConfig.groups.length > 0 ? (
-            <section className="invoice-badge-section">
-              <div className="items-section-header">
-                <h3>自定义标签</h3>
-              </div>
-              <div className="invoice-badge-groups">
-                {badgeConfig.groups.map((group) => {
-                  const selected = selectedBadgeValue(group.name);
-                  return (
-                    <div className="invoice-badge-group" key={group.name}>
-                      <div className="invoice-badge-group-name">{group.name}</div>
-                      <div className="invoice-badge-options">
-                        {group.options.map((option) => (
-                          <button
-                            className={`badge-option ${selected === option ? "is-selected" : ""}`}
-                            type="button"
-                            key={option}
-                            onClick={() => handleBadgeClick(group.name, option)}
-                            disabled={savingBadge === group.name}
-                          >
-                            {option}
-                          </button>
-                        ))}
-                        {group.options.length === 0 ? (
-                          <span className="muted">未配置可选项</span>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          ) : null}
         </aside>
 
         <div className="detail-content-pane">
@@ -390,6 +356,38 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
             </table>
           </div>
         </div>
+      ) : null}
+
+      {badgeConfig.groups.length > 0 ? (
+        <section className="invoice-badge-section detail-badge-section">
+          <h3>自定义标签</h3>
+          <div className="invoice-badge-groups">
+            {badgeConfig.groups.map((group) => {
+              const selected = selectedBadgeValue(group.name);
+              return (
+                <div className="invoice-badge-group" key={group.name}>
+                  <span className="invoice-badge-group-name">{group.name}</span>
+                  <div className="invoice-badge-options">
+                    {group.options.map((option) => (
+                      <button
+                        className={`badge-option ${selected === option ? "is-selected" : ""}`}
+                        type="button"
+                        key={option}
+                        onClick={() => handleBadgeClick(group.name, option)}
+                        disabled={savingBadge === group.name}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                    {group.options.length === 0 ? (
+                      <span className="muted">未配置可选项</span>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       ) : null}
     </div>
   );
