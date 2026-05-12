@@ -19,7 +19,7 @@ use crate::{
     document::{prepare_image_for_recognition, render_pdf_pages},
     event,
     extractor::{save_invoice_extraction, SaveInvoiceExtractionRequest},
-    importer::{import_files, ImportJobSummary},
+    importer::{import_files, update_import_job_status, ImportJobSummary},
     llm::{recognize_invoice_image, LlmAuditConfig, LlmProviderConfig},
     storage::StorageError,
 };
@@ -527,8 +527,8 @@ fn watch_loop(
         .collect();
 
     let kw_filter: Vec<String> = name_keywords
-        .split(',')
-        .map(|s| s.trim().to_lowercase())
+        .split_whitespace()
+        .map(|s| s.to_lowercase())
         .filter(|s| !s.is_empty())
         .collect();
 
@@ -665,13 +665,13 @@ fn process_pending(
 
     let count = path_strs.len();
     info!("Watcher import: {count} files from watch_dir {watch_id}");
-    let (imported, raw_file_ids) = match db.lock() {
+    let (imported, recognition_jobs) = match db.lock() {
         Ok(mut conn) => {
             let jobs = import_files(&mut conn, raw_dir, path_strs, "watcher").unwrap_or_default();
-            let ids: Vec<i64> = jobs
+            let pairs: Vec<(i64, i64)> = jobs
                 .iter()
                 .filter(|j| j.status == "imported" && j.raw_file_id.is_some())
-                .filter_map(|j| j.raw_file_id)
+                .filter_map(|j| Some((j.id, j.raw_file_id?)))
                 .collect();
 
             // Record event and notification
@@ -679,11 +679,19 @@ fn process_pending(
             let success = jobs.iter().filter(|j| j.status == "imported").count();
             let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
             let failed = jobs.iter().filter(|j| j.status == "failed").count();
-            if let Err(e) = event::record_import_event(&conn, total, success, dups, failed, &[], &ids) {
+            let raw_ids: Vec<i64> = pairs.iter().map(|(_, raw_id)| *raw_id).collect();
+            if let Err(e) = event::record_import_event(&conn, total, success, dups, failed, &[], &raw_ids) {
                 warn!("Failed to record watcher import event: {e}");
             }
 
-            (jobs, ids)
+            // Mark jobs as "recognizing"
+            for (job_id, _) in &pairs {
+                if let Err(e) = update_import_job_status(&conn, *job_id, None, "recognizing", None) {
+                    warn!("Failed to update import job {job_id} status to recognizing: {e}");
+                }
+            }
+
+            (jobs, pairs)
         }
         Err(_) => return,
     };
@@ -701,27 +709,41 @@ fn process_pending(
     }
 
     // Auto-recognize each imported file if LLM is configured
-    if !raw_file_ids.is_empty() {
-        if let Some(config) = llm_config.lock().ok().and_then(|c| c.clone()) {
-            let db = Arc::clone(db);
-            let thumbnails_dir = thumbnails_dir.to_path_buf();
-            let audit = (*llm_audit_enabled.lock().expect("lock")).then(|| LlmAuditConfig {
-                dir: llm_audit_dir.to_path_buf(),
-            });
+    if !recognition_jobs.is_empty() {
+        let config = match llm_config.lock().ok().and_then(|c| c.clone()) {
+            Some(c) if !c.api_key.is_empty() => c,
+            _ => return,
+        };
+        let db = Arc::clone(db);
+        let thumbnails_dir = thumbnails_dir.to_path_buf();
+        let audit = (*llm_audit_enabled.lock().expect("lock")).then(|| LlmAuditConfig {
+            dir: llm_audit_dir.to_path_buf(),
+        });
+        let app_handle = app_handle.clone();
 
-            tauri::async_runtime::spawn(async move {
-                for raw_file_id in raw_file_ids {
-                    recognize_raw_file_async(
-                        &db,
-                        &thumbnails_dir,
-                        raw_file_id,
-                        &config,
-                        audit.as_ref(),
-                    )
-                    .await;
+        tauri::async_runtime::spawn(async move {
+            for (job_id, raw_file_id) in recognition_jobs {
+                let result = recognize_raw_file_async(
+                    &db,
+                    &thumbnails_dir,
+                    raw_file_id,
+                    &config,
+                    audit.as_ref(),
+                )
+                .await;
+
+                if let Ok(conn) = db.lock() {
+                    let status = if result { "imported" } else { "failed" };
+                    if let Err(e) = update_import_job_status(&conn, job_id, None, status, None) {
+                        warn!("Failed to update import job {job_id} status: {e}");
+                    }
                 }
-            });
-        }
+            }
+
+            if let Err(e) = app_handle.emit("recognition-complete", ()) {
+                warn!("Failed to emit recognition-complete event: {e}");
+            }
+        });
     }
 }
 
@@ -731,7 +753,7 @@ pub async fn recognize_raw_file_async(
     raw_file_id: i64,
     config: &LlmProviderConfig,
     audit: Option<&LlmAuditConfig>,
-) {
+) -> bool {
     let (storage_path, mime_type) = match db.lock() {
         Ok(conn) => {
             match conn.query_row(
@@ -742,13 +764,13 @@ pub async fn recognize_raw_file_async(
                 Ok(r) => r,
                 Err(e) => {
                     error!("Watcher: raw_file {raw_file_id} not found: {e}");
-                    return;
+                    return false;
                 }
             }
         }
         Err(e) => {
             error!("Watcher: failed to lock db for recognition: {e}");
-            return;
+            return false;
         }
     };
 
@@ -770,13 +792,14 @@ pub async fn recognize_raw_file_async(
                     .collect(),
                 Err(e) => {
                     error!("Watcher: PDF render failed for raw_file {raw_file_id}: {e}");
-                    return;
+                    return false;
                 }
             }
         } else {
             vec![(None, storage_path, mime_type)]
         };
 
+    let mut any_success = false;
     for (page_range, image_path, mime) in recognition_inputs {
         let page_number = page_range.as_ref().and_then(|s| s.parse::<usize>().ok());
 
@@ -824,6 +847,7 @@ pub async fn recognize_raw_file_async(
         };
 
         if let Some(invoice) = invoice {
+            any_success = true;
             let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
             if let Ok(db) = db.lock() {
                 if let Err(e) = event::record_recognition_event(
@@ -840,6 +864,7 @@ pub async fn recognize_raw_file_async(
             }
         }
     }
+    any_success
 }
 
 #[cfg(test)]
