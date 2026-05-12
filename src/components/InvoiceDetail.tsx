@@ -32,6 +32,8 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
   const [savingItems, setSavingItems] = React.useState(false);
   const [badgeConfig, setBadgeConfig] = React.useState<BadgeConfig>({ groups: [] });
   const [savingBadge, setSavingBadge] = React.useState<string | null>(null);
+  const formRef = React.useRef<{ save: () => void; saving: boolean } | null>(null);
+  const [formSaving, setFormSaving] = React.useState(false);
 
   const loadDetail = React.useCallback(async () => {
     setLoading(true);
@@ -167,6 +169,15 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
           ← 返回列表
         </button>
         <div className="detail-header-actions">
+          {isEditing && (
+            <button
+              className="btn-primary btn-small"
+              onClick={() => formRef.current?.save()}
+              disabled={formSaving}
+            >
+              {formSaving ? "保存中..." : "保存"}
+            </button>
+          )}
           <button
             className="edit-btn"
             onClick={() => setIsEditing((prev) => !prev)}
@@ -290,6 +301,10 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               detail={detail}
               onSaved={handleSaved}
               onError={onError}
+              onStateChange={(state) => {
+                formRef.current = state;
+                setFormSaving(state.saving);
+              }}
             />
           ) : (
             <div className="detail-fields">

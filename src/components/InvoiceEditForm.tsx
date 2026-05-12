@@ -7,9 +7,10 @@ type Props = {
   detail: InvoiceDetail;
   onSaved: () => void;
   onError: (error: string) => void;
+  onStateChange?: (state: { save: () => void; saving: boolean }) => void;
 };
 
-export function InvoiceEditForm({ detail, onSaved, onError }: Props) {
+export function InvoiceEditForm({ detail, onSaved, onError, onStateChange }: Props) {
   const [form, setForm] = React.useState<UpdateInvoiceRequest>({
     id: detail.id,
     invoice_type: detail.invoice_type,
@@ -31,16 +32,18 @@ export function InvoiceEditForm({ detail, onSaved, onError }: Props) {
   });
   const [errors, setErrors] = React.useState<FieldError[]>([]);
   const [saving, setSaving] = React.useState(false);
+  const formRef = React.useRef(form);
+  formRef.current = form;
 
   const setField = (field: keyof UpdateInvoiceRequest, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value || null }));
   };
 
-  const handleSave = async () => {
+  const handleSave = React.useCallback(async () => {
     setSaving(true);
     setErrors([]);
     try {
-      const result = await updateInvoice(form);
+      const result = await updateInvoice(formRef.current);
       if (result.errors.length > 0) {
         setErrors(result.errors);
       } else {
@@ -51,7 +54,11 @@ export function InvoiceEditForm({ detail, onSaved, onError }: Props) {
     } finally {
       setSaving(false);
     }
-  };
+  }, [onSaved, onError]);
+
+  React.useEffect(() => {
+    onStateChange?.({ save: handleSave, saving });
+  }, [saving, handleSave, onStateChange]);
 
   const fieldError = (field: string) =>
     errors.find((e) => e.field === field)?.message;
@@ -142,12 +149,6 @@ export function InvoiceEditForm({ detail, onSaved, onError }: Props) {
         onChange={(v) => setField("remarks", v)}
         error={fieldError("remarks")}
       />
-
-      <div className="form-actions">
-        <button onClick={handleSave} disabled={saving}>
-          {saving ? "保存中..." : "保存"}
-        </button>
-      </div>
     </div>
   );
 }
