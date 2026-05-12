@@ -90,4 +90,6 @@ fn main() {
 
         println!("cargo:rerun-if-changed={}", real_path.display());
     }
+
+    tauri_build::build()
 }

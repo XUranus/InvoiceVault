@@ -32,6 +32,6 @@
     "active": true,
     "targets": "all",
     "icon": ["../icons/app.png"],
-    "resources": ["../sample/*", "resources/*"]
+    "resources": ["../sample/*"]
   }
 }

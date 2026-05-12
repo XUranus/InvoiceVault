@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Local-first invoice processing desktop app"
 authors = ["InvoiceVault Contributors"]
 edition = "2021"
+default-run = "invoicevault"
 
 [lib]
 name = "invoicevault_lib"
