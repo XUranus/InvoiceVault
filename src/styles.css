@@ -2263,37 +2263,45 @@ textarea:focus {
 
 /* Edit form */
 .edit-form {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 16px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-surface);
 }
 
 .edit-field {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
-  gap: 6px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--color-separator);
+  gap: 16px;
+}
+
+.edit-field:last-child {
+  border-bottom: none;
 }
 
 .edit-field span {
   color: var(--color-text-muted);
-  font-size: 13px;
-  font-weight: 600;
-  min-width: 72px;
+  font-size: 12px;
+  font-weight: 500;
   flex-shrink: 0;
 }
 
 .edit-field input {
   flex: 1;
   min-width: 0;
-  min-height: 36px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 0 10px;
+  padding: 4px 10px;
   color: var(--color-text);
   background: var(--color-input-bg);
   font: inherit;
-  font-weight: 400;
+  font-weight: 500;
+  text-align: right;
 }
 
 .input-error {
@@ -2304,12 +2312,9 @@ textarea:focus {
   color: var(--color-error-text);
   font-size: 12px;
   font-weight: 400;
-  flex-basis: 100%;
-  padding-left: 78px;
 }
 
 .form-actions {
-  grid-column: 1 / -1;
   display: flex;
   gap: 10px;
   margin-top: 8px;

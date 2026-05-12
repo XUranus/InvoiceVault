@@ -167,12 +167,14 @@ function TextInput({
   return (
     <label className="edit-field">
       <span>{label}</span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={error ? "input-error" : ""}
-      />
-      {error ? <span className="field-error">{error}</span> : null}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={error ? "input-error" : ""}
+        />
+        {error ? <span className="field-error">{error}</span> : null}
+      </div>
     </label>
   );
 }
