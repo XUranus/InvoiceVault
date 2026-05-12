@@ -154,7 +154,14 @@ fn import_one(
     match inspect_file(&source_path) {
         Ok(raw_file) => {
             if let Some(raw_file_id) = find_raw_file_by_hash(conn, &raw_file.sha256)? {
-                update_import_job_status(conn, job_id, Some(raw_file_id), "duplicate", None)?;
+                if raw_file_has_invoice(conn, raw_file_id)? {
+                    // Already imported and recognized — true duplicate
+                    update_import_job_status(conn, job_id, Some(raw_file_id), "duplicate", None)?;
+                    return load_import_job(conn, job_id);
+                }
+                // raw_file exists but has no invoice (e.g. recognition failed last time)
+                // Reuse it so the caller can re-trigger recognition
+                update_import_job_status(conn, job_id, Some(raw_file_id), "imported", None)?;
                 return load_import_job(conn, job_id);
             }
 
@@ -191,6 +198,15 @@ fn find_raw_file_by_hash(conn: &Connection, sha256: &str) -> Result<Option<i64>,
             |row| row.get::<_, i64>(0),
         )
         .optional()?)
+}
+
+fn raw_file_has_invoice(conn: &Connection, raw_file_id: i64) -> Result<bool, ImportError> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM invoices WHERE raw_file_id = ?1",
+        [raw_file_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
 }
 
 fn insert_raw_file(conn: &Connection, raw_file: &RawFileInput) -> Result<i64, ImportError> {
@@ -406,6 +422,13 @@ mod tests {
             "manual",
         )
         .expect("first import");
+
+        assert_eq!(first[0].status, "imported");
+        assert_eq!(first[0].original_name.as_deref(), Some("receipt.jpg"));
+        assert_eq!(first[0].current_name.as_deref(), Some("receipt.jpg"));
+
+        // Without an associated invoice, re-import reuses the raw_file as "imported"
+        // (allows re-recognition). A true "duplicate" requires an existing invoice.
         let second = import_files(
             &mut conn,
             &temp_dir.path().join("raw"),
@@ -414,11 +437,26 @@ mod tests {
         )
         .expect("second import");
 
-        assert_eq!(first[0].status, "imported");
-        assert_eq!(second[0].status, "duplicate");
+        assert_eq!(second[0].status, "imported");
         assert_eq!(first[0].raw_file_id, second[0].raw_file_id);
-        assert_eq!(first[0].original_name.as_deref(), Some("receipt.jpg"));
-        assert_eq!(first[0].current_name.as_deref(), Some("receipt.jpg"));
+
+        // Simulate: create an invoice for this raw_file, then re-import → duplicate
+        let raw_id = first[0].raw_file_id.unwrap();
+        conn.execute(
+            "INSERT INTO invoices (raw_file_id) VALUES (?1)",
+            rusqlite::params![raw_id],
+        ).expect("insert invoice");
+
+        let third = import_files(
+            &mut conn,
+            &temp_dir.path().join("raw"),
+            vec![source_path.to_string_lossy().into_owned()],
+            "manual",
+        )
+        .expect("third import");
+
+        assert_eq!(third[0].status, "duplicate");
+        assert_eq!(first[0].raw_file_id, third[0].raw_file_id);
     }
 
     #[test]
