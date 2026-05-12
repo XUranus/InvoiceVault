@@ -111,7 +111,7 @@ pub fn prepare_image_for_recognition(
     let thumbnail_path = thumbnail_dir.join(format!("{label}.jpg"));
 
     run_magick_resize(image_path, &normalized_path, 1800, 85)?;
-    run_magick_resize(image_path, &thumbnail_path, 420, 78)?;
+    run_magick_resize(image_path, &thumbnail_path, 800, 85)?;
 
     Ok(PreparedImage {
         image_path: normalized_path,

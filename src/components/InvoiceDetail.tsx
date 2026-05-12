@@ -192,7 +192,7 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               置信度 {(detail.confidence * 100).toFixed(0)}%
             </span>
           )}
-          {detail.source_page_range && (
+          {detail.source_page_range && detail.source_page_range !== "1" && (
             <span className="badge badge-page">
               {detail.source_page_range}
             </span>
