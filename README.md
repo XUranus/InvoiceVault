@@ -4,7 +4,7 @@
   <img src="icons/app.png" alt="InvoiceVault Logo" width="160" height="160">
 </p>
 
-InvoiceVault 是一个本地优先的跨平台桌面端发票处理 Agent。把 PDF/图片发票导入本地归档，通过多模态 AI 模型识别为结构化数据，支持去重、语义检索、统计分析、批量导出和自然语言对话。
+InvoiceVault（票匣） 是一个本地优先的跨平台桌面端发票处理 Agent。把 PDF/图片发票导入本地归档，通过多模态 AI 模型识别为结构化数据，支持去重、语义检索、统计分析、批量导出和自然语言对话。
 
 ## 功能
 
@@ -36,13 +36,10 @@ PDF 识别额外需要 Poppler `pdftoppm`，图片标准化需要 ImageMagick `m
 ```bash
 # 安装依赖
 npm install
-
 # 启动开发版
 npm run tauri dev
-
 # 构建前端
 npm run build
-
 # 后端测试
 cd src-tauri && cargo test
 ```
