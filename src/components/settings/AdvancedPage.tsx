@@ -418,6 +418,7 @@ export function AdvancedPage() {
             将数据库、配置文件及系统信息打包为 ZIP 压缩包用于问题诊断。
           </p>
           <button className="btn-primary" onClick={handleExportLogs} disabled={exporting}>
+            {exporting && <span className="inline-spinner" style={{ marginRight: 6 }} />}
             {exporting ? "导出中..." : "导出日志"}
           </button>
           {exportResult ? (
@@ -443,6 +444,7 @@ export function AdvancedPage() {
             将全部用户数据（数据库、配置、日志、文件归档）打包压缩为 ZIP 文件。
           </p>
           <button className="btn-primary" onClick={handleBackup} disabled={backingUp}>
+            {backingUp && <span className="inline-spinner" style={{ marginRight: 6 }} />}
             {backingUp ? "备份中..." : "基础备份"}
           </button>
           {backupResult ? (
@@ -472,6 +474,7 @@ export function AdvancedPage() {
             onClick={() => setCleanupDialogOpen(true)}
             disabled={cleaning}
           >
+            {cleaning && <span className="inline-spinner" style={{ marginRight: 6 }} />}
             {cleaning ? "清理中..." : "存储清理"}
           </button>
           {cleanupResult ? (

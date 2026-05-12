@@ -1004,6 +1004,7 @@ textarea:focus {
   border-right-color: transparent;
   border-radius: 50%;
   animation: nav-spin 0.8s linear infinite;
+  vertical-align: middle;
 }
 
 .job-card-detail {
