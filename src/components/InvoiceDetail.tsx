@@ -309,19 +309,18 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
           ) : (
             <div className="detail-fields">
               <Field label="发票类型" value={detail.invoice_type} />
-              <Field label="发票代码" value={detail.invoice_code} />
-              <Field label="发票号码" value={detail.invoice_number} />
               <Field label="开票日期" value={detail.issue_date} />
+              <Field label="发票号码" value={detail.invoice_number} />
+              <Field label="发票代码" value={detail.invoice_code} />
               <Field label="销售方" value={detail.seller_name} />
               <Field label="销售方税号" value={detail.seller_tax_id} />
               <Field label="购买方" value={detail.buyer_name} />
               <Field label="购买方税号" value={detail.buyer_tax_id} />
-              <Field label="币种" value={detail.currency} />
               <Field label="不含税金额" value={detail.amount_without_tax} />
               <Field label="税额" value={detail.tax_amount} />
               <Field label="价税合计" value={detail.total_amount} />
-              <Field label="类别" value={detail.category} />
-              <Field label="备注" value={detail.remarks} />
+              <Field label="币种" value={detail.currency} />
+              <Field label="备注" value={detail.remarks} fullWidth />
               {parseExtraFields(detail.extra_fields).map(([label, value]) => (
                 <Field key={label} label={label} value={value} />
               ))}
@@ -459,10 +458,10 @@ function formatExtraFieldValue(value: unknown): string {
   return "";
 }
 
-function Field({ label, value }: { label: string; value: string | null }) {
+function Field({ label, value, fullWidth }: { label: string; value: string | null; fullWidth?: boolean }) {
   if (!value) return null;
   return (
-    <div className="detail-field">
+    <div className={`detail-field${fullWidth ? " field-full" : ""}`}>
       <dt>{label}</dt>
       <dd>{value}</dd>
     </div>

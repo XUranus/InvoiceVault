@@ -65,90 +65,19 @@ export function InvoiceEditForm({ detail, onSaved, onError, onStateChange }: Pro
 
   return (
     <div className="edit-form">
-      <TextInput
-        label="发票类型"
-        value={form.invoice_type ?? ""}
-        onChange={(v) => setField("invoice_type", v)}
-        error={fieldError("invoice_type")}
-      />
-      <TextInput
-        label="发票代码"
-        value={form.invoice_code ?? ""}
-        onChange={(v) => setField("invoice_code", v)}
-        error={fieldError("invoice_code")}
-      />
-      <TextInput
-        label="发票号码"
-        value={form.invoice_number ?? ""}
-        onChange={(v) => setField("invoice_number", v)}
-        error={fieldError("invoice_number")}
-      />
-      <TextInput
-        label="开票日期 (YYYY-MM-DD)"
-        value={form.issue_date ?? ""}
-        onChange={(v) => setField("issue_date", v)}
-        error={fieldError("issue_date")}
-      />
-      <TextInput
-        label="销售方名称"
-        value={form.seller_name ?? ""}
-        onChange={(v) => setField("seller_name", v)}
-        error={fieldError("seller_name")}
-      />
-      <TextInput
-        label="销售方税号"
-        value={form.seller_tax_id ?? ""}
-        onChange={(v) => setField("seller_tax_id", v)}
-        error={fieldError("seller_tax_id")}
-      />
-      <TextInput
-        label="购买方名称"
-        value={form.buyer_name ?? ""}
-        onChange={(v) => setField("buyer_name", v)}
-        error={fieldError("buyer_name")}
-      />
-      <TextInput
-        label="购买方税号"
-        value={form.buyer_tax_id ?? ""}
-        onChange={(v) => setField("buyer_tax_id", v)}
-        error={fieldError("buyer_tax_id")}
-      />
-      <TextInput
-        label="币种"
-        value={form.currency ?? ""}
-        onChange={(v) => setField("currency", v)}
-        error={fieldError("currency")}
-      />
-      <TextInput
-        label="不含税金额"
-        value={form.amount_without_tax ?? ""}
-        onChange={(v) => setField("amount_without_tax", v)}
-        error={fieldError("amount_without_tax")}
-      />
-      <TextInput
-        label="税额"
-        value={form.tax_amount ?? ""}
-        onChange={(v) => setField("tax_amount", v)}
-        error={fieldError("tax_amount")}
-      />
-      <TextInput
-        label="价税合计"
-        value={form.total_amount ?? ""}
-        onChange={(v) => setField("total_amount", v)}
-        error={fieldError("total_amount")}
-      />
-      <TextInput
-        label="类别"
-        value={form.category ?? ""}
-        onChange={(v) => setField("category", v)}
-        error={fieldError("category")}
-      />
-      <TextInput
-        label="备注"
-        value={form.remarks ?? ""}
-        onChange={(v) => setField("remarks", v)}
-        error={fieldError("remarks")}
-      />
+      <TextInput label="发票类型" value={form.invoice_type ?? ""} onChange={(v) => setField("invoice_type", v)} error={fieldError("invoice_type")} />
+      <TextInput label="开票日期" value={form.issue_date ?? ""} onChange={(v) => setField("issue_date", v)} error={fieldError("issue_date")} placeholder="YYYY-MM-DD" />
+      <TextInput label="发票号码" value={form.invoice_number ?? ""} onChange={(v) => setField("invoice_number", v)} error={fieldError("invoice_number")} />
+      <TextInput label="发票代码" value={form.invoice_code ?? ""} onChange={(v) => setField("invoice_code", v)} error={fieldError("invoice_code")} />
+      <TextInput label="销售方" value={form.seller_name ?? ""} onChange={(v) => setField("seller_name", v)} error={fieldError("seller_name")} />
+      <TextInput label="销售方税号" value={form.seller_tax_id ?? ""} onChange={(v) => setField("seller_tax_id", v)} error={fieldError("seller_tax_id")} />
+      <TextInput label="购买方" value={form.buyer_name ?? ""} onChange={(v) => setField("buyer_name", v)} error={fieldError("buyer_name")} />
+      <TextInput label="购买方税号" value={form.buyer_tax_id ?? ""} onChange={(v) => setField("buyer_tax_id", v)} error={fieldError("buyer_tax_id")} />
+      <TextInput label="不含税金额" value={form.amount_without_tax ?? ""} onChange={(v) => setField("amount_without_tax", v)} error={fieldError("amount_without_tax")} />
+      <TextInput label="税额" value={form.tax_amount ?? ""} onChange={(v) => setField("tax_amount", v)} error={fieldError("tax_amount")} />
+      <TextInput label="价税合计" value={form.total_amount ?? ""} onChange={(v) => setField("total_amount", v)} error={fieldError("total_amount")} />
+      <TextInput label="币种" value={form.currency ?? ""} onChange={(v) => setField("currency", v)} error={fieldError("currency")} />
+      <TextInput label="备注" value={form.remarks ?? ""} onChange={(v) => setField("remarks", v)} error={fieldError("remarks")} fullWidth />
     </div>
   );
 }
@@ -158,20 +87,25 @@ function TextInput({
   value,
   onChange,
   error,
+  placeholder,
+  fullWidth,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   error?: string;
+  placeholder?: string;
+  fullWidth?: boolean;
 }) {
   return (
-    <label className="edit-field">
+    <label className={`edit-field${fullWidth ? " field-full" : ""}`}>
       <span>{label}</span>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={error ? "input-error" : ""}
+          placeholder={placeholder}
         />
         {error ? <span className="field-error">{error}</span> : null}
       </div>

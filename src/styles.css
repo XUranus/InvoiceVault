@@ -1945,8 +1945,8 @@ textarea:focus {
 }
 
 .detail-fields {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -1989,8 +1989,17 @@ textarea:focus {
   gap: 16px;
 }
 
-.detail-field:last-child {
+.detail-field:nth-child(even) {
+  border-left: 1px solid var(--color-separator);
+}
+
+.detail-field:last-child,
+.detail-field:nth-last-child(2) {
   border-bottom: none;
+}
+
+.detail-field.field-full {
+  grid-column: 1 / -1;
 }
 
 .detail-field dt {
@@ -2263,8 +2272,8 @@ textarea:focus {
 
 /* Edit form */
 .edit-form {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -2280,8 +2289,17 @@ textarea:focus {
   gap: 16px;
 }
 
-.edit-field:last-child {
+.edit-field:nth-child(even) {
+  border-left: 1px solid var(--color-separator);
+}
+
+.edit-field:last-child,
+.edit-field:nth-last-child(2) {
   border-bottom: none;
+}
+
+.edit-field.field-full {
+  grid-column: 1 / -1;
 }
 
 .edit-field span {
