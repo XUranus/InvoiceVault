@@ -2629,6 +2629,12 @@ textarea:focus {
   background: var(--color-selected-bg);
 }
 
+.badge-chip-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-bg);
+  color: var(--color-primary-text);
+}
+
 .badge-chip-label {
   min-width: 0;
   overflow: hidden;
@@ -6765,6 +6771,12 @@ textarea:focus,
   background: rgba(104, 173, 255, 0.18);
   border-color: rgba(104, 173, 255, 0.2);
   color: var(--color-badge-blue-text);
+}
+
+[data-theme="dark"] .badge-chip-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
 }
 
 [data-theme="dark"] .badge-chip-remove {

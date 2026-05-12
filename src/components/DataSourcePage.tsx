@@ -39,9 +39,10 @@ function WatchDirEditModal({
   onSaved: () => void;
 }) {
   const [path, setPath] = React.useState(dir?.path ?? "");
-  const [extensions, setExtensions] = React.useState(dir?.extensions ?? "");
+  const defaultExtensions = (dir?.extensions ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const [selectedExts, setSelectedExts] = React.useState<string[]>(defaultExtensions);
   const [nameKeywords, setNameKeywords] = React.useState(dir?.name_keywords ?? "");
-  const [maxFileAgeDays, setMaxFileAgeDays] = React.useState(String(dir?.max_file_age_days ?? 0));
+  const [maxFileAgeDays, setMaxFileAgeDays] = React.useState(String(dir?.max_file_age_days ?? 30));
   const [recursive, setRecursive] = React.useState(dir?.recursive ?? true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -58,11 +59,12 @@ function WatchDirEditModal({
     }
     setSaving(true);
     setError(null);
+    const extensionsStr = selectedExts.join(",") || undefined;
     try {
       if (dir) {
         await updateWatchDir(dir.id, {
           path: path.trim(),
-          extensions: extensions.trim() || undefined,
+          extensions: extensionsStr,
           name_keywords: nameKeywords.trim() || undefined,
           max_file_age_days: parseInt(maxFileAgeDays) || 0,
           recursive,
@@ -70,7 +72,7 @@ function WatchDirEditModal({
       } else {
         await addWatchDir({
           path: path.trim(),
-          extensions: extensions.trim() || undefined,
+          extensions: extensionsStr,
           name_keywords: nameKeywords.trim() || undefined,
           max_file_age_days: parseInt(maxFileAgeDays) || 0,
           recursive,
@@ -103,20 +105,32 @@ function WatchDirEditModal({
           </button>
         </div>
 
-        <label className="form-label">文件扩展名过滤（逗号分隔，留空=所有文件）</label>
-        <input
-          className="form-input"
-          value={extensions}
-          onChange={(e) => setExtensions(e.target.value)}
-          placeholder="pdf,png,jpg"
-        />
+        <label className="form-label">文件扩展名过滤（留空=所有文件）</label>
+        <div className="badge-chip-list" style={{ marginBottom: 4 }}>
+          {["png", "jpg", "jpeg", "pdf"].map((ext) => {
+            const active = selectedExts.includes(ext);
+            return (
+              <span
+                key={ext}
+                className={`badge-chip ${active ? "badge-chip-active" : ""}`}
+                style={{ cursor: "pointer" }}
+                onClick={() => setSelectedExts((prev) => active ? prev.filter((e) => e !== ext) : [...prev, ext])}
+              >
+                <span className="badge-chip-label">.{ext}</span>
+              </span>
+            );
+          })}
+          {selectedExts.length === 0 ? (
+            <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>全部文件</span>
+          ) : null}
+        </div>
 
-        <label className="form-label">文件名关键词过滤（逗号分隔，留空=不过滤）</label>
+        <label className="form-label">文件名关键词过滤（空格分隔，留空=不过滤）</label>
         <input
           className="form-input"
           value={nameKeywords}
           onChange={(e) => setNameKeywords(e.target.value)}
-          placeholder="发票,票据"
+          placeholder="发票 票据"
         />
 
         <label className="form-label">文件最大天数（0=不限制）</label>
