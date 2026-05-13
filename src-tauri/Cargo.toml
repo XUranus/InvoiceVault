@@ -57,7 +57,7 @@ printpdf = { version = "0.9", default-features = false, features = ["images", "j
 # On macOS/Windows, use load-dynamic (runtime ONNX Runtime loading via ORT_DYLIB_PATH).
 # On Linux, the base ort dep is used (static linking via download-binaries).
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "load-dynamic", "tls-rustls"] }
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "load-dynamic", "tls-rustls", "api-24"] }
 
 [dev-dependencies]
 tempfile = "3.23.0"

@@ -179,6 +179,10 @@ export async function resolveDuplicate(
   });
 }
 
+export async function regenerateAllDuplicates(): Promise<number> {
+  return invoke<number>("regenerate_all_duplicates");
+}
+
 export async function exportInvoices(
   request: ExportInvoicesRequest,
 ): Promise<ExportResult> {

@@ -317,6 +317,13 @@ fn resolve_duplicate(
 }
 
 #[tauri::command]
+fn regenerate_all_duplicates(state: State<'_, AppState>) -> Result<usize, String> {
+    state
+        .regenerate_all_duplicates()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn export_invoices(
     state: State<'_, AppState>,
     request: ExportInvoicesRequest,
@@ -1408,6 +1415,7 @@ pub fn run() {
             batch_delete_invoices,
             check_invoice_duplicates,
             resolve_duplicate,
+            regenerate_all_duplicates,
             export_invoices,
             merge_invoices,
             export_pdf_report,

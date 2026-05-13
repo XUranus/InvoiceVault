@@ -997,6 +997,31 @@ impl AppState {
         Ok(run_dedupe_resolve(&db, request)?)
     }
 
+    pub fn regenerate_all_duplicates(&self) -> Result<usize, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        let deleted = db.execute("DELETE FROM dedupe_candidates", [])?;
+        let reset = db.execute(
+            "UPDATE invoices SET duplicate_status = 'unique' WHERE duplicate_status != 'unique'",
+            [],
+        )?;
+
+        let invoice_ids: Vec<i64> = db
+            .prepare("SELECT id FROM invoices")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let count = invoice_ids.len();
+        info!("regenerate_all_duplicates: deleted {deleted} candidates, reset {reset} invoices, processing {count} invoices: {invoice_ids:?}");
+        for id in &invoice_ids {
+            if let Err(e) = crate::dedupe::detect_field_duplicates(&db, *id) {
+                warn!("Failed to detect duplicates for invoice {id}: {e}");
+            }
+        }
+
+        info!("Regenerated duplicate detection for {count} invoices");
+        Ok(count)
+    }
+
     pub fn export_invoices(
         &self,
         request: ExportInvoicesRequest,

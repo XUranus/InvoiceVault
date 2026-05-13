@@ -1,6 +1,7 @@
 import React from "react";
 import type { DedupeCheckResult } from "../types";
 import { checkInvoiceDuplicates, resolveDuplicate } from "../api";
+import { DuplicateCompare } from "./DuplicateCompare";
 
 type Props = {
   invoiceId: number;
@@ -11,6 +12,7 @@ type Props = {
 export function DuplicateWarning({ invoiceId, onError, onDeleted }: Props) {
   const [result, setResult] = React.useState<DedupeCheckResult | null>(null);
   const [confirmingId, setConfirmingId] = React.useState<number | null>(null);
+  const [comparingId, setComparingId] = React.useState<number | null>(null);
   const [resolving, setResolving] = React.useState(false);
 
   React.useEffect(() => {
@@ -81,7 +83,23 @@ export function DuplicateWarning({ invoiceId, onError, onDeleted }: Props) {
               日期: {c.issue_date ?? "未知"} | 金额:{" "}
               {c.total_amount ?? "未知"} | 匹配分数: {c.score}
             </span>
+            <button
+              className="btn-ghost btn-small"
+              style={{ marginTop: 6 }}
+              onClick={() => setComparingId(comparingId === c.id ? null : c.id)}
+            >
+              {comparingId === c.id ? "收起对比" : "查看对比"}
+            </button>
           </div>
+          {comparingId === c.id && (
+            <DuplicateCompare
+              currentInvoiceId={invoiceId}
+              candidateInvoiceId={c.candidate_invoice_id}
+              candidateScore={c.score}
+              onClose={() => setComparingId(null)}
+              onError={onError}
+            />
+          )}
           {confirmingId === c.id ? (
             <div className="dup-actions-expanded">
               <span className="dup-actions-label">选择处理方式：</span>

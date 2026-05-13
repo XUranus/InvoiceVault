@@ -10,6 +10,7 @@ import {
   markInvoiceViewed,
   mergeInvoices,
   exportPdfReport,
+  regenerateAllDuplicates,
 } from "../api";
 import { InvoiceListControls } from "./InvoiceListControls";
 import { ExportButton } from "./ExportButton";
@@ -90,10 +91,26 @@ export function InvoicesPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [batchDeleting, setBatchDeleting] = React.useState(false);
   const [localError, setLocalError] = React.useState<string | null>(null);
+  const [regenerating, setRegenerating] = React.useState(false);
 
   const showError = (err: string) => {
     setLocalError(err);
     setError(err);
+  };
+
+  const handleRegenerateDuplicates = async () => {
+    if (regenerating) return;
+    setRegenerating(true);
+    try {
+      const count = await regenerateAllDuplicates();
+      setLocalError(`已重新检测 ${count} 张发票的重复状态`);
+      refreshInvoices();
+      doSearch(params);
+    } catch (err) {
+      showError(String(err));
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   const doSearch = React.useCallback(
@@ -392,6 +409,14 @@ export function InvoicesPage() {
             onRefresh={refreshInvoices}
             invoiceIds={selected.size > 0 ? Array.from(selected) : undefined}
           />
+          <button
+            className="btn-secondary"
+            onClick={handleRegenerateDuplicates}
+            disabled={regenerating}
+            title="清除已有重复检测结果，重新匹配所有发票"
+          >
+            {regenerating ? "检测中…" : "重新检测重复"}
+          </button>
         </div>
       </div>
 

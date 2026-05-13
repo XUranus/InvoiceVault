@@ -180,7 +180,51 @@ pub fn resolve_duplicate(
     }
 }
 
-fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), DedupeError> {
+/// Compute similarity between two invoice numbers (0.0 to 1.0).
+/// Uses Levenshtein edit distance + substring containment check.
+/// Handles OCR errors like extra/missing/transposed digits.
+fn invoice_number_similarity(a: &str, b: &str) -> f64 {
+    if a == b {
+        return 1.0;
+    }
+    // Substring containment: one number is contained in the other
+    if a.contains(b) || b.contains(a) {
+        return 0.95;
+    }
+    let max_len = a.len().max(b.len());
+    if max_len == 0 {
+        return 1.0;
+    }
+    1.0 - levenshtein(a, b) as f64 / max_len as f64
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (m, n) = (a.len(), b.len());
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+    // Two-row DP, O(min(m,n)) space
+    let (mut prev, mut curr) = (vec![0usize; n + 1], vec![0usize; n + 1]);
+    for j in 0..=n {
+        prev[j] = j;
+    }
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
+pub(crate) fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), DedupeError> {
     let (invoice_code, invoice_number, issue_date, total_amount, seller_name, _buyer_name): (
         Option<String>,
         Option<String>,
@@ -203,6 +247,10 @@ fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), Ded
             ))
         },
     )?;
+
+    tracing::debug!(
+        "dedup check invoice {invoice_id}: code={invoice_code:?}, num={invoice_number:?}, date={issue_date:?}, amount={total_amount:?}, seller={seller_name:?}"
+    );
 
     let mut candidates: Vec<(i64, f64, &str)> = Vec::new();
 
@@ -239,9 +287,19 @@ fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), Ded
         );
         let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(invoice_id)];
 
+        // Narrow by amount+date to reduce comparisons
+        if let Some(amt) = amount_match {
+            sql.push_str(&format!(" AND total_amount = ?{}", vals.len() + 1));
+            vals.push(Box::new(amt.to_string()));
+        }
+        if let Some(dt) = date_match {
+            sql.push_str(&format!(" AND issue_date = ?{}", vals.len() + 1));
+            vals.push(Box::new(dt.to_string()));
+        }
+
         // Exclude already-looked-at exact matches
         let existing_ids: Vec<i64> = candidates.iter().map(|(id, _, _)| *id).collect();
-        for (_i, id) in existing_ids.iter().enumerate() {
+        for id in &existing_ids {
             sql.push_str(&format!(" AND id != ?{}", vals.len() + 1));
             vals.push(Box::new(*id));
         }
@@ -272,6 +330,9 @@ fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), Ded
             if let (Some(n1), Some(n2)) = (number_match, &row_num) {
                 if n1 == n2 {
                     weight_sum += 40.0;
+                } else if invoice_number_similarity(n1, n2) >= 0.9 {
+                    // Near-identical numbers (likely OCR error) get partial credit
+                    weight_sum += 30.0;
                 }
             }
             if let (Some(a1), Some(a2)) = (amount_match, &row_amount) {
@@ -301,7 +362,9 @@ fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), Ded
     }
 
     // Upsert candidates and update duplicate_status
+    tracing::debug!("dedup invoice {invoice_id}: found {} candidates", candidates.len());
     for (candidate_id, score, reason) in &candidates {
+        tracing::debug!("  candidate: invoice_id={candidate_id}, score={score}, reason={reason}");
         conn.execute(
             "INSERT INTO dedupe_candidates (invoice_id, candidate_invoice_id, score, reason, status)
             VALUES (?1, ?2, ?3, ?4, 'open')
@@ -328,9 +391,10 @@ pub fn detect_semantic_duplicates(
             continue;
         }
 
-        let score = if result.similarity >= 0.92 {
-            80.0
-        } else if result.similarity >= 0.85 {
+        // Semantic similarity alone is unreliable for dedup (same template/layout
+        // produces high embedding similarity even for different invoices).
+        // Require extremely high similarity to flag anything.
+        let score = if result.similarity >= 0.98 {
             60.0
         } else {
             continue;
@@ -365,9 +429,10 @@ fn recalc_duplicate_status(conn: &Connection, invoice_id: i64) -> Result<(), Ded
     let status = match max_score {
         Some(score) if score >= 95.0 => "probable_duplicate",
         Some(score) if score >= 80.0 => "possible_duplicate",
-        Some(_) => "possible_duplicate",
-        None => "unique",
+        _ => "unique",
     };
+
+    tracing::debug!("dedup recalc invoice {invoice_id}: max_score={max_score:?} -> status={status}");
 
     conn.execute(
         "UPDATE invoices SET duplicate_status = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
@@ -497,5 +562,120 @@ mod tests {
             )
             .expect("read status");
         assert_eq!(status, "probable_duplicate");
+    }
+
+    #[test]
+    fn search_returns_duplicate_status_after_detection() {
+        let conn = setup_db();
+        ensure_raw_file(&conn);
+
+        let id1 = insert_invoice(
+            &conn,
+            "CODE003",
+            "NUM003",
+            "2026-06-01",
+            "300.00",
+            "SellerC",
+        );
+        let _id2 = insert_invoice(
+            &conn,
+            "CODE003",
+            "NUM003",
+            "2026-06-01",
+            "300.00",
+            "SellerC",
+        );
+
+        // Verify initial status is 'unknown'
+        let initial: String = conn
+            .query_row("SELECT duplicate_status FROM invoices WHERE id = ?1", [id1], |row| row.get(0))
+            .expect("read");
+        assert_eq!(initial, "unknown");
+
+        // Run detection
+        detect_field_duplicates(&conn, id1).expect("detect");
+
+        // Verify DB status changed
+        let db_status: String = conn
+            .query_row("SELECT duplicate_status FROM invoices WHERE id = ?1", [id1], |row| row.get(0))
+            .expect("read");
+        assert_eq!(db_status, "probable_duplicate");
+
+        // Verify search returns correct duplicate_status
+        let search_result = crate::extractor::search_invoices(
+            &conn,
+            crate::extractor::InvoiceSearchParams {
+                query: None,
+                invoice_type: None,
+                seller_name: None,
+                buyer_name: None,
+                invoice_number: None,
+                date_from: None,
+                date_to: None,
+                amount_min: None,
+                amount_max: None,
+                category: None,
+                tag: None,
+                status: None,
+                duplicate_status: None,
+                sort_by: None,
+                sort_order: None,
+                page: Some(1),
+                page_size: Some(10),
+            },
+        )
+        .expect("search");
+
+        let invoice = search_result.invoices.iter().find(|inv| inv.id == id1).expect("found");
+        assert_eq!(invoice.duplicate_status, "probable_duplicate");
+    }
+
+    #[test]
+    fn detects_fuzzy_number_match_with_same_amount_date_seller() {
+        let conn = setup_db();
+        ensure_raw_file(&conn);
+
+        // Two invoices with slightly different numbers (OCR error: extra digit)
+        // but same amount, date, and seller
+        let id1 = insert_invoice(
+            &conn,
+            "",
+            "2651200001808075851",
+            "2026-04-30",
+            "139.0",
+            "成都明和盛信息技术有限公司",
+        );
+        let _id2 = insert_invoice(
+            &conn,
+            "",
+            "26512000001808075851",
+            "2026-04-30",
+            "139.0",
+            "成都明和盛信息技术有限公司",
+        );
+
+        detect_field_duplicates(&conn, id1).expect("detect");
+        let result = check_invoice_duplicates(&conn, id1).expect("check");
+
+        // Should find candidate with score >= 80 (fuzzy number 30 + amount 25 + date 20 + seller 15 = 90, score = 85.5)
+        assert!(!result.candidates.is_empty(), "should find fuzzy match candidate");
+        assert!(result.candidates[0].score >= 80.0, "score should be >= 80, got {}", result.candidates[0].score);
+
+        let status: String = conn
+            .query_row("SELECT duplicate_status FROM invoices WHERE id = ?1", [id1], |row| row.get(0))
+            .expect("read status");
+        assert_eq!(status, "possible_duplicate");
+    }
+
+    #[test]
+    fn invoice_number_similarity_score() {
+        // Identical
+        assert_eq!(invoice_number_similarity("12345", "12345"), 1.0);
+        // Substring containment (extra digit)
+        assert!(invoice_number_similarity("2651200001808075851", "26512000001808075851") >= 0.9);
+        // One digit different: edit distance 1/5 = 0.8 similarity
+        assert!(invoice_number_similarity("12345", "12346") >= 0.8);
+        // Completely different
+        assert!(invoice_number_similarity("11111", "99999") < 0.5);
     }
 }

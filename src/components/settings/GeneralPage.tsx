@@ -3,8 +3,10 @@ import type { PriceConfig } from "../../types";
 import {
   getPriceConfig,
   setPriceConfig,
+  regenerateAllDuplicates,
 } from "../../api";
 import { useAppStore } from "../../stores/appStore";
+import { useRefreshStore } from "../../stores/refreshStore";
 import { Sun, Moon } from "lucide-react";
 
 export function GeneralPage() {
@@ -17,6 +19,28 @@ export function GeneralPage() {
     embedding_input_price_per_1k: 0.0007,
     embedding_output_price_per_1k: 0.0007,
   });
+
+  const refreshInvoices = useAppStore((s) => s.refreshInvoices);
+  const triggerInvoicesRefresh = useRefreshStore((s) => s.triggerInvoicesRefresh);
+
+  const [regenerating, setRegenerating] = React.useState(false);
+  const [regenResult, setRegenResult] = React.useState<string | null>(null);
+
+  const handleRegenerate = async () => {
+    if (regenerating) return;
+    setRegenerating(true);
+    setRegenResult(null);
+    try {
+      const count = await regenerateAllDuplicates();
+      setRegenResult(`完成：已重新检测 ${count} 张发票的重复状态`);
+      refreshInvoices();
+      triggerInvoicesRefresh();
+    } catch (err) {
+      setRegenResult(`失败：${String(err)}`);
+    } finally {
+      setRegenerating(false);
+    }
+  };
 
   React.useEffect(() => {
     let cancelled = false;
@@ -110,6 +134,24 @@ export function GeneralPage() {
             />
           </label>
         </div>
+      </div>
+
+      {/* Duplicate Detection */}
+      <div className="section">
+        <h3>重复检测</h3>
+        <p className="section-desc">
+          清除所有已有的重复检测结果，根据当前阈值重新匹配所有发票并生成告警。
+        </p>
+        <button
+          className="btn-primary"
+          onClick={handleRegenerate}
+          disabled={regenerating}
+        >
+          {regenerating ? "检测中…" : "重新检测重复"}
+        </button>
+        {regenResult && (
+          <p className="section-desc" style={{ marginTop: 8 }}>{regenResult}</p>
+        )}
       </div>
     </>
   );
