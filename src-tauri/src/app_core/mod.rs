@@ -358,6 +358,9 @@ impl AppState {
             }
         }
 
+        // Regenerate any missing preview thumbnails from normalized images
+        state.regenerate_missing_previews();
+
         info!("AppState initialized");
         Ok(state)
     }
@@ -656,12 +659,16 @@ impl AppState {
                             warn!("Failed to remove raw file {path}: {e}");
                         }
                     }
-                    // Clean up thumbnail directory
-                    let thumb_path = thumbnails_dir
-                        .join("previews")
-                        .join(raw_file_id.to_string());
-                    if let Err(e) = std::fs::remove_dir_all(&thumb_path) {
-                        warn!("Failed to remove thumbnail dir {}: {e}", thumb_path.display());
+                    // Clean up all generated thumbnail directories
+                    for subdir in &["previews", "normalized", "pdf-pages"] {
+                        let dir_path = thumbnails_dir
+                            .join(subdir)
+                            .join(raw_file_id.to_string());
+                        if dir_path.exists() {
+                            if let Err(e) = std::fs::remove_dir_all(&dir_path) {
+                                warn!("Failed to remove {subdir} dir {}: {e}", dir_path.display());
+                            }
+                        }
                     }
                     // Delete dependent DB records, then the raw_file itself
                     if let Err(e) = db.execute(
@@ -1159,6 +1166,89 @@ impl AppState {
 
     pub fn set_embedding_engine(&self, engine: LocalEmbeddingEngine) {
         *self.local_embedding.lock().expect("lock") = Some(engine);
+    }
+
+    /// Scan invoices and regenerate any missing preview thumbnails from normalized images.
+    fn regenerate_missing_previews(&self) {
+        let db = match self.db.lock() {
+            Ok(db) => db,
+            Err(_) => return,
+        };
+        let preview_root = self.paths.thumbnails_dir.join("previews");
+        let normalized_root = self.paths.thumbnails_dir.join("normalized");
+
+        let rows: Vec<(i64, i64, Option<String>)> = match db.prepare(
+            "SELECT id, raw_file_id, source_page_range FROM invoices",
+        ) {
+            Ok(mut stmt) => match stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<String>>(2)?))
+            }) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(_) => return,
+            },
+            Err(_) => return,
+        };
+
+        let mut fixed = 0usize;
+        for (invoice_id, raw_file_id, source_page_range) in rows {
+            let preview_dir = preview_root.join(raw_file_id.to_string());
+            let normalized_dir = normalized_root.join(raw_file_id.to_string());
+
+            // Determine the expected preview filename
+            let label = source_page_range
+                .as_ref()
+                .and_then(|r| r.split('-').next().and_then(|s| s.parse::<usize>().ok()))
+                .map(|p| format!("page-{p}.jpg"))
+                .unwrap_or_else(|| "image.jpg".to_string());
+
+            let preview_path = preview_dir.join(&label);
+            if preview_path.exists() {
+                continue;
+            }
+
+            let normalized_path = normalized_dir.join(&label);
+            if !normalized_path.exists() {
+                continue;
+            }
+
+            // Regenerate preview from normalized image
+            if let Err(e) = fs::create_dir_all(&preview_dir) {
+                warn!("Invoice {invoice_id}: failed to create preview dir: {e}");
+                continue;
+            }
+            let output = Command::new("magick")
+                .arg(&normalized_path)
+                .arg("-auto-orient")
+                .arg("-resize")
+                .arg("800x800>")
+                .arg("-background")
+                .arg("white")
+                .arg("-alpha")
+                .arg("remove")
+                .arg("-alpha")
+                .arg("off")
+                .arg("-strip")
+                .arg("-quality")
+                .arg("85")
+                .arg(&preview_path)
+                .output();
+            match output {
+                Ok(o) if o.status.success() => {
+                    fixed += 1;
+                    info!("Regenerated missing preview for invoice {invoice_id}");
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    warn!("Invoice {invoice_id}: magick failed: {stderr}");
+                }
+                Err(e) => {
+                    warn!("Invoice {invoice_id}: magick not found or failed to run: {e}");
+                }
+            }
+        }
+        if fixed > 0 {
+            info!("Regenerated {fixed} missing preview(s)");
+        }
     }
 
     pub fn set_badge_config(&self, config: BadgeConfig) -> Result<(), AppError> {

@@ -159,7 +159,12 @@ fn import_one(
                     update_import_job_status(conn, job_id, Some(raw_file_id), "duplicate", None)?;
                     return load_import_job(conn, job_id);
                 }
-                // raw_file exists but has no invoice (e.g. recognition failed last time)
+                // raw_file exists but has no invoice yet
+                if raw_file_has_running_recognition(conn, raw_file_id)? {
+                    // Recognition already in progress — skip to avoid concurrent tasks
+                    update_import_job_status(conn, job_id, Some(raw_file_id), "duplicate", None)?;
+                    return load_import_job(conn, job_id);
+                }
                 // Reuse it so the caller can re-trigger recognition
                 update_import_job_status(conn, job_id, Some(raw_file_id), "imported", None)?;
                 return load_import_job(conn, job_id);
@@ -203,6 +208,15 @@ fn find_raw_file_by_hash(conn: &Connection, sha256: &str) -> Result<Option<i64>,
 fn raw_file_has_invoice(conn: &Connection, raw_file_id: i64) -> Result<bool, ImportError> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM invoices WHERE raw_file_id = ?1",
+        [raw_file_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn raw_file_has_running_recognition(conn: &Connection, raw_file_id: i64) -> Result<bool, ImportError> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM import_jobs WHERE raw_file_id = ?1 AND status = 'recognizing'",
         [raw_file_id],
         |row| row.get(0),
     )?;
