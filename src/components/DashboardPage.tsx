@@ -199,14 +199,14 @@ export function DashboardPage() {
   const handleOpenImportedJob = async (job: ImportJob) => {
     if (!canOpenImportedJob(job)) return;
     if (job.invoice_id) {
-      navigateToInvoice(job.invoice_id);
+      navigateToInvoice(job.invoice_id, "/dashboard");
       return;
     }
     if (!job.raw_file_id) return;
     try {
       const invoiceId = await getInvoiceIdByRawFile(job.raw_file_id);
       if (invoiceId) {
-        navigateToInvoice(invoiceId);
+        navigateToInvoice(invoiceId, "/dashboard");
       } else {
         setOperationsError("该导入任务还没有生成发票详情。");
       }

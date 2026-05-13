@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import type { Invoice, InvoiceSearchParams, SimilarResult } from "../types";
 import {
   searchInvoices,
@@ -52,6 +53,7 @@ type InvoiceTagOption = {
 };
 
 export function InvoicesPage() {
+  const navigate = useNavigate();
   const invoices = useAppStore((s) => s.invoices);
   const refreshInvoices = useAppStore((s) => s.refreshInvoices);
   const setError = useAppStore((s) => s.setError);
@@ -313,6 +315,12 @@ export function InvoicesPage() {
   }, [refreshKey]);
 
   const handleBack = () => {
+    const returnTo = sessionStorage.getItem("focusInvoiceReturnTo");
+    sessionStorage.removeItem("focusInvoiceReturnTo");
+    if (returnTo) {
+      navigate(returnTo);
+      return;
+    }
     setView("list");
     setSelectedId(null);
     doSearch(params);

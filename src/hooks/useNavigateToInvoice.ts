@@ -9,8 +9,13 @@ export function useNavigateToInvoice() {
   );
 
   return useCallback(
-    (id: number) => {
+    (id: number, returnTo?: string) => {
       sessionStorage.setItem("focusInvoiceId", String(id));
+      if (returnTo) {
+        sessionStorage.setItem("focusInvoiceReturnTo", returnTo);
+      } else {
+        sessionStorage.removeItem("focusInvoiceReturnTo");
+      }
       triggerInvoicesRefresh();
       navigate("/invoices");
     },

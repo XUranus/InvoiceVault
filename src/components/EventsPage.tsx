@@ -101,13 +101,13 @@ export function EventsPage() {
     if (!ev.is_read) handleMarkRead(ev.id);
 
     if (ev.reference_type === "invoice" && ev.reference_id && onNavigateToInvoice) {
-      onNavigateToInvoice(ev.reference_id);
+      onNavigateToInvoice(ev.reference_id, "/events");
       return;
     }
 
     const metadataInvoiceId = metadata.invoice_ids?.[0];
     if (metadataInvoiceId && onNavigateToInvoice) {
-      onNavigateToInvoice(metadataInvoiceId);
+      onNavigateToInvoice(metadataInvoiceId, "/events");
       return;
     }
 
@@ -119,7 +119,7 @@ export function EventsPage() {
     try {
       const invoiceId = await getInvoiceIdByRawFile(rawFileId);
       if (invoiceId) {
-        onNavigateToInvoice(invoiceId);
+        onNavigateToInvoice(invoiceId, "/events");
       }
     } catch {
       // silent — invoice not ready yet

@@ -47,7 +47,7 @@ const DEFAULT_COLUMNS = [
 export function ExportButton({ onError, invoiceIds }: Props) {
   const [exporting, setExporting] = React.useState(false);
   const [lastResult, setLastResult] = React.useState<ExportResult | null>(null);
-  const [showPanel, setShowPanel] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
   const [columns, setColumns] = React.useState<string[]>(DEFAULT_COLUMNS);
   const [dateFrom, setDateFrom] = React.useState("");
   const [dateTo, setDateTo] = React.useState("");
@@ -90,7 +90,7 @@ export function ExportButton({ onError, invoiceIds }: Props) {
         date_to: dateTo || undefined,
       });
       setLastResult(result);
-      setShowPanel(false);
+      setOpen(false);
     } catch (err) {
       onError(String(err));
     } finally {
@@ -115,7 +115,7 @@ export function ExportButton({ onError, invoiceIds }: Props) {
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined,
       });
-      setShowPanel(false);
+      setOpen(false);
     } catch (err) {
       onError(String(err));
     } finally {
@@ -124,89 +124,108 @@ export function ExportButton({ onError, invoiceIds }: Props) {
   };
 
   return (
-    <div className="export-group">
-      <button
-        className="btn-small"
-        onClick={() => setShowPanel(!showPanel)}
-      >
-        {showPanel ? "收起选项" : "导出..."}
+    <>
+      <button className="btn-small" onClick={() => setOpen(true)}>
+        导出...
       </button>
-
-      {showPanel && (
-        <div className="export-panel">
-          {/* Format buttons */}
-          <div className="export-panel-row">
-            <span className="export-panel-label">格式</span>
-            <button
-              className="btn-small"
-              onClick={() => handleExport("csv")}
-              disabled={exporting || columns.length === 0}
-            >
-              {exporting ? "导出中..." : "导出 CSV"}
-            </button>
-            <button
-              className="btn-small"
-              onClick={() => handleExport("xlsx")}
-              disabled={exporting || columns.length === 0}
-            >
-              {exporting ? "导出中..." : "导出 Excel"}
-            </button>
-            <button
-              className="btn-small"
-              onClick={handleExportPdf}
-              disabled={exporting}
-            >
-              {exporting ? "导出中..." : "导出 PDF 报表"}
-            </button>
-          </div>
-
-          {/* Date range */}
-          <div className="export-panel-row">
-            <span className="export-panel-label">日期</span>
-            <input
-              type="date"
-              className="control-input"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              style={{ width: 140 }}
-            />
-            <span className="muted" style={{ fontSize: 12 }}>至</span>
-            <input
-              type="date"
-              className="control-input"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              style={{ width: 140 }}
-            />
-          </div>
-
-          {/* Column selection */}
-          <div className="export-panel-row">
-            <span className="export-panel-label">列</span>
-            <button className="btn-small" onClick={selectAllColumns}>全选</button>
-            <button className="btn-small" onClick={selectDefaults}>默认</button>
-            <button className="btn-small" onClick={clearColumns}>清空</button>
-          </div>
-          <div className="export-column-grid">
-            {ALL_COLUMN_KEYS.map((key) => (
-              <label key={key} className="export-column-check">
-                <input
-                  type="checkbox"
-                  checked={columns.includes(key)}
-                  onChange={() => toggleColumn(key)}
-                />
-                <span>{COLUMN_LABELS[key] ?? key}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
 
       {lastResult ? (
         <small className="export-result">
-          已导出 {lastResult.row_count} 条 ({lastResult.columns.length} 列) 到 {lastResult.file_path}
+          已导出 {lastResult.row_count} 条 ({lastResult.columns.length} 列)
         </small>
       ) : null}
-    </div>
+
+      {open && (
+        <div className="modal-overlay" onClick={() => setOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">导出发票数据</h3>
+
+            {/* Format buttons */}
+            <div className="export-modal-section">
+              <span className="export-modal-label">导出格式</span>
+              <div className="export-modal-actions">
+                <button
+                  className="btn-small"
+                  onClick={() => handleExport("csv")}
+                  disabled={exporting || columns.length === 0}
+                >
+                  {exporting ? "导出中..." : "CSV"}
+                </button>
+                <button
+                  className="btn-small"
+                  onClick={() => handleExport("xlsx")}
+                  disabled={exporting || columns.length === 0}
+                >
+                  {exporting ? "导出中..." : "Excel"}
+                </button>
+                <button
+                  className="btn-small"
+                  onClick={handleExportPdf}
+                  disabled={exporting}
+                >
+                  {exporting ? "导出中..." : "PDF 报表"}
+                </button>
+              </div>
+            </div>
+
+            {/* Date range */}
+            <div className="export-modal-section">
+              <span className="export-modal-label">日期范围</span>
+              <div className="export-modal-actions">
+                <input
+                  type="date"
+                  className="control-input"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  style={{ width: 140 }}
+                />
+                <span className="muted" style={{ fontSize: 12 }}>至</span>
+                <input
+                  type="date"
+                  className="control-input"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  style={{ width: 140 }}
+                />
+              </div>
+            </div>
+
+            {/* Column selection */}
+            <div className="export-modal-section">
+              <div className="export-modal-label-row">
+                <span className="export-modal-label">导出列</span>
+                <div className="export-modal-actions" style={{ gap: 4 }}>
+                  <button className="btn-small" onClick={selectAllColumns}>全选</button>
+                  <button className="btn-small" onClick={selectDefaults}>默认</button>
+                  <button className="btn-small" onClick={clearColumns}>清空</button>
+                </div>
+              </div>
+              <div className="export-column-grid">
+                {ALL_COLUMN_KEYS.map((key) => (
+                  <label key={key} className="export-column-check">
+                    <input
+                      type="checkbox"
+                      checked={columns.includes(key)}
+                      onChange={() => toggleColumn(key)}
+                    />
+                    <span>{COLUMN_LABELS[key] ?? key}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                className="btn-small"
+                onClick={() => setOpen(false)}
+                disabled={exporting}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

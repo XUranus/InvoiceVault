@@ -142,7 +142,7 @@ export function ImportPage() {
 
   const handleOpenImportedInvoice = async (job: ImportJob) => {
     if (job.invoice_id) {
-      onNavigateToInvoice(job.invoice_id);
+      onNavigateToInvoice(job.invoice_id, "/import");
       return;
     }
     if (!job.raw_file_id) {
@@ -152,7 +152,7 @@ export function ImportPage() {
     try {
       const invoiceId = await getInvoiceIdByRawFile(job.raw_file_id);
       if (invoiceId) {
-        onNavigateToInvoice(invoiceId);
+        onNavigateToInvoice(invoiceId, "/import");
       } else {
         setError("该文件还没有生成发票详情。");
       }
@@ -169,7 +169,7 @@ export function ImportPage() {
     try {
       const invoiceId = await getInvoiceIdByRawFile(job.raw_file_id);
       if (invoiceId) {
-        onNavigateToInvoice(invoiceId);
+        onNavigateToInvoice(invoiceId, "/import");
       } else {
         setError("该重复文件还没有生成发票详情。");
       }

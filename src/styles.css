@@ -1087,22 +1087,27 @@ textarea:focus {
 
 .import-history-table th:nth-child(1),
 .import-history-table td:nth-child(1) {
-  width: 38%;
+  width: 48%;
 }
 
 .import-history-table th:nth-child(2),
 .import-history-table td:nth-child(2) {
-  width: 21%;
+  width: 8%;
 }
 
 .import-history-table th:nth-child(3),
 .import-history-table td:nth-child(3) {
-  width: 10%;
+  width: 18%;
 }
 
 .import-history-table th:nth-child(4),
 .import-history-table td:nth-child(4) {
-  width: 24%;
+  width: 10%;
+}
+
+.import-history-table th:nth-child(5),
+.import-history-table td:nth-child(5) {
+  width: 8%;
 }
 
 .import-history-row {
@@ -2483,37 +2488,30 @@ textarea:focus {
 }
 
 /* Export */
-.export-group {
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  flex-direction: column;
-}
-
-.export-panel {
+.export-modal-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  min-width: 360px;
+  gap: 8px;
+  padding-top: 8px;
 }
 
-.export-panel-row {
+.export-modal-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.export-modal-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.export-modal-actions {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-}
-
-.export-panel-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  min-width: 36px;
 }
 
 .export-column-grid {
@@ -5982,7 +5980,6 @@ textarea {
 .badge-config-card,
 .dependency-card,
 .error-boundary-card,
-.export-panel,
 .agent-artifact-card,
 .event-card,
 .notification-card {
@@ -6725,7 +6722,6 @@ textarea:focus,
 [data-theme="dark"] .badge-config-card,
 [data-theme="dark"] .dependency-card,
 [data-theme="dark"] .error-boundary-card,
-[data-theme="dark"] .export-panel,
 [data-theme="dark"] .agent-artifact-card,
 [data-theme="dark"] .event-card,
 [data-theme="dark"] .notification-card {
