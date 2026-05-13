@@ -20,7 +20,7 @@ use crate::{
     event,
     extractor::{save_invoice_extraction, SaveInvoiceExtractionRequest},
     importer::{import_files, update_import_job_status, ImportJobSummary},
-    llm::{recognize_invoice_image, LlmAuditConfig, LlmProviderConfig},
+    llm::{recognize_invoice_with_retries, LlmAuditConfig, LlmProviderConfig},
     storage::StorageError,
 };
 
@@ -823,7 +823,7 @@ pub async fn recognize_raw_file_async(
         };
 
         let recognition =
-            match recognize_invoice_image(config.clone(), &prepared.image_path, &prepared.mime_type, audit).await {
+            match recognize_invoice_with_retries(config.clone(), &prepared.image_path, &prepared.mime_type, audit).await {
                 Ok(r) => r,
                 Err(e) => {
                     error!("Watcher: recognition failed for raw_file {raw_file_id}: {e}");

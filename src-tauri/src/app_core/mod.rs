@@ -528,7 +528,7 @@ impl AppState {
                 for (source_page_range, image_path, _thumbnail_path, mime_type) in
                     &recognition_inputs
                 {
-                    let recognition = crate::llm::recognize_invoice_image(
+                    let recognition = crate::llm::recognize_invoice_with_retries(
                         config.clone(),
                         image_path,
                         mime_type,

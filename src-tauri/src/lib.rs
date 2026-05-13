@@ -38,7 +38,7 @@ use extractor::{
 use importer::{ImportJobListResult, ImportJobSummary, ImportRequest};
 use llm::LlmProviderConfig;
 use llm::{
-    analyze_error_with_llm, recognize_invoice_image,
+    analyze_error_with_llm, recognize_invoice_with_retries,
     test_llm_connection as run_llm_connection_test, LlmConnectionTestResult,
 };
 use serde::{Deserialize, Serialize};
@@ -437,7 +437,7 @@ async fn recognize_raw_file(
 
     for input in recognition_inputs {
         thumbnail_paths.push(input.thumbnail_path.to_string_lossy().into_owned());
-        let recognition = match recognize_invoice_image(
+        let recognition = match recognize_invoice_with_retries(
             request.config.clone(),
             &input.image_path,
             &input.mime_type,

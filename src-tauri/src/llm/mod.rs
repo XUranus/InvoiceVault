@@ -265,6 +265,7 @@ pub async fn recognize_invoice_image(
     config: LlmProviderConfig,
     image_path: &Path,
     mime_type: &str,
+    temperature: f32,
     audit: Option<&LlmAuditConfig>,
 ) -> Result<InvoiceRecognitionResult, LlmError> {
     let base_url = config.base_url.trim().trim_end_matches('/');
@@ -307,7 +308,7 @@ pub async fn recognize_invoice_image(
                 },
             ],
         }],
-        temperature: 0.0,
+        temperature,
         max_tokens: 4096,
     };
     let endpoint = format!("{base_url}/chat/completions");
@@ -447,6 +448,261 @@ pub async fn recognize_invoice_image(
 
     // All retries exhausted
     Err(last_err.unwrap_or(LlmError::MissingAssistantContent))
+}
+
+const MAX_VLM_ATTEMPTS: u32 = 3;
+const CONFIDENCE_THRESHOLD: f64 = 0.5;
+const VLM_TEMPERATURES: [f32; 3] = [0.0, 0.3, 0.5];
+
+/// Try VLM recognition multiple times with varying temperatures.
+/// If all attempts yield low confidence, send all results to LLM for audit.
+pub async fn recognize_invoice_with_retries(
+    config: LlmProviderConfig,
+    image_path: &Path,
+    mime_type: &str,
+    audit: Option<&LlmAuditConfig>,
+) -> Result<InvoiceRecognitionResult, LlmError> {
+    let mut candidates: Vec<String> = Vec::new();
+
+    for attempt in 1..=MAX_VLM_ATTEMPTS {
+        let temp = VLM_TEMPERATURES
+            .get((attempt - 1) as usize)
+            .copied()
+            .unwrap_or(0.5);
+
+        info!("VLM recognition attempt {attempt}/{MAX_VLM_ATTEMPTS}, temperature={temp}");
+
+        let result = recognize_invoice_image(
+            config.clone(),
+            image_path,
+            mime_type,
+            temp,
+            audit,
+        )
+        .await?;
+
+        // Check if it's not an invoice — return immediately
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&result.response_json) {
+            if value.get("is_invoice").and_then(|v| v.as_bool()) == Some(false) {
+                info!("VLM determined not an invoice on attempt {attempt}, returning immediately");
+                return Ok(result);
+            }
+
+            let confidence = value
+                .get("confidence")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+
+            if confidence >= CONFIDENCE_THRESHOLD {
+                info!(
+                    "VLM attempt {attempt} confidence={confidence:.2} >= {CONFIDENCE_THRESHOLD}, accepting"
+                );
+                return Ok(result);
+            }
+
+            info!("VLM attempt {attempt} confidence={confidence:.2} < {CONFIDENCE_THRESHOLD}");
+        }
+
+        candidates.push(result.response_json);
+    }
+
+    // All attempts have low confidence — audit with LLM
+    info!("All {MAX_VLM_ATTEMPTS} VLM attempts low confidence, running LLM audit");
+    audit_invoice_results(config, &candidates, audit).await
+}
+
+/// Send all candidate recognition results to LLM for comparison and best-pick.
+async fn audit_invoice_results(
+    config: LlmProviderConfig,
+    candidate_jsons: &[String],
+    _audit_config: Option<&LlmAuditConfig>,
+) -> Result<InvoiceRecognitionResult, LlmError> {
+    let base_url = config.base_url.trim().trim_end_matches('/');
+    let api_key = config.api_key.trim();
+    let model = config.model.trim();
+
+    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(90).clamp(1, 300));
+    let client = reqwest::Client::builder().timeout(timeout).build()?;
+
+    let candidates_formatted: Vec<serde_json::Value> = candidate_jsons
+        .iter()
+        .enumerate()
+        .map(|(i, json_str)| {
+            serde_json::from_str::<serde_json::Value>(json_str)
+                .unwrap_or_else(|_| serde_json::json!({"parse_error": true, "raw": json_str}))
+                .as_object()
+                .map(|obj| {
+                    let mut filtered = obj.clone();
+                    // Remove verbose items array for audit brevity
+                    filtered.remove("items");
+                    filtered.remove("extra_fields");
+                    serde_json::Value::Object(filtered)
+                })
+                .unwrap_or_else(|| serde_json::json!({"index": i}))
+        })
+        .collect();
+
+    let prompt = format!(
+        r#"你是发票识别结果审计引擎。以下是一张发票图片被 VLM（视觉大模型）多次识别的结果。
+请比较这些结果，选择最准确的一个，并评估可信度。
+
+审计要点：
+1. 比对关键字段一致性：发票号码、金额、购销方名称、日期
+2. 如果多数结果一致但个别不同，以多数为准
+3. 选择字段最完整、数值最合理的结果
+4. 如果所有结果都有严重问题（如金额异常大、日期不合理），仍选择最接近的并给低分
+
+只输出一个 JSON 对象，不要输出其他内容：
+{{"selected_index": 0, "confidence": 0.85, "reason": "简要原因"}}
+
+候选结果（共 {} 个）：
+{}"#,
+        candidate_jsons.len(),
+        serde_json::to_string_pretty(&candidates_formatted).unwrap_or_default()
+    );
+
+    info!("Sending VLM audit request to LLM, {} candidates", candidate_jsons.len());
+
+    let started = Instant::now();
+    let request = ChatCompletionRequest {
+        model,
+        messages: vec![ChatMessage {
+            role: "user",
+            content: &prompt,
+        }],
+        temperature: 0.0,
+        max_tokens: 1024,
+    };
+    let endpoint = format!("{base_url}/chat/completions");
+
+    let response = client
+        .post(&endpoint)
+        .headers(headers(api_key)?)
+        .json(&request)
+        .send()
+        .await?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        error!("LLM audit returned HTTP {status}: {}", truncate(&body, 200));
+        // Fallback: return the first candidate as-is
+        warn!("LLM audit failed, falling back to first VLM candidate");
+        return Ok(InvoiceRecognitionResult {
+            model: model.to_owned(),
+            duration_ms: started.elapsed().as_millis(),
+            response_preview: truncate(&candidate_jsons[0], 160),
+            response_json: candidate_jsons[0].clone(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+        });
+    }
+
+    let body = response.text().await?;
+    let api_response: ChatCompletionResponse = serde_json::from_str(&body)?;
+
+    let content = api_response
+        .choices
+        .first()
+        .and_then(|c| c.message.content.as_deref())
+        .map(str::trim)
+        .filter(|c| !c.is_empty());
+
+    let Some(content) = content else {
+        warn!("LLM audit returned empty content, falling back to first candidate");
+        return Ok(InvoiceRecognitionResult {
+            model: model.to_owned(),
+            duration_ms: started.elapsed().as_millis(),
+            response_preview: truncate(&candidate_jsons[0], 160),
+            response_json: candidate_jsons[0].clone(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+        });
+    };
+
+    // Parse audit result
+    let audit_json_str = match extract_json_object(content) {
+        Ok(json) => json,
+        Err(_) => {
+            warn!("Failed to parse audit JSON, falling back to first candidate");
+            return Ok(InvoiceRecognitionResult {
+                model: model.to_owned(),
+                duration_ms: started.elapsed().as_millis(),
+                response_preview: truncate(&candidate_jsons[0], 160),
+                response_json: candidate_jsons[0].clone(),
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            });
+        }
+    };
+
+    let audit_value: serde_json::Value = match serde_json::from_str(&audit_json_str) {
+        Ok(v) => v,
+        Err(_) => {
+            warn!("Failed to deserialize audit JSON, falling back to first candidate");
+            return Ok(InvoiceRecognitionResult {
+                model: model.to_owned(),
+                duration_ms: started.elapsed().as_millis(),
+                response_preview: truncate(&candidate_jsons[0], 160),
+                response_json: candidate_jsons[0].clone(),
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            });
+        }
+    };
+
+    let selected_index = audit_value
+        .get("selected_index")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let audit_confidence = audit_value
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.5);
+    let reason = audit_value
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let selected_index = selected_index.min(candidate_jsons.len() - 1);
+    let selected_json = &candidate_jsons[selected_index];
+
+    // Inject audit confidence into the selected result JSON
+    let mut selected_value: serde_json::Value = serde_json::from_str(selected_json)
+        .unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = selected_value.as_object_mut() {
+        obj.insert(
+            "confidence".to_string(),
+            serde_json::json!(audit_confidence),
+        );
+        obj.insert(
+            "needs_review".to_string(),
+            serde_json::json!(audit_confidence < CONFIDENCE_THRESHOLD),
+        );
+    }
+    let final_json = serde_json::to_string(&selected_value).unwrap_or_else(|_| selected_json.clone());
+
+    let prompt_tokens = api_response.usage.as_ref().map_or(0, |u| u.prompt_tokens);
+    let completion_tokens = api_response.usage.as_ref().map_or(0, |u| u.completion_tokens);
+    let total_tokens = api_response.usage.as_ref().map_or(0, |u| u.total_tokens);
+
+    info!(
+        "LLM audit selected candidate {selected_index}, confidence={audit_confidence:.2}, reason: {reason}"
+    );
+
+    Ok(InvoiceRecognitionResult {
+        model: model.to_owned(),
+        duration_ms: started.elapsed().as_millis(),
+        response_preview: truncate(&final_json, 160),
+        response_json: final_json,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+    })
 }
 
 pub(crate) fn headers(api_key: &str) -> Result<HeaderMap, LlmError> {
@@ -740,6 +996,7 @@ mod tests {
             },
             &sample_path,
             "image/jpeg",
+            0.0,
             None,
         )
         .await

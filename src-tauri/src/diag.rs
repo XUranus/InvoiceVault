@@ -6,7 +6,7 @@ use tracing::{info, warn};
 
 use crate::embedding::EmbeddingTestResult;
 use crate::llm::{
-    recognize_invoice_image, test_llm_connection as run_llm_connection_test, LlmAuditConfig,
+    recognize_invoice_with_retries, test_llm_connection as run_llm_connection_test, LlmAuditConfig,
     LlmProviderConfig,
 };
 
@@ -188,7 +188,7 @@ pub async fn run_diagnostic(
             let mime = infer_mime(&test_image_path);
             let start = Instant::now();
             info!("Diagnostic: sending test image to recognition");
-            match recognize_invoice_image(llm_config.clone(), &test_image_path, &mime, audit).await {
+            match recognize_invoice_with_retries(llm_config.clone(), &test_image_path, &mime, audit).await {
                 Ok(result) => {
                     let parsed = serde_json::from_str::<serde_json::Value>(&result.response_json);
                     match parsed {

@@ -1046,14 +1046,6 @@ fn normalize_extraction(extraction: &mut InvoiceExtraction) -> Result<(), Extrac
         return Err(ExtractorError::InvalidConfidence);
     }
 
-    if extraction.needs_review.unwrap_or(true)
-        || extraction
-            .confidence
-            .is_none_or(|confidence| confidence < 0.7)
-    {
-        return Err(ExtractorError::LowConfidence);
-    }
-
     for item in &mut extraction.items {
         item.name = clean_optional(item.name.take());
         item.spec = clean_optional(item.spec.take());
