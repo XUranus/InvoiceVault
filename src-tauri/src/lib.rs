@@ -1073,6 +1073,13 @@ fn get_unread_event_count(state: State<'_, AppState>) -> Result<i64, String> {
 }
 
 #[tauri::command]
+fn get_unread_failed_import_event_count(state: State<'_, AppState>) -> Result<i64, String> {
+    state
+        .get_unread_failed_import_event_count()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn mark_event_read(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     state.mark_event_read(id).map_err(|err| err.to_string())
 }
@@ -1107,17 +1114,19 @@ fn get_llm_audit_enabled(state: State<'_, AppState>) -> Result<bool, String> {
 fn get_recognition_queue_status(
     state: State<'_, AppState>,
 ) -> Result<RecognitionQueueStatus, String> {
-    Ok(state.get_recognition_queue_status())
-}
-
-#[tauri::command]
-fn set_recognition_concurrency(
-    state: State<'_, AppState>,
-    max_concurrent: usize,
-) -> Result<(), String> {
-    state
-        .set_recognition_concurrency(max_concurrent)
-        .map_err(|e| e.to_string())
+    let db = state.db().lock().expect("db lock");
+    let running: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM import_jobs WHERE status = 'recognizing'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    Ok(RecognitionQueueStatus {
+        pending: 0,
+        running,
+        max_concurrent: 0,
+    })
 }
 
 #[tauri::command]
@@ -1422,6 +1431,7 @@ pub fn run() {
             confirm_agent_action_stream,
             list_events,
             get_unread_event_count,
+            get_unread_failed_import_event_count,
             mark_event_read,
             mark_all_events_read,
             set_llm_config,
@@ -1429,7 +1439,6 @@ pub fn run() {
             set_llm_audit_enabled,
             get_llm_audit_enabled,
             get_recognition_queue_status,
-            set_recognition_concurrency,
             raw_file_has_invoices,
             get_invoice_id_by_raw_file,
             delete_all_events,

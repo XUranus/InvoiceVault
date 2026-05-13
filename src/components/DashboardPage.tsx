@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import type {
   DashboardStats as DashboardStatsType,
   ImportJob,
@@ -13,6 +14,7 @@ import {
   listImportJobs,
   getLlmUsage,
   getPriceConfig,
+  getUnreadFailedImportEventCount,
 } from "../api";
 import { importStatusMeta, toneClass } from "../status";
 import { DashboardCharts } from "./DashboardStats";
@@ -141,11 +143,13 @@ function buildInsight(stats: DashboardStatsType): string | null {
 export function DashboardPage() {
   const error = useAppStore((s) => s.error);
   const refreshKey = useRefreshStore((s) => s.dashboardKey);
+  const navigate = useNavigate();
   const navigateToInvoice = useNavigateToInvoice();
   const [stats, setStats] = React.useState<DashboardStatsType | null>(null);
   const [statsError, setStatsError] = React.useState<string | null>(null);
   const [queueStatus, setQueueStatus] = React.useState<RecognitionQueueStatus | null>(null);
   const [recentJobs, setRecentJobs] = React.useState<ImportJob[]>([]);
+  const [unreadFailedCount, setUnreadFailedCount] = React.useState(0);
   const [operationsError, setOperationsError] = React.useState<string | null>(null);
   const [dateRange, setDateRange] = React.useState<DateRange>("this_month");
   const [customFrom, setCustomFrom] = React.useState("");
@@ -166,14 +170,16 @@ export function DashboardPage() {
 
   React.useEffect(() => {
     setOperationsError(null);
-    Promise.all([getRecognitionQueueStatus(), listImportJobs(1, 5)])
-      .then(([queue, jobs]) => {
+    Promise.all([getRecognitionQueueStatus(), listImportJobs(1, 5), getUnreadFailedImportEventCount()])
+      .then(([queue, jobs, failed]) => {
         setQueueStatus(queue);
         setRecentJobs(jobs.jobs.slice(0, 5));
+        setUnreadFailedCount(failed);
       })
       .catch((err) => {
         setQueueStatus(null);
         setRecentJobs([]);
+        setUnreadFailedCount(0);
         setOperationsError(String(err));
       });
   }, [refreshKey]);
@@ -187,9 +193,8 @@ export function DashboardPage() {
       .catch(() => {});
   }, [refreshKey]);
 
-  const failedJobs = recentJobs.filter((j) => j.status === "failed");
   const queueTotal = queueStatus ? queueStatus.pending + queueStatus.running : 0;
-  const hasIssues = stats && (stats.pending_count > 0 || failedJobs.length > 0 || stats.duplicate_count > 0);
+  const hasIssues = stats && (stats.pending_count > 0 || unreadFailedCount > 0 || stats.duplicate_count > 0);
 
   const handleOpenImportedJob = async (job: ImportJob) => {
     if (!canOpenImportedJob(job)) return;
@@ -306,10 +311,10 @@ export function DashboardPage() {
                   </span>
                 </div>
                 <div className="dashboard-status-row">
-                  <span className={`dashboard-status-dot ${failedJobs.length > 0 ? "dot-danger" : "dot-idle"}`} />
+                  <span className={`dashboard-status-dot ${unreadFailedCount > 0 ? "dot-danger" : "dot-idle"}`} />
                   <span className="dashboard-status-label">导入失败</span>
-                  <span className={`dashboard-status-value ${failedJobs.length === 0 ? "is-idle" : ""}`}>
-                    {failedJobs.length > 0 ? failedJobs.length : "无"}
+                  <span className={`dashboard-status-value ${unreadFailedCount === 0 ? "is-idle" : ""}`}>
+                    {unreadFailedCount > 0 ? unreadFailedCount : "无"}
                   </span>
                 </div>
                 <div className="dashboard-status-row">
@@ -334,7 +339,7 @@ export function DashboardPage() {
               <div className="dashboard-action-header">
                 <h3 className="dashboard-section-title">待处理事项</h3>
                 <span className="dashboard-action-count">
-                  {stats.pending_count + failedJobs.length + duplicatePairs(stats.duplicate_count)} 项
+                  {stats.pending_count + unreadFailedCount + duplicatePairs(stats.duplicate_count)} 项
                 </span>
               </div>
               <div className="dashboard-action-rows">
@@ -348,16 +353,14 @@ export function DashboardPage() {
                     <button className="dashboard-action-btn" onClick={() => navigateToInvoice(0)}>开始复核</button>
                   </div>
                 )}
-                {failedJobs.length > 0 && (
+                {unreadFailedCount > 0 && (
                   <div className="dashboard-action-row">
                     <span className="dashboard-action-indicator indicator-danger" />
                     <div className="dashboard-action-body">
-                      <span className="dashboard-action-label">{failedJobs.length} 个导入任务失败</span>
-                      <span className="dashboard-action-hint" title={failedJobs[0].error_message ?? undefined}>
-                        {failedJobs.length === 1 ? jobTitle(failedJobs[0]) : `最近失败: ${jobTitle(failedJobs[0])}`}
-                      </span>
+                      <span className="dashboard-action-label">{unreadFailedCount} 个导入任务失败</span>
+                      <span className="dashboard-action-hint">点击查看详情</span>
                     </div>
-                    <button className="dashboard-action-btn">查看详情</button>
+                    <button className="dashboard-action-btn" onClick={() => navigate("/events")}>查看详情</button>
                   </div>
                 )}
                 {stats.duplicate_count > 0 && (

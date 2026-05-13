@@ -336,29 +336,6 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
             requires_confirmation: true,
         },
         ToolDefinition {
-            name: "get_recognition_status",
-            description: "获取识别任务队列状态，包括待处理数、运行中数和最大并发数。",
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {}
-            }),
-            is_read_only: true,
-            requires_confirmation: false,
-        },
-        ToolDefinition {
-            name: "set_recognition_concurrency",
-            description: "设置识别任务的最大并发数。修改前需要用户确认。",
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "max_concurrent": {"type": "integer", "description": "最大并发数，建议 1-5"}
-                },
-                "required": ["max_concurrent"]
-            }),
-            is_read_only: false,
-            requires_confirmation: true,
-        },
-        ToolDefinition {
             name: "get_theme",
             description: "获取当前主题设置（亮色/暗色）。",
             parameters: serde_json::json!({
@@ -711,7 +688,7 @@ const SYSTEM_PROMPT: &str = r#"你是 InvoiceVault 发票处理助手，只能�
 - export_invoices 支持 columns，自定义列必须传字段 key。例如”只包含发票代码”应传 columns=[“invoice_code”]
 - 修改发票信息使用 update_invoice 工具
 - 自定义标签管理：使用 get_badge_config 获取当前配置，set_badge_config 修改配置（增删分组和选项），set_invoice_badge 给发票设置标签
-- 系统设置：使用 get_price_config/set_price_config 管理 LLM 价格配置；get_recognition_status/set_recognition_concurrency 管理识别并发数
+- 系统设置：使用 get_price_config/set_price_config 管理 LLM 价格配置
 - 主题切换：使用 get_theme/set_theme 切换亮色/暗色主题
 - 维护操作：export_logs 导出日志，export_backup 导出备份，cleanup_storage 清理存储空间，get_app_info 查看系统版本信息
 - 工具返回什么数据就如实汇报，不要虚构或编造数据

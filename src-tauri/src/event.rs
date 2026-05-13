@@ -158,6 +158,15 @@ pub fn get_unread_event_count(conn: &Connection) -> Result<i64, EventError> {
     Ok(count)
 }
 
+pub fn get_unread_failed_import_event_count(conn: &Connection) -> Result<i64, EventError> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM events WHERE is_read = 0 AND event_type = 'recognition' AND status = 'failed'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
 pub fn mark_event_read(conn: &Connection, id: i64) -> Result<(), EventError> {
     conn.execute("UPDATE events SET is_read = 1 WHERE id = ?1", [id])?;
     Ok(())

@@ -55,6 +55,7 @@ export type Invoice = {
   created_at: string;
   updated_at: string;
   viewed_at: string | null;
+  item_names: string | null;
   badges: InvoiceBadgeSelection[];
 };
 

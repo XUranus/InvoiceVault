@@ -4,7 +4,6 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
 use chrono::{Datelike, Local};
@@ -241,15 +240,12 @@ pub struct AppState {
     watcher_manager: WatcherManager,
     email_manager: EmailManager,
     chroma_config: Mutex<ChromaConfig>,
-    local_embedding: Mutex<Option<LocalEmbeddingEngine>>,
+    local_embedding: Arc<Mutex<Option<LocalEmbeddingEngine>>>,
     embedding_enabled: Mutex<bool>,
     badge_config: Arc<Mutex<BadgeConfig>>,
     price_config: Arc<Mutex<PriceConfig>>,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     llm_audit_enabled: Arc<Mutex<bool>>,
-    recognition_pending: Arc<Mutex<i64>>,
-    recognition_running: Arc<Mutex<i64>>,
-    recognition_max_concurrent: Arc<Mutex<usize>>,
 }
 
 impl AppState {
@@ -289,12 +285,6 @@ impl AppState {
             Arc::new(Mutex::new(saved))
         };
 
-        let recognition_max_concurrent: usize =
-            Self::load_config_raw::<serde_json::Value>(&app_data_dir, "recognition_config.json")
-                .and_then(|v| v.get("max_concurrent").and_then(|v| v.as_u64()))
-                .map(|v| v as usize)
-                .unwrap_or(3);
-
         let badge_config = Self::load_config_raw::<BadgeConfig>(&app_data_dir, "badge_config.json")
             .unwrap_or_default();
 
@@ -326,15 +316,12 @@ impl AppState {
             watcher_manager,
             email_manager,
             chroma_config: Mutex::new(chroma_config),
-            local_embedding: Mutex::new(None),
+            local_embedding: Arc::new(Mutex::new(None)),
             embedding_enabled: Mutex::new(embedding_enabled),
             badge_config: Arc::new(Mutex::new(badge_config)),
             price_config: Arc::new(Mutex::new(price_config)),
             llm_config,
             llm_audit_enabled,
-            recognition_pending: Arc::new(Mutex::new(0)),
-            recognition_running: Arc::new(Mutex::new(0)),
-            recognition_max_concurrent: Arc::new(Mutex::new(recognition_max_concurrent)),
         };
 
         // Load local embedding engine if enabled and model exists
@@ -364,10 +351,7 @@ impl AppState {
             }
         }
 
-        info!(
-            "AppState initialized, concurrency={}",
-            recognition_max_concurrent
-        );
+        info!("AppState initialized");
         Ok(state)
     }
 
@@ -388,6 +372,10 @@ impl AppState {
 
     pub fn app_data_dir(&self) -> &Path {
         &self.paths.app_data_dir
+    }
+
+    pub fn db(&self) -> &Arc<Mutex<Connection>> {
+        &self.db
     }
 
     pub fn import_files(
@@ -456,34 +444,11 @@ impl AppState {
     ) {
         let db = Arc::clone(&self.db);
         let thumbnails_dir = self.paths.thumbnails_dir.clone();
-        let pending = Arc::clone(&self.recognition_pending);
-        let running = Arc::clone(&self.recognition_running);
-        let max_concurrent = Arc::clone(&self.recognition_max_concurrent);
-
-        // Increment pending
-        if let Ok(mut p) = pending.lock() {
-            *p += 1;
-        }
+        let chroma_enabled = self.chroma_config.lock().expect("lock").enabled;
+        let embedding_on = *self.embedding_enabled.lock().expect("lock");
+        let embedding_engine = Arc::clone(&self.local_embedding);
 
         tauri::async_runtime::spawn(async move {
-            // Wait until a slot is available
-            loop {
-                let max = *max_concurrent.lock().expect("lock") as i64;
-                let current = *running.lock().expect("lock");
-                if current < max {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-
-            // Move from pending to running
-            if let Ok(mut p) = pending.lock() {
-                *p = (*p - 1).max(0);
-            }
-            if let Ok(mut r) = running.lock() {
-                *r += 1;
-            }
-
             if let Ok(db) = db.lock() {
                 if let Err(e) = update_import_job_status(&db, job_id, None, "recognizing", None) {
                     warn!("Failed to update import job {job_id} status to recognizing: {e}");
@@ -595,20 +560,68 @@ impl AppState {
                     ) {
                         warn!("Failed to insert LLM usage log: {e}");
                     }
+
+                    // Best-effort embedding generation
+                    if chroma_enabled && embedding_on {
+                        if let Some(ref mut engine) = *embedding_engine.lock().expect("lock") {
+                            let invoice_id = invoice.id;
+                            let thumb_dir = thumbnails_dir.clone();
+                            let detail = get_invoice_detail(&conn, &thumb_dir, invoice_id).ok();
+                            if let Some(detail) = detail {
+                                let text = invoice_to_embedding_text(&detail);
+                                if let Ok(result) = generate_embedding(engine, &text) {
+                                    let embedding = result.embedding;
+                                    let prompt_tokens = result.prompt_tokens;
+                                    let total_tokens = result.total_tokens;
+                                    let db_for_emb = Arc::clone(&db);
+                                    tauri::async_runtime::spawn(async move {
+                                        if let Ok(conn) = db_for_emb.lock() {
+                                            if let Err(e) = chroma::upsert_embedding(&conn, invoice_id, &embedding, &text) {
+                                                warn!("Failed to upsert embedding for invoice {invoice_id}: {e}");
+                                            }
+                                            if let Err(e) = conn.execute(
+                                                "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
+                                                [invoice_id],
+                                            ) {
+                                                warn!("Failed to mark invoice {invoice_id} as having embedding: {e}");
+                                            }
+                                            if let Ok(similar) = chroma::query_similar(&conn, &embedding, 5) {
+                                                if let Err(e) = crate::dedupe::detect_semantic_duplicates(
+                                                    &conn, invoice_id, &similar,
+                                                ) {
+                                                    warn!("Failed to detect semantic duplicates for invoice {invoice_id}: {e}");
+                                                }
+                                            }
+                                            if let Err(e) = crate::extractor::insert_usage_log(
+                                                &conn, "embedding", EMBEDDING_MODEL_NAME,
+                                                prompt_tokens, total_tokens.saturating_sub(prompt_tokens), total_tokens,
+                                            ) {
+                                                warn!("Failed to insert embedding usage log: {e}");
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
                 Ok(())
             }
             .await;
 
-            // Decrement running
-            if let Ok(mut r) = running.lock() {
-                *r = (*r - 1).max(0);
-            }
-
             if let Err(e) = result {
+                error!("Auto recognition raw error: {e}");
                 let message = import_failure_message(&e);
                 error!("Auto recognition failed: {message}");
                 if let Ok(db) = db.lock() {
+                    // Mark as failed, detach from raw_file
+                    if let Err(e) = db.execute(
+                        "UPDATE import_jobs SET status = 'failed', error_message = ?1, raw_file_id = NULL WHERE id = ?2",
+                        rusqlite::params![message, job_id],
+                    ) {
+                        error!("Failed to mark import job {job_id} as failed: {e}");
+                    }
+
                     // Record failure event
                     if let Err(e) = event::create_event(
                         &db,
@@ -622,15 +635,8 @@ impl AppState {
                     ) {
                         warn!("Failed to record recognition failure event: {e}");
                     }
-                    // Keep import_job as failed with error message, detach from raw_file
-                    // so we can delete the raw_file without breaking the history record.
-                    if let Err(e) = db.execute(
-                        "UPDATE import_jobs SET status = 'failed', error_message = ?1, raw_file_id = NULL WHERE id = ?2",
-                        rusqlite::params![message, job_id],
-                    ) {
-                        error!("Failed to mark import job {job_id} as failed: {e}");
-                    }
-                    // Delete the stored file from disk
+
+                    // Delete the stored file from disk immediately
                     let storage_path: Option<String> = db
                         .query_row(
                             "SELECT storage_path FROM raw_files WHERE id = ?1",
@@ -1363,6 +1369,11 @@ impl AppState {
         Ok(event::get_unread_event_count(&db)?)
     }
 
+    pub fn get_unread_failed_import_event_count(&self) -> Result<i64, AppError> {
+        let db = self.db.lock().expect("db lock");
+        Ok(event::get_unread_failed_import_event_count(&db)?)
+    }
+
     pub fn mark_event_read(&self, id: i64) -> Result<(), AppError> {
         let db = self.db.lock().expect("db lock");
         Ok(event::mark_event_read(&db, id)?)
@@ -1433,32 +1444,6 @@ impl AppState {
     pub fn get_agent_session(&self, session_id: i64) -> Result<Vec<AgentMessageRow>, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(agent::get_session_messages(&db, session_id)?)
-    }
-
-    pub fn get_recognition_queue_status(&self) -> RecognitionQueueStatus {
-        RecognitionQueueStatus {
-            pending: *self.recognition_pending.lock().expect("lock"),
-            running: *self.recognition_running.lock().expect("lock"),
-            max_concurrent: *self.recognition_max_concurrent.lock().expect("lock"),
-        }
-    }
-
-    pub fn set_recognition_concurrency(&self, max_concurrent: usize) -> Result<(), AppError> {
-        let max = max_concurrent.clamp(1, 10);
-        {
-            let mut curr = self.recognition_max_concurrent.lock().expect("lock");
-            *curr = max;
-        }
-        let path = self.paths.app_data_dir.join("recognition_config.json");
-        if let Ok(json) =
-            serde_json::to_string_pretty(&serde_json::json!({ "max_concurrent": max }))
-        {
-            if let Err(e) = std::fs::write(&path, json) {
-                error!("Failed to persist recognition config: {e}");
-            }
-        }
-        info!("Recognition concurrency set to {max}");
-        Ok(())
     }
 
     pub fn export_logs(&self, output_path: &str) -> Result<ExportLogsResult, AppError> {
@@ -1881,7 +1866,6 @@ impl AppState {
             Arc::clone(&self.db),
             Arc::clone(&self.badge_config),
             Arc::clone(&self.price_config),
-            Arc::clone(&self.recognition_max_concurrent),
             self.app_handle.clone(),
             session_id,
         ));
@@ -1913,7 +1897,6 @@ impl AppState {
             Arc::clone(&self.db),
             Arc::clone(&self.badge_config),
             Arc::clone(&self.price_config),
-            Arc::clone(&self.recognition_max_concurrent),
             self.app_handle.clone(),
             session_id,
         ));
@@ -1968,7 +1951,6 @@ impl AppState {
             Arc::clone(&self.db),
             Arc::clone(&self.badge_config),
             Arc::clone(&self.price_config),
-            Arc::clone(&self.recognition_max_concurrent),
             self.app_handle.clone(),
             request.session_id,
         ));
@@ -1996,7 +1978,6 @@ impl AppState {
             Arc::clone(&self.db),
             Arc::clone(&self.badge_config),
             Arc::clone(&self.price_config),
-            Arc::clone(&self.recognition_max_concurrent),
             self.app_handle.clone(),
             request.session_id,
         ));
@@ -2020,7 +2001,6 @@ fn make_tool_executor(
     db: Arc<Mutex<Connection>>,
     badge_config: Arc<Mutex<BadgeConfig>>,
     price_config: Arc<Mutex<PriceConfig>>,
-    recognition_max_concurrent: Arc<Mutex<usize>>,
     app_handle: AppHandle,
     session_id: i64,
 ) -> impl Fn(&str, &serde_json::Value) -> ToolExecResult {
@@ -2806,78 +2786,6 @@ fn make_tool_executor(
                     message: e.to_string(),
                 },
             }
-        }
-        "get_recognition_status" => {
-            let max_concurrent: usize =
-                crate::AppState::load_config_raw::<serde_json::Value>(
-                    &app_data_dir,
-                    "recognition_config.json",
-                )
-                .and_then(|v| v.get("max_concurrent").and_then(|v| v.as_u64()))
-                .map(|v| v as usize)
-                .unwrap_or(3);
-            let conn = db.lock().expect("db lock");
-            let pending: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM import_jobs WHERE status = 'imported'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            let running: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM import_jobs WHERE status = 'recognizing'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            let content = serde_json::json!({
-                "pending": pending,
-                "running": running,
-                "max_concurrent": max_concurrent
-            })
-            .to_string();
-            ToolExecResult::Success { content }
-        }
-        "set_recognition_concurrency" => {
-            let is_confirmed = args
-                .get("_confirmed")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if !is_confirmed {
-                let max = args
-                    .get("max_concurrent")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
-                return ToolExecResult::ConfirmationRequired {
-                    tool_name: "set_recognition_concurrency".to_owned(),
-                    arguments: args.clone(),
-                    message: format!("将识别任务并发数设为 {max}，是否确认？"),
-                };
-            }
-            let Some(max_concurrent) = args.get("max_concurrent").and_then(|v| v.as_u64()) else {
-                return ToolExecResult::Error {
-                    message: "缺少 max_concurrent 参数".to_owned(),
-                };
-            };
-            let max = (max_concurrent as usize).clamp(1, 10);
-            if let Ok(json) =
-                serde_json::to_string_pretty(&serde_json::json!({ "max_concurrent": max }))
-            {
-                if let Err(e) =
-                    std::fs::write(app_data_dir.join("recognition_config.json"), json)
-                {
-                    return ToolExecResult::Error {
-                        message: format!("写入配置失败: {e}"),
-                    };
-                }
-            }
-            {
-                let mut curr = recognition_max_concurrent.lock().expect("recognition_max_concurrent lock");
-                *curr = max;
-            }
-            let content = serde_json::json!({ "max_concurrent": max }).to_string();
-            ToolExecResult::Success { content }
         }
         "get_theme" => {
             let theme_path = app_data_dir.join("theme.json");

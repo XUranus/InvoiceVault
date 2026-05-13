@@ -475,6 +475,10 @@ export async function getUnreadEventCount(): Promise<number> {
   return invoke<number>("get_unread_event_count");
 }
 
+export async function getUnreadFailedImportEventCount(): Promise<number> {
+  return invoke<number>("get_unread_failed_import_event_count");
+}
+
 export async function markEventRead(id: number): Promise<void> {
   return invoke<void>("mark_event_read", { id });
 }
@@ -513,10 +517,6 @@ export async function getLlmAuditEnabled(): Promise<boolean> {
 
 export async function getRecognitionQueueStatus(): Promise<RecognitionQueueStatus> {
   return invoke<RecognitionQueueStatus>("get_recognition_queue_status");
-}
-
-export async function setRecognitionConcurrency(maxConcurrent: number): Promise<void> {
-  return invoke<void>("set_recognition_concurrency", { maxConcurrent });
 }
 
 export async function rawFileHasInvoices(rawFileId: number): Promise<boolean> {

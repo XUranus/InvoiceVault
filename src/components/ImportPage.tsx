@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ImportJob, ImportJobListResult } from "../types";
 import {
-  deleteImportJob,
   getInvoiceIdByRawFile,
   importFiles,
   listImportJobs,
@@ -162,19 +161,6 @@ export function ImportPage() {
     }
   };
 
-  const handleRetryImport = async (job: ImportJob) => {
-    if (!job.source_path) {
-      setError("无法重试：缺少源文件路径。");
-      return;
-    }
-    try {
-      await deleteImportJob(job.id);
-      await doImport([job.source_path]);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
-
   const handleOpenDuplicateInvoice = async (job: ImportJob) => {
     if (!job.raw_file_id) {
       setError("该重复文件没有关联的原始文件。");
@@ -263,7 +249,6 @@ export function ImportPage() {
               onToggleExpand={setExpandedJobId}
               onOpenImportedInvoice={handleOpenImportedInvoice}
               onOpenDuplicateInvoice={handleOpenDuplicateInvoice}
-              onRetryImport={handleRetryImport}
             />
             {result && result.total_pages > 1 ? (
               <div className="pagination" style={{ marginTop: 12, justifyContent: "center" }}>
@@ -320,14 +305,12 @@ function ImportHistoryTable({
   onToggleExpand,
   onOpenImportedInvoice,
   onOpenDuplicateInvoice,
-  onRetryImport,
 }: {
   jobs: ImportJob[];
   expandedJobId: number | null;
   onToggleExpand: (id: number | null) => void;
   onOpenImportedInvoice: (job: ImportJob) => void;
   onOpenDuplicateInvoice: (job: ImportJob) => void;
-  onRetryImport: (job: ImportJob) => void;
 }) {
   return (
     <div className="import-history-table-wrap">
@@ -350,7 +333,6 @@ function ImportHistoryTable({
               onToggleExpand={onToggleExpand}
               onOpenImportedInvoice={onOpenImportedInvoice}
               onOpenDuplicateInvoice={onOpenDuplicateInvoice}
-              onRetryImport={onRetryImport}
             />
           ))}
         </tbody>
@@ -365,14 +347,12 @@ function ImportHistoryRow({
   onToggleExpand,
   onOpenImportedInvoice,
   onOpenDuplicateInvoice,
-  onRetryImport,
 }: {
   job: ImportJob;
   expanded: boolean;
   onToggleExpand: (id: number | null) => void;
   onOpenImportedInvoice: (job: ImportJob) => void;
   onOpenDuplicateInvoice: (job: ImportJob) => void;
-  onRetryImport: (job: ImportJob) => void;
 }) {
   const meta = importStatusMeta(job.status);
   const fileTypeLabel = formatFileType(job.mime_type, job.original_name ?? job.source_path);
@@ -401,18 +381,12 @@ function ImportHistoryRow({
         </td>
         <td>
           {isFailed ? (
-            <button
-              className="status-tag status-tag-button status-tag-retry"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRetryImport(job);
-              }}
-              type="button"
-              title="点击重试导入"
+            <span
+              className="status-tag tag-tone-danger"
+              title={job.error_message ?? undefined}
             >
-              <span className="status-tag-default-text">识别失败</span>
-              <span className="status-tag-hover-text">重试</span>
-            </button>
+              识别失败
+            </span>
           ) : isDuplicate ? (
             <button
               className={`status-tag status-tag-button ${toneClass(meta.tone)}`}

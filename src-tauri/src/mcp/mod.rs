@@ -269,22 +269,6 @@ fn tool_definitions() -> Vec<McpTool> {
             }),
         },
         McpTool {
-            name: "get_recognition_status",
-            description: "获取识别任务队列状态，包括待处理数、运行中数和最大并发数。",
-            input_schema: json!({"type": "object", "properties": {}}),
-        },
-        McpTool {
-            name: "set_recognition_concurrency",
-            description: "设置识别任务的最大并发数（1-10）。",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "max_concurrent": {"type": "integer", "description": "最大并发数"}
-                },
-                "required": ["max_concurrent"]
-            }),
-        },
-        McpTool {
             name: "get_theme",
             description: "获取当前主题设置（亮色/暗色）。",
             input_schema: json!({"type": "object", "properties": {}}),
@@ -618,36 +602,6 @@ fn execute_tool(
                 }
             }
             success_text(serde_json::to_string_pretty(&config).unwrap_or_default())
-        }
-        "get_recognition_status" => {
-            let max_concurrent: usize =
-                crate::AppState::load_config_raw::<serde_json::Value>(app_data_dir, "recognition_config.json")
-                    .and_then(|v| v.get("max_concurrent").and_then(|v| v.as_u64()))
-                    .map(|v| v as usize)
-                    .unwrap_or(3);
-            let pending: i64 = conn
-                .query_row("SELECT COUNT(*) FROM import_jobs WHERE status = 'imported'", [], |row| row.get(0))
-                .unwrap_or(0);
-            let running: i64 = conn
-                .query_row("SELECT COUNT(*) FROM import_jobs WHERE status = 'recognizing'", [], |row| row.get(0))
-                .unwrap_or(0);
-            success_text(json!({
-                "pending": pending,
-                "running": running,
-                "max_concurrent": max_concurrent
-            }).to_string())
-        }
-        "set_recognition_concurrency" => {
-            let Some(max_concurrent) = args.get("max_concurrent").and_then(|v| v.as_u64()) else {
-                return error_text("缺少 max_concurrent 参数".into());
-            };
-            let max = (max_concurrent as usize).clamp(1, 10);
-            if let Ok(json) = serde_json::to_string_pretty(&json!({ "max_concurrent": max })) {
-                if let Err(e) = std::fs::write(app_data_dir.join("recognition_config.json"), json) {
-                    return error_text(format!("写入配置失败: {e}"));
-                }
-            }
-            success_text(json!({ "max_concurrent": max }).to_string())
         }
         "get_theme" => {
             let theme = std::fs::read_to_string(app_data_dir.join("theme.json"))

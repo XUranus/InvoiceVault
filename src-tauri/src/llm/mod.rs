@@ -259,6 +259,8 @@ pub async fn test_llm_connection(
     })
 }
 
+const MAX_RETRIES: u32 = 3;
+
 pub async fn recognize_invoice_image(
     config: LlmProviderConfig,
     image_path: &Path,
@@ -288,8 +290,7 @@ pub async fn recognize_invoice_image(
         .inspect_err(|e| error!("Failed to read image for recognition: {e}"))?;
     let image_len = image_bytes.len();
     let image_data_url = format!("data:{mime_type};base64,{}", STANDARD.encode(image_bytes));
-    let started_at = Utc::now();
-    let started = Instant::now();
+
     info!("Sending recognition request, model={model}, {image_len} bytes");
     let request = VisionChatCompletionRequest {
         model,
@@ -311,16 +312,51 @@ pub async fn recognize_invoice_image(
     };
     let endpoint = format!("{base_url}/chat/completions");
     let request_json = serde_json::to_value(&request)?;
+    let headers = headers(api_key)?;
 
-    let response = match client
-        .post(&endpoint)
-        .headers(headers(api_key)?)
-        .json(&request)
-        .send()
-        .await
-    {
-        Ok(response) => response,
-        Err(err) => {
+    let mut last_err: Option<LlmError> = None;
+    for attempt in 1..=MAX_RETRIES {
+        if attempt > 1 {
+            let sleep_secs = attempt * 2;
+            info!("Retry {attempt}/{MAX_RETRIES} after {sleep_secs}s sleep");
+            tokio::time::sleep(Duration::from_secs(sleep_secs as u64)).await;
+        }
+
+        let started_at = Utc::now();
+        let started = Instant::now();
+
+        let response = match client
+            .post(&endpoint)
+            .headers(headers.clone())
+            .json(&request)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                let err_str = err.to_string();
+                warn!("LLM request attempt {attempt} failed: {err_str}");
+                last_err = Some(err.into());
+                // Network errors are retryable
+                continue;
+            }
+        };
+
+        let status = response.status();
+        let status_code = status.as_u16();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            error!("LLM recognition HTTP {status} (attempt {attempt}): {}", truncate(&body, 200));
+            let llm_err = LlmError::ProviderStatus {
+                status: status_code,
+                body: truncate(&body, 500),
+            };
+            // Retry on 429 (rate limit) and 5xx (server error)
+            if status_code == 429 || status_code >= 500 {
+                last_err = Some(llm_err);
+                continue;
+            }
+            // Non-retryable HTTP error
             write_llm_audit_record(
                 audit,
                 LlmAuditRecord {
@@ -329,21 +365,49 @@ pub async fn recognize_invoice_image(
                     endpoint: &endpoint,
                     model,
                     duration_ms: started.elapsed().as_millis(),
-                    status: None,
-                    request: request_json,
-                    response: None,
-                    error: Some(err.to_string()),
+                    status: Some(status_code),
+                    request: request_json.clone(),
+                    response: Some(body_to_value(&body)),
+                    error: Some(format!("HTTP {status_code}")),
                 },
             );
-            return Err(err.into());
+            return Err(llm_err);
         }
-    };
 
-    let status = response.status();
-    let status_code = status.as_u16();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        error!("LLM recognition HTTP {status}: {}", truncate(&body, 200));
+        let body = response.text().await?;
+
+        let response_body: ChatCompletionResponse = match serde_json::from_str(&body) {
+            Ok(rb) => rb,
+            Err(e) => {
+                warn!("LLM response JSON parse failed (attempt {attempt}): {e}");
+                last_err = Some(e.into());
+                continue;
+            }
+        };
+
+        let content = response_body
+            .choices
+            .first()
+            .and_then(|choice| choice.message.content.as_deref())
+            .map(str::trim)
+            .filter(|content| !content.is_empty());
+
+        let Some(content) = content else {
+            warn!("LLM recognition returned empty response content (attempt {attempt})");
+            last_err = Some(LlmError::MissingAssistantContent);
+            continue;
+        };
+
+        let response_json = match extract_json_object(content) {
+            Ok(json) => json,
+            Err(e) => {
+                warn!("Failed to extract JSON from recognition response (attempt {attempt}): {e}");
+                last_err = Some(e);
+                continue;
+            }
+        };
+
+        // Success — write audit and return
         write_llm_audit_record(
             audit,
             LlmAuditRecord {
@@ -354,66 +418,35 @@ pub async fn recognize_invoice_image(
                 duration_ms: started.elapsed().as_millis(),
                 status: Some(status_code),
                 request: request_json,
-                response: Some(body_to_value(&body)),
-                error: Some(format!("HTTP {status_code}")),
+                response: Some(body_to_value(content)),
+                error: None,
             },
         );
-        return Err(LlmError::ProviderStatus {
-            status: status_code,
-            body: truncate(&body, 500),
+
+        let prompt_tokens = response_body.usage.as_ref().map_or(0, |u| u.prompt_tokens);
+        let completion_tokens = response_body
+            .usage
+            .as_ref()
+            .map_or(0, |u| u.completion_tokens);
+        let total_tokens = response_body.usage.as_ref().map_or(0, |u| u.total_tokens);
+
+        info!(
+            "Recognition OK: model={model}, {}ms, tokens={total_tokens}, attempts={attempt}",
+            started.elapsed().as_millis()
+        );
+        return Ok(InvoiceRecognitionResult {
+            model: model.to_owned(),
+            duration_ms: started.elapsed().as_millis(),
+            response_preview: truncate(content, 160),
+            response_json,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
         });
     }
 
-    let body = response.text().await?;
-    write_llm_audit_record(
-        audit,
-        LlmAuditRecord {
-            started_at,
-            operation: "invoice_recognition",
-            endpoint: &endpoint,
-            model,
-            duration_ms: started.elapsed().as_millis(),
-            status: Some(status_code),
-            request: request_json,
-            response: Some(body_to_value(&body)),
-            error: None,
-        },
-    );
-
-    let response_body: ChatCompletionResponse = serde_json::from_str(&body)?;
-    let content = response_body
-        .choices
-        .first()
-        .and_then(|choice| choice.message.content.as_deref())
-        .map(str::trim)
-        .filter(|content| !content.is_empty())
-        .ok_or_else(|| {
-            error!("LLM recognition returned empty response content");
-            LlmError::MissingAssistantContent
-        })?;
-    let response_json = extract_json_object(content)
-        .inspect_err(|e| error!("Failed to extract JSON from recognition response: {e}"))?;
-
-    let prompt_tokens = response_body.usage.as_ref().map_or(0, |u| u.prompt_tokens);
-    let completion_tokens = response_body
-        .usage
-        .as_ref()
-        .map_or(0, |u| u.completion_tokens);
-    let total_tokens = response_body.usage.as_ref().map_or(0, |u| u.total_tokens);
-
-    info!(
-        "Recognition OK: model={model}, {}ms, tokens={total_tokens}",
-        started.elapsed().as_millis()
-    );
-    Ok(InvoiceRecognitionResult {
-        model: model.to_owned(),
-        duration_ms: started.elapsed().as_millis(),
-        response_preview: truncate(content, 160),
-        response_json,
-        prompt_tokens,
-        completion_tokens,
-        total_tokens,
-    })
+    // All retries exhausted
+    Err(last_err.unwrap_or(LlmError::MissingAssistantContent))
 }
 
 pub(crate) fn headers(api_key: &str) -> Result<HeaderMap, LlmError> {

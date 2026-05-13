@@ -222,7 +222,8 @@ fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), Ded
         }
     }
 
-    // Rule 2: at least 3 of {number, date, amount, seller} match → score 80
+    // Rule 2: weighted field matching
+    // Weights: invoice_number=40, total_amount=25, issue_date=20, seller_name=15 (max 100)
     let number_match = invoice_number.as_deref().filter(|s| !s.is_empty());
     let date_match = issue_date.as_deref().filter(|s| !s.is_empty());
     let amount_match = total_amount.as_deref().filter(|s| !s.is_empty());
@@ -266,36 +267,34 @@ fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), Ded
             .collect::<Result<Vec<_>, _>>()?;
 
         for (id, row_num, row_date, row_amount, row_seller) in rows {
-            let mut matches = 0u32;
+            let mut weight_sum: f64 = 0.0;
 
             if let (Some(n1), Some(n2)) = (number_match, &row_num) {
                 if n1 == n2 {
-                    matches += 1;
-                }
-            }
-            if let (Some(d1), Some(d2)) = (date_match, &row_date) {
-                if d1 == d2 {
-                    matches += 1;
+                    weight_sum += 40.0;
                 }
             }
             if let (Some(a1), Some(a2)) = (amount_match, &row_amount) {
                 if a1 == a2 {
-                    matches += 1;
+                    weight_sum += 25.0;
+                }
+            }
+            if let (Some(d1), Some(d2)) = (date_match, &row_date) {
+                if d1 == d2 {
+                    weight_sum += 20.0;
                 }
             }
             if let (Some(s1), Some(s2)) = (seller_match, &row_seller) {
                 if s1 == s2 {
-                    matches += 1;
+                    weight_sum += 15.0;
                 }
             }
 
-            let score = if matches >= 3 {
-                80.0
-            } else if matches >= 2 {
-                60.0
-            } else {
+            // Scale to 0-95 range (max weight sum = 100)
+            let score = weight_sum / 100.0 * 95.0;
+            if score < 30.0 {
                 continue;
-            };
+            }
 
             candidates.push((id, score, "field_match"));
         }

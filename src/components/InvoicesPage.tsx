@@ -161,6 +161,7 @@ export function InvoicesPage() {
             created_at: detail.created_at,
             updated_at: detail.updated_at,
             viewed_at: detail.viewed_at,
+            item_names: null,
             badges: detail.badges,
           });
         } catch {
@@ -634,6 +635,11 @@ function InvoiceCardView({
             {invoice.buyer_name && invoice.buyer_name !== invoice.seller_name ? (
               <div className="invoice-card-buyer">
                 购买方：{invoice.buyer_name}
+              </div>
+            ) : null}
+            {invoice.item_names ? (
+              <div className="invoice-card-items">
+                {invoice.item_names}
               </div>
             ) : null}
             <div className="invoice-card-meta">

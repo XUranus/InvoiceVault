@@ -36,6 +36,7 @@ pub struct InvoiceSummary {
     pub created_at: String,
     pub updated_at: String,
     pub viewed_at: Option<String>,
+    pub item_names: Option<String>,
     pub badges: Vec<InvoiceBadgeSelection>,
 }
 
@@ -95,7 +96,8 @@ pub fn search_invoices(
             invoice_type, invoice_code, invoice_number,
             issue_date, seller_name, buyer_name, currency, total_amount,
             category, source_page_range, confidence, status, duplicate_status,
-            created_at, updated_at, viewed_at
+            created_at, updated_at, viewed_at,
+            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names
         FROM invoices
         WHERE 1=1 {where_clause}
         {sort_clause}
@@ -1046,7 +1048,7 @@ fn normalize_extraction(extraction: &mut InvoiceExtraction) -> Result<(), Extrac
     if extraction.needs_review.unwrap_or(true)
         || extraction
             .confidence
-            .is_none_or(|confidence| confidence < 0.85)
+            .is_none_or(|confidence| confidence < 0.7)
     {
         return Err(ExtractorError::LowConfidence);
     }
@@ -1263,6 +1265,7 @@ fn row_to_invoice_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceSu
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
         viewed_at: row.get(18)?,
+        item_names: row.get(19)?,
         badges: Vec::new(),
     })
 }

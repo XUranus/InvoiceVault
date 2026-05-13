@@ -1383,6 +1383,15 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.invoice-card-items {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .invoice-card-tags {
   display: flex;
   gap: 4px;

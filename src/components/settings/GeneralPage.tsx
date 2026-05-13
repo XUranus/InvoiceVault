@@ -1,8 +1,6 @@
 import React from "react";
 import type { PriceConfig } from "../../types";
 import {
-  getRecognitionQueueStatus,
-  setRecognitionConcurrency,
   getPriceConfig,
   setPriceConfig,
 } from "../../api";
@@ -13,7 +11,6 @@ export function GeneralPage() {
   const theme = useAppStore((s) => s.theme);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
 
-  const [recognitionConcurrency, setRecognitionConcurrencyState] = React.useState(3);
   const [priceConfig, setPriceConfigState] = React.useState<PriceConfig>({
     llm_input_price_per_1k: 0.0008,
     llm_output_price_per_1k: 0.002,
@@ -23,14 +20,12 @@ export function GeneralPage() {
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      getRecognitionQueueStatus().catch(() => null),
-      getPriceConfig().catch(() => null),
-    ]).then(([recog, price]) => {
-      if (cancelled) return;
-      if (recog) setRecognitionConcurrencyState(recog.max_concurrent);
-      if (price) setPriceConfigState(price);
-    });
+    getPriceConfig()
+      .then((price) => {
+        if (cancelled) return;
+        if (price) setPriceConfigState(price);
+      })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -45,28 +40,6 @@ export function GeneralPage() {
         <button className="btn-primary" onClick={toggleTheme}>
           {theme === "dark" ? <><Sun size={16} /> 切换到亮色主题</> : <><Moon size={16} /> 切换到暗色主题</>}
         </button>
-      </div>
-
-      {/* Recognition Concurrency */}
-      <div className="section">
-        <h3>识别任务</h3>
-        <p className="section-desc">
-          设置同时进行的发票识别任务数量。导入文件后会自动开始识别。
-        </p>
-        <div className="form-field">
-          <span>最大并发数 (1-10)</span>
-          <input
-            type="number"
-            min={1}
-            max={10}
-            value={recognitionConcurrency}
-            onChange={(e) => {
-              const v = Math.max(1, Math.min(10, Number(e.target.value) || 1));
-              setRecognitionConcurrencyState(v);
-              setRecognitionConcurrency(v).catch(() => {});
-            }}
-          />
-        </div>
       </div>
 
       {/* Price Config */}
