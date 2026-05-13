@@ -505,6 +505,7 @@ export async function setLlmConfig(config: {
   base_url: string;
   api_key: string;
   model: string;
+  scnet_ocr_api_key?: string;
 }): Promise<void> {
   return invoke<void>("set_llm_config", { config });
 }
@@ -514,6 +515,7 @@ export type LlmConfigResponse = {
   api_key: string;
   model: string;
   timeout_seconds?: number;
+  scnet_ocr_api_key?: string;
 } | null;
 
 export async function getLlmConfig(): Promise<LlmConfigResponse> {

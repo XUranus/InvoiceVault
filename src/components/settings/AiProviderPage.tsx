@@ -58,6 +58,13 @@ export function AiProviderPage() {
   const [savingLlm, setSavingLlm] = React.useState(false);
   const [showApiKey, setShowApiKey] = React.useState(false);
 
+  // --- SCNet OCR ---
+  const scnetApiKey = useLlmStore((s) => s.scnetApiKey);
+  const setScnetApiKey = useLlmStore((s) => s.setScnetApiKey);
+  const [showScnetKey, setShowScnetKey] = React.useState(false);
+  const [scnetSaveMsg, setScnetSaveMsg] = React.useState<string | null>(null);
+  const [savingScnet, setSavingScnet] = React.useState(false);
+
   // --- Embedding Panel (local model) ---
   const [embStatus, setEmbStatus] = React.useState<LocalEmbeddingStatus>({
     enabled: true,
@@ -122,6 +129,7 @@ export function AiProviderPage() {
         base_url: llm.config.baseUrl,
         api_key: llm.config.apiKey,
         model: llm.config.model,
+        scnet_ocr_api_key: scnetApiKey || undefined,
       });
       resetLlm(llm.config);
       setLlmSaveMsg("已保存 LLM 配置");
@@ -129,6 +137,24 @@ export function AiProviderPage() {
       setLlmSaveMsg(String(err));
     } finally {
       setSavingLlm(false);
+    }
+  };
+
+  const handleSaveScnet = async () => {
+    setSavingScnet(true);
+    setScnetSaveMsg(null);
+    try {
+      await setLlmConfig({
+        base_url: llm.config.baseUrl,
+        api_key: llm.config.apiKey,
+        model: llm.config.model,
+        scnet_ocr_api_key: scnetApiKey || undefined,
+      });
+      setScnetSaveMsg("已保存 SCNet 配置");
+    } catch (err) {
+      setScnetSaveMsg(String(err));
+    } finally {
+      setSavingScnet(false);
     }
   };
 
@@ -305,6 +331,45 @@ export function AiProviderPage() {
             </div>
           </div>
         ) : null}
+      </div>
+
+      {/* SCNet OCR */}
+      <div className="section">
+        <h3>SCNet 专业票据 OCR（可选）</h3>
+        <p className="section-desc">
+          配置后，识别时会调用 SCNet 专业票据 OCR 对关键字段（发票号码、金额、购销方等）进行交叉验证，提高识别准确率。
+          未配置则仅使用 LLM 多模态识别。
+        </p>
+
+        <div className="form-grid">
+          <label className="form-field">
+            <span>SCNet API Key</span>
+            <div className="input-with-toggle">
+              <input
+                value={scnetApiKey}
+                onChange={(e) => setScnetApiKey(e.target.value)}
+                type={showScnetKey ? "text" : "password"}
+                placeholder="留空则不启用 SCNet OCR"
+                spellCheck={false}
+              />
+              <button
+                className="input-toggle-btn"
+                type="button"
+                onClick={() => setShowScnetKey((v) => !v)}
+                title={showScnetKey ? "隐藏" : "显示"}
+              >
+                {showScnetKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <div className="provider-actions">
+          <button className="btn-primary" onClick={handleSaveScnet} disabled={savingScnet}>
+            {savingScnet ? "保存中..." : "保存 SCNet 配置"}
+          </button>
+          {scnetSaveMsg ? <span className="badge-config-message">{scnetSaveMsg}</span> : null}
+        </div>
       </div>
 
       {/* Local Embedding Model */}

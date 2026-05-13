@@ -18,6 +18,8 @@ pub struct LlmProviderConfig {
     pub api_key: String,
     pub model: String,
     pub timeout_seconds: Option<u64>,
+    #[serde(default)]
+    pub scnet_ocr_api_key: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -456,7 +458,44 @@ const VLM_TEMPERATURES: [f32; 3] = [0.0, 0.3, 0.5];
 
 /// Try VLM recognition multiple times with varying temperatures.
 /// If all attempts yield low confidence, send all results to LLM for audit.
+/// Then optionally cross-validate with SCNet OCR if API key is configured.
 pub async fn recognize_invoice_with_retries(
+    config: LlmProviderConfig,
+    image_path: &Path,
+    mime_type: &str,
+    audit: Option<&LlmAuditConfig>,
+) -> Result<InvoiceRecognitionResult, LlmError> {
+    // Step 1: VLM recognition (with retries + audit)
+    let mut vlm_result = recognize_vlm_only(config.clone(), image_path, mime_type, audit).await?;
+
+    // Step 2: Optional SCNet OCR cross-validation
+    let scnet_key = config.scnet_ocr_api_key.as_deref().filter(|k| !k.is_empty());
+    if let Some(api_key) = scnet_key {
+        info!("SCNet OCR enabled, running cross-validation");
+        match crate::scnet_ocr::recognize_with_scnet(api_key, image_path).await {
+            Ok(Some(scnet_json)) => {
+                let merged_json = crate::scnet_ocr::merge_vlm_and_scnet(
+                    &vlm_result.response_json,
+                    &scnet_json,
+                );
+                info!("SCNet OCR merged successfully with VLM result");
+                vlm_result.response_json = merged_json;
+                vlm_result.response_preview = truncate(&vlm_result.response_json, 160);
+            }
+            Ok(None) => {
+                info!("SCNet OCR returned no invoice results, using VLM result as-is");
+            }
+            Err(e) => {
+                warn!("SCNet OCR failed, falling back to VLM result: {e}");
+            }
+        }
+    }
+
+    Ok(vlm_result)
+}
+
+/// Core VLM recognition with retries and LLM audit fallback.
+async fn recognize_vlm_only(
     config: LlmProviderConfig,
     image_path: &Path,
     mime_type: &str,
@@ -891,6 +930,7 @@ mod tests {
                 api_key: "key".to_owned(),
                 model: "model".to_owned(),
                 timeout_seconds: Some(1),
+                scnet_ocr_api_key: None,
             },
             None,
         )
@@ -970,6 +1010,7 @@ mod tests {
                 api_key: std::env::var("RECEIPTIER_LLM_API_KEY").expect("RECEIPTIER_LLM_API_KEY"),
                 model: std::env::var("RECEIPTIER_LLM_MODEL").expect("RECEIPTIER_LLM_MODEL"),
                 timeout_seconds: Some(30),
+                scnet_ocr_api_key: None,
             },
             None,
         )
@@ -993,6 +1034,7 @@ mod tests {
                 api_key: std::env::var("RECEIPTIER_LLM_API_KEY").expect("RECEIPTIER_LLM_API_KEY"),
                 model: std::env::var("RECEIPTIER_LLM_MODEL").expect("RECEIPTIER_LLM_MODEL"),
                 timeout_seconds: Some(120),
+                scnet_ocr_api_key: None,
             },
             &sample_path,
             "image/jpeg",

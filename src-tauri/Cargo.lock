@@ -2216,6 +2216,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rusqlite",
  "rust_xlsxwriter",
+ "scnetocr",
  "serde",
  "serde_json",
  "sha2",
@@ -3995,6 +3996,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
@@ -4276,6 +4278,18 @@ dependencies = [
  "quote",
  "serde_derive_internals",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "scnetocr"
+version = "0.1.0"
+source = "git+https://github.com/XUranus/scnetocr-rs#7d3287d2fc60167cb1ce18bd65c00ee88e8e9fea"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

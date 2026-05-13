@@ -22,6 +22,9 @@ type LlmStore = {
   resetLlm: (config: ProviderConfig) => void;
   markLlmTestPassed: (passed: boolean) => void;
 
+  scnetApiKey: string;
+  setScnetApiKey: (v: string) => void;
+
   auditEnabled: boolean;
   setAuditEnabled: (v: boolean) => void;
 
@@ -40,6 +43,7 @@ function makePanel(config: ProviderConfig): PanelState {
 
 export const useLlmStore = create<LlmStore>((set) => ({
   llm: makePanel({ ...defaultProvider }),
+  scnetApiKey: "",
   auditEnabled: true,
 
   setLlmField: (field, value) =>
@@ -57,6 +61,8 @@ export const useLlmStore = create<LlmStore>((set) => ({
   markLlmTestPassed: (passed) =>
     set((s) => ({ llm: { ...s.llm, testPassed: passed } })),
 
+  setScnetApiKey: (scnetApiKey) => set({ scnetApiKey }),
+
   setAuditEnabled: (auditEnabled) => set({ auditEnabled }),
 
   loadConfigFromBackend: async () => {
@@ -71,6 +77,7 @@ export const useLlmStore = create<LlmStore>((set) => ({
           model: llmCfg?.model ?? defaultProvider.model,
           apiKey: llmCfg?.api_key ?? defaultProvider.apiKey,
         }),
+        scnetApiKey: llmCfg?.scnet_ocr_api_key ?? "",
         auditEnabled: audit !== false,
       });
     } catch {

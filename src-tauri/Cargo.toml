@@ -40,7 +40,7 @@ sha2 = "0.10.9"
 tauri = { version = "2.11.0", features = ["protocol-asset", "image-png", "tray-icon"] }
 tauri-plugin-dialog = "2.7.0"
 tauri-plugin-shell = "2.3.5"
-tokio = { version = "1", features = ["sync", "time", "rt"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "fs"] }
 notify = { version = "8", features = ["macos_kqueue"] }
 thiserror = "2.0.17"
 zip = { version = "2", default-features = false, features = ["deflate"] }
@@ -53,6 +53,7 @@ tokenizers = { version = "0.21", default-features = false, features = ["fancy-re
 hf-hub = { version = "0.4", features = ["tokio", "rustls-tls"] }
 dirs = "6"
 printpdf = { version = "0.9", default-features = false, features = ["images", "jpeg", "png", "text_layout"] }
+scnetocr = { git = "https://github.com/XUranus/scnetocr-rs" }
 
 # On macOS/Windows, use load-dynamic (runtime ONNX Runtime loading via ORT_DYLIB_PATH).
 # On Linux, the base ort dep is used (static linking via download-binaries).

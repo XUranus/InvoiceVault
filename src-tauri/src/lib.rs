@@ -13,6 +13,7 @@ mod importer;
 mod llm;
 pub mod mcp;
 mod raw_store;
+pub mod scnet_ocr;
 pub mod storage;
 mod watcher;
 
