@@ -472,21 +472,68 @@ pub async fn recognize_invoice_with_retries(
     let scnet_key = config.scnet_ocr_api_key.as_deref().filter(|k| !k.is_empty());
     if let Some(api_key) = scnet_key {
         info!("SCNet OCR enabled, running cross-validation");
+        let scnet_started = Utc::now();
+        let scnet_timer = Instant::now();
         match crate::scnet_ocr::recognize_with_scnet(api_key, image_path).await {
             Ok(Some(scnet_json)) => {
+                let elapsed = scnet_timer.elapsed().as_millis();
+                write_llm_audit_record(
+                    audit,
+                    LlmAuditRecord {
+                        started_at: scnet_started,
+                        operation: "scnet_ocr",
+                        endpoint: "scnet",
+                        model: "scnet-vat-ocr",
+                        duration_ms: elapsed,
+                        status: Some(200),
+                        request: json!({ "image_path": image_path.to_string_lossy() }),
+                        response: Some(json!(&scnet_json)),
+                        error: None,
+                    },
+                );
                 let merged_json = crate::scnet_ocr::merge_vlm_and_scnet(
                     &vlm_result.response_json,
                     &scnet_json,
                 );
-                info!("SCNet OCR merged successfully with VLM result");
+                info!("SCNet OCR merged successfully with VLM result in {elapsed}ms");
                 vlm_result.response_json = merged_json;
                 vlm_result.response_preview = truncate(&vlm_result.response_json, 160);
             }
             Ok(None) => {
+                let elapsed = scnet_timer.elapsed().as_millis();
+                write_llm_audit_record(
+                    audit,
+                    LlmAuditRecord {
+                        started_at: scnet_started,
+                        operation: "scnet_ocr",
+                        endpoint: "scnet",
+                        model: "scnet-vat-ocr",
+                        duration_ms: elapsed,
+                        status: Some(200),
+                        request: json!({ "image_path": image_path.to_string_lossy() }),
+                        response: Some(json!({ "result": "no_invoice_detected" })),
+                        error: None,
+                    },
+                );
                 info!("SCNet OCR returned no invoice results, using VLM result as-is");
             }
             Err(e) => {
-                warn!("SCNet OCR failed, falling back to VLM result: {e}");
+                let elapsed = scnet_timer.elapsed().as_millis();
+                write_llm_audit_record(
+                    audit,
+                    LlmAuditRecord {
+                        started_at: scnet_started,
+                        operation: "scnet_ocr",
+                        endpoint: "scnet",
+                        model: "scnet-vat-ocr",
+                        duration_ms: elapsed,
+                        status: None,
+                        request: json!({ "image_path": image_path.to_string_lossy() }),
+                        response: None,
+                        error: Some(e.to_string()),
+                    },
+                );
+                warn!("SCNet OCR failed in {elapsed}ms, falling back to VLM result: {e}");
             }
         }
     }
