@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -253,6 +254,7 @@ pub struct AppState {
     price_config: Arc<Mutex<PriceConfig>>,
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     llm_audit_enabled: Arc<Mutex<bool>>,
+    importing_paths: Arc<Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -329,6 +331,7 @@ impl AppState {
             price_config: Arc::new(Mutex::new(price_config)),
             llm_config,
             llm_audit_enabled,
+            importing_paths: Arc::new(Mutex::new(HashSet::new())),
         };
 
         // Load local embedding engine if enabled and model exists
@@ -393,9 +396,36 @@ impl AppState {
         paths: Vec<String>,
         app: &AppHandle,
     ) -> Result<Vec<ImportJobSummary>, AppError> {
+        // Guard: skip paths already being processed in a concurrent call
+        let paths: Vec<String> = {
+            let mut guard = self.importing_paths.lock().expect("importing_paths mutex poisoned");
+            paths.into_iter().filter(|p| guard.insert(p.clone())).collect()
+        };
+        if paths.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let result = self.import_files_inner(paths.clone(), app);
+
+        // Remove guard entries regardless of success/failure
+        {
+            let mut guard = self.importing_paths.lock().expect("importing_paths mutex poisoned");
+            for p in &paths {
+                guard.remove(p);
+            }
+        }
+
+        result
+    }
+
+    fn import_files_inner(
+        &self,
+        paths: Vec<String>,
+        app: &AppHandle,
+    ) -> Result<Vec<ImportJobSummary>, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
         let source_paths: Vec<String> = paths.iter().map(|p| p.clone()).collect();
-        info!("Importing {} files", paths.len());
+        info!(count = paths.len(), files = ?paths, "Importing files");
         let jobs = import_files(&mut db, &self.paths.raw_dir, paths, "manual")?;
         let total = jobs.len();
         let success = jobs.iter().filter(|j| j.status == "imported").count();
@@ -624,6 +654,15 @@ impl AppState {
                 let message = import_failure_message(&e);
                 error!("Auto recognition failed: {message}");
                 if let Ok(db) = db.lock() {
+                    // Fetch file name for event details
+                    let file_name: Option<String> = db
+                        .query_row(
+                            "SELECT original_name FROM raw_files WHERE id = ?1",
+                            [raw_file_id],
+                            |row| row.get(0),
+                        )
+                        .ok();
+
                     // Mark as failed, detach from raw_file
                     if let Err(e) = db.execute(
                         "UPDATE import_jobs SET status = 'failed', error_message = ?1, raw_file_id = NULL WHERE id = ?2",
@@ -632,11 +671,15 @@ impl AppState {
                         error!("Failed to mark import job {job_id} as failed: {e}");
                     }
 
-                    // Record failure event
+                    // Record failure event with file name
+                    let event_title = match &file_name {
+                        Some(name) => format!("自动识别失败: {name}"),
+                        None => "自动识别失败".to_owned(),
+                    };
                     if let Err(e) = event::create_event(
                         &db,
                         "recognition",
-                        "自动识别失败",
+                        &event_title,
                         &message,
                         "failed",
                         None,

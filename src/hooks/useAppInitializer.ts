@@ -13,6 +13,10 @@ import { useAppStore } from "../stores/appStore";
 import { useLlmStore } from "../stores/llmStore";
 import { useRefreshStore } from "../stores/refreshStore";
 
+// Module-level guard: prevents duplicate drag-drop handler registration
+// caused by React StrictMode double-mount (mount → unmount → mount)
+let dragDropRegistered = false;
+
 export function useAppInitializer() {
   const navigate = useNavigate();
 
@@ -67,27 +71,29 @@ export function useAppInitializer() {
   }, [initialize, loadConfigFromBackend]);
 
   // Global drag-drop handler
+  // Uses module-level guard to survive React StrictMode double-mount
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
+    if (dragDropRegistered) return;
+    dragDropRegistered = true;
 
     getCurrentWebview()
       .onDragDropEvent((event) => {
-        if (
-          event.payload.type === "enter" ||
-          event.payload.type === "over"
-        ) {
+        const evtType = (event.payload as { type: string }).type;
+
+        if (evtType === "enter" || evtType === "over") {
           setIsDraggingFiles(true);
           return;
         }
 
-        if (event.payload.type === "leave") {
+        if (evtType === "leave") {
           setIsDraggingFiles(false);
           return;
         }
 
         setIsDraggingFiles(false);
-        const paths: string[] = (event.payload as { paths: string[] })
-          .paths;
+        const paths: string[] = (event.payload as { paths: string[] }).paths ?? [];
+        if (paths.length === 0) return;
+
         importFiles(paths)
           .then(() => {
             triggerImportRefresh();
@@ -95,14 +101,7 @@ export function useAppInitializer() {
           })
           .catch((err) => setError(String(err)));
       })
-      .then((handler) => {
-        unlisten = handler;
-      })
       .catch(() => {});
-
-    return () => {
-      unlisten?.();
-    };
   }, [
     setIsDraggingFiles,
     setError,
