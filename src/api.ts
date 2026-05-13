@@ -264,6 +264,16 @@ export async function testEmbeddingConnection(): Promise<EmbeddingTestResult> {
   return invoke<EmbeddingTestResult>("test_embedding_connection");
 }
 
+export type RegenerateEmbeddingsResult = {
+  total_invoices: number;
+  success_count: number;
+  failure_count: number;
+};
+
+export async function regenerateAllEmbeddings(): Promise<RegenerateEmbeddingsResult> {
+  return invoke<RegenerateEmbeddingsResult>("regenerate_all_embeddings");
+}
+
 export async function searchInvoicesSemantic(
   query: string,
   limit: number,

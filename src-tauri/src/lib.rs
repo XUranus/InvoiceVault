@@ -22,7 +22,7 @@ use agent::{
 };
 use app_core::{
     import_failure_message, AppHealth, AppState, CleanupStorageResult, ExportLogsResult,
-    RecognitionQueueStatus,
+    RecognitionQueueStatus, RegenerateEmbeddingsResult,
 };
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest, ResolveDuplicateResult};
@@ -828,6 +828,13 @@ fn test_embedding_connection(state: State<'_, AppState>) -> Result<EmbeddingTest
 }
 
 #[tauri::command]
+fn regenerate_all_embeddings(state: State<'_, AppState>) -> Result<RegenerateEmbeddingsResult, String> {
+    state
+        .regenerate_all_embeddings()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn search_invoices_semantic(
     state: State<'_, AppState>,
     query: String,
@@ -1321,6 +1328,26 @@ pub fn run() {
                 }
             }
 
+            // Auto-regenerate embeddings on startup if engine is loaded
+            {
+                let state_ref = app.state::<AppState>();
+                let (enabled, model_loaded, _, _) = state_ref.embedding_status();
+                if enabled && model_loaded {
+                    let app_handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app_handle.state::<AppState>();
+                        info!("Auto-regenerating all embeddings on startup...");
+                        match state.regenerate_all_embeddings() {
+                            Ok(result) => info!(
+                                "Embedding regeneration done: {}/{} succeeded, {} failed",
+                                result.success_count, result.total_invoices, result.failure_count,
+                            ),
+                            Err(e) => warn!("Embedding regeneration failed: {e}"),
+                        }
+                    });
+                }
+            }
+
             // Restore and persist window size
             let window = app
                 .get_webview_window(MAIN_WINDOW_LABEL)
@@ -1413,6 +1440,7 @@ pub fn run() {
             set_invoice_badge,
             test_chroma_connection,
             test_embedding_connection,
+            regenerate_all_embeddings,
             search_invoices_semantic,
             create_agent_session,
             list_agent_sessions,

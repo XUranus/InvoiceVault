@@ -146,6 +146,13 @@ pub struct CleanupStorageResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct RegenerateEmbeddingsResult {
+    pub total_invoices: usize,
+    pub success_count: usize,
+    pub failure_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct SpreadsheetInspection {
     pub attachment_id: i64,
     pub file_name: String,
@@ -1284,6 +1291,79 @@ impl AppState {
             .as_mut()
             .ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
         Ok(run_embedding_test(engine)?)
+    }
+
+    pub fn regenerate_all_embeddings(&self) -> Result<RegenerateEmbeddingsResult, AppError> {
+        let mut engine_guard = self.local_embedding.lock().expect("lock");
+        let engine = engine_guard
+            .as_mut()
+            .ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
+
+        let db = self.db.lock().expect("db lock");
+        let thumb_dir = self.paths.thumbnails_dir.clone();
+
+        let invoice_ids: Vec<i64> = {
+            let mut stmt = db.prepare("SELECT id FROM invoices")?;
+            let ids: Vec<i64> = stmt.query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            ids
+        };
+        let total = invoice_ids.len();
+
+        // Reset all embedding flags
+        db.execute("UPDATE invoices SET has_embedding = 0", [])?;
+
+        let mut success_count = 0usize;
+        let mut failure_count = 0usize;
+
+        for invoice_id in invoice_ids {
+            let detail = match get_invoice_detail(&db, &thumb_dir, invoice_id) {
+                Ok(d) => d,
+                Err(e) => {
+                    warn!("Failed to get invoice detail for {invoice_id}: {e}");
+                    failure_count += 1;
+                    continue;
+                }
+            };
+            let text = invoice_to_embedding_text(&detail);
+            match generate_embedding(engine, &text) {
+                Ok(result) => {
+                    if let Err(e) = chroma::upsert_embedding(
+                        &db,
+                        invoice_id,
+                        &result.embedding,
+                        &text,
+                    ) {
+                        warn!("Failed to upsert embedding for invoice {invoice_id}: {e}");
+                        failure_count += 1;
+                        continue;
+                    }
+                    let _ = db.execute(
+                        "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
+                        [invoice_id],
+                    );
+                    let _ = crate::extractor::insert_usage_log(
+                        &db,
+                        "embedding",
+                        EMBEDDING_MODEL_NAME,
+                        result.prompt_tokens,
+                        result.total_tokens.saturating_sub(result.prompt_tokens),
+                        result.total_tokens,
+                    );
+                    success_count += 1;
+                }
+                Err(e) => {
+                    warn!("Failed to generate embedding for invoice {invoice_id}: {e}");
+                    failure_count += 1;
+                }
+            }
+        }
+
+        Ok(RegenerateEmbeddingsResult {
+            total_invoices: total,
+            success_count,
+            failure_count,
+        })
     }
 
     pub fn search_invoices_semantic(

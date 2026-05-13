@@ -12,6 +12,7 @@ import {
   getEmbeddingStatus,
   downloadEmbeddingModel,
   testEmbeddingConnection,
+  regenerateAllEmbeddings,
   setLlmAuditEnabled as apiSetLlmAuditEnabled,
 } from "../../api";
 import { useLlmStore } from "../../stores/llmStore";
@@ -69,6 +70,8 @@ export function AiProviderPage() {
   const [embTestError, setEmbTestError] = React.useState<string | null>(null);
   const [isDownloadingEmb, setIsDownloadingEmb] = React.useState(false);
   const [embDownloadMsg, setEmbDownloadMsg] = React.useState<string | null>(null);
+  const [isRegeneratingEmb, setIsRegeneratingEmb] = React.useState(false);
+  const [embRegenMsg, setEmbRegenMsg] = React.useState<string | null>(null);
 
   // --- Audit ---
   const auditEnabled = useLlmStore((s) => s.auditEnabled);
@@ -174,6 +177,22 @@ export function AiProviderPage() {
       setEmbTestError(String(err));
     } finally {
       setIsTestingEmb(false);
+    }
+  };
+
+  const handleRegenerateEmbeddings = async () => {
+    setIsRegeneratingEmb(true);
+    setEmbRegenMsg(null);
+    try {
+      const result = await regenerateAllEmbeddings();
+      setEmbRegenMsg(
+        `完成：${result.success_count}/${result.total_invoices} 成功` +
+          (result.failure_count > 0 ? `，${result.failure_count} 失败` : ""),
+      );
+    } catch (err) {
+      setEmbRegenMsg(String(err));
+    } finally {
+      setIsRegeneratingEmb(false);
     }
   };
 
@@ -349,8 +368,18 @@ export function AiProviderPage() {
           >
             {isTestingEmb ? "测试中..." : "测试推理"}
           </button>
+          <button
+            className="btn-primary"
+            onClick={handleRegenerateEmbeddings}
+            disabled={isRegeneratingEmb || !embStatus.model_loaded || !embStatus.enabled}
+          >
+            {isRegeneratingEmb ? "生成中..." : "重新生成全部 Embedding"}
+          </button>
           {embDownloadMsg ? (
             <span className="badge-config-message">{embDownloadMsg}</span>
+          ) : null}
+          {embRegenMsg ? (
+            <span className="badge-config-message">{embRegenMsg}</span>
           ) : null}
         </div>
 
