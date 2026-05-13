@@ -995,7 +995,8 @@ pub fn list_invoices(conn: &Connection) -> Result<Vec<InvoiceSummary>, Extractor
             duplicate_status,
             created_at,
             updated_at,
-            viewed_at
+            viewed_at,
+            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names
         FROM invoices
         ORDER BY id DESC
         LIMIT 100",
@@ -1233,7 +1234,8 @@ fn load_invoice_summary(
             duplicate_status,
             created_at,
             updated_at,
-            viewed_at
+            viewed_at,
+            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names
         FROM invoices
         WHERE id = ?1",
         [invoice_id],
@@ -1684,7 +1686,8 @@ pub fn batch_update_invoices(
             invoice_type, invoice_code, invoice_number, issue_date,
             seller_name, buyer_name, currency, total_amount, category,
             source_page_range, confidence, status, duplicate_status,
-            created_at, updated_at, viewed_at
+            created_at, updated_at, viewed_at,
+            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names
         FROM invoices WHERE id IN ({}) ORDER BY id",
         ids_str
     ))?;
