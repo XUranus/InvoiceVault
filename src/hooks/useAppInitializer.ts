@@ -17,6 +17,11 @@ import { useRefreshStore } from "../stores/refreshStore";
 // caused by React StrictMode double-mount (mount → unmount → mount)
 let dragDropRegistered = false;
 
+// Mutex guard: Tauri's onDragDropEvent fires multiple "drop" events
+// for a single physical file drop on Linux/GTK. A boolean lock ensures
+// only the first event triggers import; the rest are dropped immediately.
+let dropImportInProgress = false;
+
 export function useAppInitializer() {
   const navigate = useNavigate();
 
@@ -94,12 +99,17 @@ export function useAppInitializer() {
         const paths: string[] = (event.payload as { paths: string[] }).paths ?? [];
         if (paths.length === 0) return;
 
+        // Guard against duplicate drop events from Tauri on Linux/GTK
+        if (dropImportInProgress) return;
+        dropImportInProgress = true;
+
         importFiles(paths)
           .then(() => {
             triggerImportRefresh();
             navigate("/import");
           })
-          .catch((err) => setError(String(err)));
+          .catch((err) => setError(String(err)))
+          .finally(() => { dropImportInProgress = false; });
       })
       .catch(() => {});
   }, [

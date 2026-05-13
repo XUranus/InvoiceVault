@@ -65,12 +65,14 @@ pub fn import_files(
 
     let mut summaries = Vec::with_capacity(paths.len());
     for source_path in paths {
-        summaries.push(import_one(
+        if let Some(summary) = import_one(
             conn,
             raw_dir,
             PathBuf::from(source_path),
             source_type,
-        )?);
+        )? {
+            summaries.push(summary);
+        }
     }
     Ok(summaries)
 }
@@ -140,8 +142,16 @@ fn import_one(
     raw_dir: &Path,
     source_path: PathBuf,
     source_type: &str,
-) -> Result<ImportJobSummary, ImportError> {
+) -> Result<Option<ImportJobSummary>, ImportError> {
     let source_path_text = source_path.to_string_lossy().into_owned();
+
+    // Skip if there's already a pending import job for this source path
+    // (created within the last 10 seconds). Prevents duplicate records
+    // when Tauri fires multiple drop events for a single file drop.
+    if has_recent_import_job(conn, &source_path_text)? {
+        return Ok(None);
+    }
+
     let job_id = insert_import_job(
         conn,
         None,
@@ -157,17 +167,17 @@ fn import_one(
                 if raw_file_has_invoice(conn, raw_file_id)? {
                     // Already imported and recognized — true duplicate
                     update_import_job_status(conn, job_id, Some(raw_file_id), "duplicate", None)?;
-                    return load_import_job(conn, job_id);
+                    return Ok(Some(load_import_job(conn, job_id)?));
                 }
                 // raw_file exists but has no invoice yet
                 if raw_file_has_running_recognition(conn, raw_file_id)? {
                     // Recognition already in progress — skip to avoid concurrent tasks
                     update_import_job_status(conn, job_id, Some(raw_file_id), "duplicate", None)?;
-                    return load_import_job(conn, job_id);
+                    return Ok(Some(load_import_job(conn, job_id)?));
                 }
                 // Reuse it so the caller can re-trigger recognition
                 update_import_job_status(conn, job_id, Some(raw_file_id), "imported", None)?;
-                return load_import_job(conn, job_id);
+                return Ok(Some(load_import_job(conn, job_id)?));
             }
 
             let stored_raw_file = match store_original_file(raw_dir, raw_file) {
@@ -176,21 +186,21 @@ fn import_one(
                     error!("Import failed for {source_path_text}: {err}");
                     let error_message = err.to_string();
                     update_import_job_status(conn, job_id, None, "failed", Some(&error_message))?;
-                    return load_import_job(conn, job_id);
+                    return Ok(Some(load_import_job(conn, job_id)?));
                 }
             };
             let tx = conn.transaction()?;
             let raw_file_id = insert_raw_file(&tx, &stored_raw_file)?;
             update_import_job_status(&tx, job_id, Some(raw_file_id), "imported", None)?;
             tx.commit()?;
-            load_import_job(conn, job_id)
+            Ok(Some(load_import_job(conn, job_id)?))
         }
         Err(err) => {
             error!("Import failed for {source_path_text}: {err}");
             let status = "failed";
             let error_message = err.to_string();
             update_import_job_status(conn, job_id, None, status, Some(&error_message))?;
-            load_import_job(conn, job_id)
+            Ok(Some(load_import_job(conn, job_id)?))
         }
     }
 }
@@ -218,6 +228,21 @@ fn raw_file_has_running_recognition(conn: &Connection, raw_file_id: i64) -> Resu
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM import_jobs WHERE raw_file_id = ?1 AND status = 'recognizing'",
         [raw_file_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn has_recent_import_job(conn: &Connection, source_path: &str) -> Result<bool, ImportError> {
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Check if a job for the same source_path was created in the last 10 seconds
+    let threshold = (now_secs.saturating_sub(10)).to_string();
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM import_jobs WHERE source_path = ?1 AND status = 'importing' AND created_at > ?2",
+        params![source_path, threshold],
         |row| row.get(0),
     )?;
     Ok(count > 0)
