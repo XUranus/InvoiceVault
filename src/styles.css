@@ -7088,3 +7088,102 @@ body,
   margin: 4px 0;
   padding-left: 20px;
 }
+
+/* ---- Custom Titlebar ---- */
+:root {
+  --titlebar-height: 36px;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  height: var(--titlebar-height);
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  color: var(--color-text-secondary);
+  background: var(--color-sidebar);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+[data-theme="dark"] .titlebar {
+  background: linear-gradient(180deg, var(--color-sidebar), rgba(25, 28, 34, 0.7));
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  pointer-events: none;
+}
+
+.titlebar-icon {
+  width: 18px;
+  height: 18px;
+  filter: drop-shadow(0 2px 4px rgba(28, 39, 58, 0.12));
+}
+
+.titlebar-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--color-text);
+  letter-spacing: -0.01em;
+}
+
+.titlebar-controls {
+  margin-left: auto;
+  display: flex;
+  height: 100%;
+}
+
+.titlebar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+
+.titlebar-btn:hover {
+  background: var(--color-sidebar-hover);
+  color: var(--color-text);
+}
+
+.titlebar-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* ---- Layout adjustments for titlebar ---- */
+.app-layout {
+  flex-direction: column;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-main {
+  margin-left: var(--sidebar-width);
+}
+
+.sidebar-collapsed + .app-main {
+  margin-left: var(--sidebar-width-collapsed);
+}
+
+/* ---- Sidebar top offset for titlebar ---- */
+.sidebar {
+  top: var(--titlebar-height);
+  height: calc(100% - var(--titlebar-height));
+  bottom: auto;
+}

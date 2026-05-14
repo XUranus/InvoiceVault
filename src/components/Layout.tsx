@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
+import { TitleBar } from "./TitleBar";
 import { Sidebar } from "./Sidebar";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { OnboardingDialog } from "./OnboardingDialog";
@@ -18,12 +19,15 @@ export function Layout() {
 
   return (
     <div className="app-layout">
-      <Sidebar />
-      <main className="app-main">
-        <ErrorBoundary onError={setError}>
-          <Outlet />
-        </ErrorBoundary>
-      </main>
+      <TitleBar />
+      <div className="app-body">
+        <Sidebar />
+        <main className="app-main">
+          <ErrorBoundary onError={setError}>
+            <Outlet />
+          </ErrorBoundary>
+        </main>
+      </div>
       {showOnboarding ? <OnboardingDialog /> : null}
     </div>
   );
