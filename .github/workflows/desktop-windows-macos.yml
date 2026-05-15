@@ -45,6 +45,14 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Verify Rust installation
+        run: |
+          rustup default stable
+          cargo --version
+          rustc --version
 
       - name: Cache Cargo registry and build output
         uses: Swatinem/rust-cache@v2

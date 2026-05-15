@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS agent_messages (
     content TEXT NOT NULL DEFAULT '',
     tool_call_json TEXT,
     tool_call_id TEXT,
+    reasoning_content TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -303,6 +304,7 @@ CREATE TABLE IF NOT EXISTS email_sources (
     last_sync_at TEXT,
     status TEXT NOT NULL DEFAULT 'idle',
     error_message TEXT,
+    auth_method TEXT NOT NULL DEFAULT 'password',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

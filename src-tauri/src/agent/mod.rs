@@ -427,6 +427,7 @@ pub struct AgentMessageRow {
     pub content: String,
     pub tool_call_json: Option<String>,
     pub tool_call_id: Option<String>,
+    pub reasoning_content: Option<String>,
     pub created_at: String,
     pub attachments: Vec<AgentAttachment>,
 }
@@ -585,6 +586,8 @@ struct LlmMessage {
     tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -630,6 +633,7 @@ struct ToolChatMessage {
     role: Option<String>,
     content: Option<String>,
     tool_calls: Option<Vec<ToolCall>>,
+    reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -648,6 +652,7 @@ struct ToolChatStreamDelta {
     role: Option<String>,
     content: Option<String>,
     tool_calls: Option<Vec<ToolCallDelta>>,
+    reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -734,7 +739,7 @@ pub fn get_session_messages(
     session_id: i64,
 ) -> Result<Vec<AgentMessageRow>, AgentError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, role, content, tool_call_json, tool_call_id, created_at
+        "SELECT id, session_id, role, content, tool_call_json, tool_call_id, created_at, reasoning_content
          FROM agent_messages
          WHERE session_id = ?1
          ORDER BY id ASC",
@@ -749,6 +754,7 @@ pub fn get_session_messages(
                 tool_call_json: row.get(4)?,
                 tool_call_id: row.get(5)?,
                 created_at: row.get(6)?,
+                reasoning_content: row.get(7)?,
                 attachments: Vec::new(),
             })
         })?
@@ -1029,8 +1035,8 @@ fn save_message(
         .transpose()?;
     let content = msg.content.clone().unwrap_or_default();
     conn.execute(
-        "INSERT INTO agent_messages (session_id, role, content, tool_call_json, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![session_id, msg.role, content, tool_call_json, msg.tool_call_id],
+        "INSERT INTO agent_messages (session_id, role, content, tool_call_json, tool_call_id, reasoning_content) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![session_id, msg.role, content, tool_call_json, msg.tool_call_id, msg.reasoning_content],
     )?;
     let id = conn.last_insert_rowid();
     conn.execute(
@@ -1044,6 +1050,7 @@ fn save_message(
         content,
         tool_call_json,
         tool_call_id: msg.tool_call_id.clone(),
+        reasoning_content: msg.reasoning_content.clone(),
         created_at: String::new(),
         attachments: Vec::new(),
     })
@@ -1321,6 +1328,7 @@ async fn send_chat_request_stream(
 
     let mut buffer = String::new();
     let mut content = String::new();
+    let mut reasoning_content = String::new();
     let mut tool_calls: Vec<ToolCallAccumulator> = Vec::new();
     let mut done = false;
     let mut stream_events: Vec<serde_json::Value> = Vec::new();
@@ -1335,6 +1343,7 @@ async fn send_chat_request_stream(
             if process_sse_event(
                 &event,
                 &mut content,
+                &mut reasoning_content,
                 &mut tool_calls,
                 stream_sink,
                 &mut stream_events,
@@ -1353,6 +1362,7 @@ async fn send_chat_request_stream(
         let _ = process_sse_event(
             &buffer,
             &mut content,
+            &mut reasoning_content,
             &mut tool_calls,
             stream_sink,
             &mut stream_events,
@@ -1391,6 +1401,11 @@ async fn send_chat_request_stream(
                 } else {
                     Some(tool_calls)
                 },
+                reasoning_content: if reasoning_content.is_empty() {
+                    None
+                } else {
+                    Some(reasoning_content)
+                },
             },
         }],
     };
@@ -1417,6 +1432,7 @@ async fn send_chat_request_stream(
 fn process_sse_event(
     event: &str,
     content: &mut String,
+    reasoning_content: &mut String,
     tool_calls: &mut Vec<ToolCallAccumulator>,
     stream_sink: &AgentStreamSink,
     audit_events: &mut Vec<serde_json::Value>,
@@ -1441,6 +1457,12 @@ fn process_sse_event(
                 if !delta.is_empty() {
                     content.push_str(&delta);
                     stream_sink(AgentStreamEvent::AssistantDelta { delta });
+                }
+            }
+
+            if let Some(rc) = choice.delta.reasoning_content {
+                if !rc.is_empty() {
+                    reasoning_content.push_str(&rc);
                 }
             }
 
@@ -1551,6 +1573,7 @@ async fn run_agent_turn_impl(
         content: Some(user_message.to_owned()),
         tool_calls: None,
         tool_call_id: None,
+        reasoning_content: None,
     };
     let llm_user_msg = LlmMessage {
         role: "user".to_owned(),
@@ -1560,6 +1583,7 @@ async fn run_agent_turn_impl(
         }),
         tool_calls: None,
         tool_call_id: None,
+        reasoning_content: None,
     };
     {
         let conn = db.lock().expect("db lock");
@@ -1689,6 +1713,7 @@ async fn continue_agent_turn_impl(
             content: Some(note.to_owned()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_content: None,
         };
         {
             let conn = db.lock().expect("db lock");
@@ -1769,6 +1794,7 @@ async fn continue_agent_turn_impl(
             content: Some(tool_content),
             tool_calls: None,
             tool_call_id: Some(tc.id.clone()),
+            reasoning_content: None,
         };
         {
             let conn = db.lock().expect("db lock");
@@ -1799,6 +1825,7 @@ async fn continue_agent_turn_impl(
             content: Some("用户取消了此操作。".to_owned()),
             tool_calls: None,
             tool_call_id: Some(tc.id.clone()),
+            reasoning_content: None,
         };
         {
             let conn = db.lock().expect("db lock");
@@ -1864,6 +1891,7 @@ async fn run_agent_loop_from_inner(
                     content: msg.content,
                     tool_calls: None,
                     tool_call_id: None,
+                    reasoning_content: msg.reasoning_content.clone(),
                 };
                 {
                     let conn = db.lock().expect("db lock");
@@ -1880,6 +1908,7 @@ async fn run_agent_loop_from_inner(
                 content: msg.content,
                 tool_calls: Some(tool_calls.clone()),
                 tool_call_id: None,
+                reasoning_content: msg.reasoning_content.clone(),
             };
             {
                 let conn = db.lock().expect("db lock");
@@ -1917,6 +1946,7 @@ async fn run_agent_loop_from_inner(
                             content: Some(content),
                             tool_calls: None,
                             tool_call_id: Some(tc.id.clone()),
+                            reasoning_content: None,
                         };
                         {
                             let conn = db.lock().expect("db lock");
@@ -1956,6 +1986,7 @@ async fn run_agent_loop_from_inner(
                             content: Some(format!("Error: {message}")),
                             tool_calls: None,
                             tool_call_id: Some(tc.id.clone()),
+                            reasoning_content: None,
                         };
                         {
                             let conn = db.lock().expect("db lock");
@@ -1977,6 +2008,7 @@ async fn run_agent_loop_from_inner(
                 content: msg.content,
                 tool_calls: None,
                 tool_call_id: None,
+                reasoning_content: msg.reasoning_content.clone(),
             };
             {
                 let conn = db.lock().expect("db lock");
@@ -2003,7 +2035,7 @@ fn get_recent_messages(
     limit: usize,
 ) -> Result<Vec<AgentMessageRow>, AgentError> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, role, content, tool_call_json, tool_call_id, created_at
+        "SELECT id, session_id, role, content, tool_call_json, tool_call_id, created_at, reasoning_content
          FROM agent_messages
          WHERE session_id = ?1
          ORDER BY id DESC
@@ -2019,6 +2051,7 @@ fn get_recent_messages(
                 tool_call_json: row.get(4)?,
                 tool_call_id: row.get(5)?,
                 created_at: row.get(6)?,
+                reasoning_content: row.get(7)?,
                 attachments: Vec::new(),
             })
         })?
@@ -2034,6 +2067,7 @@ fn build_llm_messages(history: &[AgentMessageRow]) -> Vec<LlmMessage> {
         content: Some(SYSTEM_PROMPT.to_owned()),
         tool_calls: None,
         tool_call_id: None,
+        reasoning_content: None,
     }];
 
     for m in history {
@@ -2051,6 +2085,7 @@ fn build_llm_messages(history: &[AgentMessageRow]) -> Vec<LlmMessage> {
             },
             tool_calls,
             tool_call_id: m.tool_call_id.clone(),
+            reasoning_content: m.reasoning_content.clone(),
         });
     }
 
