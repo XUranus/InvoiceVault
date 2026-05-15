@@ -1257,6 +1257,11 @@ async fn run_llm_diagnostic(
 }
 
 pub fn run() {
+    // Workaround: WebKitGTK in AppImages fails with "Could not create surfaceless
+    // EGL display: EGL_BAD_ALLOC" on some Linux systems. Disabling compositing
+    // mode resolves the issue.
+    std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
