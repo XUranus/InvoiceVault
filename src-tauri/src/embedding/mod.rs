@@ -66,7 +66,14 @@ impl LocalEmbeddingEngine {
             .commit_from_file(&onnx_path)
             .map_err(|e| EmbeddingError::Load(format!("Failed to load ONNX model: {e}")))?;
 
-        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path.to_str().unwrap())
+        let tokenizer = tokenizers::Tokenizer::from_file(
+            tokenizer_path.to_str().ok_or_else(|| {
+                EmbeddingError::Load(format!(
+                    "Tokenizer path is not valid UTF-8: {}",
+                    tokenizer_path.display()
+                ))
+            })?,
+        )
             .map_err(|e| EmbeddingError::Load(format!("Failed to load tokenizer: {e}")))?;
 
         info!("Local embedding engine loaded from {}", model_dir.display());
