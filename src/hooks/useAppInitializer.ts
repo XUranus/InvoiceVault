@@ -72,7 +72,7 @@ export function useAppInitializer() {
       if (!llm.config.apiKey.trim() && !dismissed) {
         useAppStore.getState().setShowOnboarding(true);
       }
-    });
+    }).catch(() => {});
   }, [initialize, loadConfigFromBackend]);
 
   // Global drag-drop handler

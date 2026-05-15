@@ -551,6 +551,12 @@ async fn recognize_vlm_only(
     let mut candidates: Vec<String> = Vec::new();
 
     for attempt in 1..=MAX_VLM_ATTEMPTS {
+        if attempt > 1 {
+            let backoff = Duration::from_secs(attempt as u64);
+            info!("Waiting {backoff:?} before retry attempt {attempt}");
+            tokio::time::sleep(backoff).await;
+        }
+
         let temp = VLM_TEMPERATURES
             .get((attempt - 1) as usize)
             .copied()

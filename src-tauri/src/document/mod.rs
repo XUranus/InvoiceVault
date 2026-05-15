@@ -195,7 +195,7 @@ fn page_number_from_stem(stem: &str) -> Option<usize> {
 fn unique_run_id() -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
+        .unwrap_or_default()
         .as_millis();
     format!("{millis}-{}", std::process::id())
 }

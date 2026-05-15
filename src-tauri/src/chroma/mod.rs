@@ -104,7 +104,9 @@ fn blob_to_embedding(blob: &[u8]) -> Vec<f32> {
     let len = blob.len() / 4;
     let mut vec = Vec::with_capacity(len);
     for i in 0..len {
-        let bytes: [u8; 4] = blob[i * 4..(i + 1) * 4].try_into().unwrap();
+        let bytes: [u8; 4] = blob[i * 4..(i + 1) * 4]
+            .try_into()
+            .expect("embedding blob slice must be 4-byte aligned");
         vec.push(f32::from_le_bytes(bytes));
     }
     vec

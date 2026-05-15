@@ -458,14 +458,16 @@ impl AppState {
         if let Some(cfg) = config {
             if !cfg.api_key.is_empty() {
                 for job in &jobs {
-                    if job.status == "imported" && job.raw_file_id.is_some() {
-                        self.spawn_recognition_task(
-                            job.id,
-                            job.raw_file_id.unwrap(),
-                            cfg.clone(),
-                            self.llm_audit_config(),
-                            app.clone(),
-                        );
+                    if job.status == "imported" {
+                        if let Some(raw_file_id) = job.raw_file_id {
+                            self.spawn_recognition_task(
+                                job.id,
+                                raw_file_id,
+                                cfg.clone(),
+                                self.llm_audit_config(),
+                                app.clone(),
+                            );
+                        }
                     }
                 }
             }
