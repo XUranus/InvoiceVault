@@ -1257,10 +1257,16 @@ async fn run_llm_diagnostic(
 }
 
 pub fn run() {
-    // Workaround: WebKitGTK in AppImages fails with "Could not create surfaceless
-    // EGL display: EGL_BAD_ALLOC" on some Linux systems when dmabuf rendering
-    // is used inside the AppImage sandbox.
-    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    // Workaround: WebKitGTK in AppImages has rendering issues on some Linux systems.
+    // The bundled wayland/EGL/GL libraries conflict with host GPU drivers, causing
+    // white screens or EGL_BAD_ALLOC crashes. The build pipeline now strips these
+    // conflicting libs, and these env vars provide an additional safety net.
+    // Only set when running inside an AppImage (APPIMAGE env var set by the runtime).
+    if std::env::var("APPIMAGE").is_ok() {
+        std::env::set_var("GDK_BACKEND", "x11");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

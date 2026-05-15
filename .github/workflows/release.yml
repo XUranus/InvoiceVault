@@ -137,6 +137,28 @@ jobs:
       - name: Build AppImage
         run: npm run tauri -- build --bundles appimage
 
+      - name: Strip incompatible libraries from AppImage
+        run: |
+          APPIMAGE=$(ls src-tauri/target/release/bundle/appimage/*.AppImage)
+          chmod +x "$APPIMAGE"
+
+          # Extract squashfs
+          "$APPIMAGE" --appimage-extract
+          rm "$APPIMAGE"
+
+          # Remove bundled wayland and EGL libs that conflict with host GPU drivers.
+          # These cause white screen or EGL_BAD_ALLOC on systems with different GPU setups.
+          find squashfs-root -name "libwayland-*.so*" -delete
+          find squashfs-root -name "libEGL.so*" -delete
+          find squashfs-root -name "libGL.so*" -delete
+
+          # Repackage — use --appimage-extract-and-run to bypass FUSE requirement on CI
+          curl -fsSL -o /tmp/appimagetool \
+            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x /tmp/appimagetool
+          ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run squashfs-root "$APPIMAGE"
+          rm -rf squashfs-root
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
