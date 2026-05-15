@@ -1,8 +1,12 @@
 use std::path::Path;
+use std::time::Duration;
 
 use scnetocr::{InvoiceElements, OcrClient, OcrType};
 use serde_json::{json, Value};
 use tracing::{info, warn};
+
+/// Default SCNet OCR request timeout.
+const DEFAULT_SCNET_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Call SCNet OCR to recognize a VAT invoice image.
 /// Returns the structured extraction JSON string in project-internal format.
@@ -11,7 +15,7 @@ pub async fn recognize_with_scnet(
     api_key: &str,
     image_path: &Path,
 ) -> Result<Option<String>, String> {
-    let client = OcrClient::new(api_key);
+    let client = OcrClient::with_timeout(api_key, DEFAULT_SCNET_TIMEOUT);
     let response = client
         .recognize(image_path, OcrType::VatInvoice)
         .await
