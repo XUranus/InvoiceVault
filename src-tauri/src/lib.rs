@@ -1523,7 +1523,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     )?;
 
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(tauri::include_image!("../icons/tray.png"))
+        .icon(tauri::include_image!("icons/tray.png"))
         .tooltip(format!(
             "{} {}",
             app.package_info().name,
