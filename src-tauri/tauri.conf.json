@@ -39,6 +39,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["../sample/*"]
+    "resources": ["../sample/*"],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
   }
 }
