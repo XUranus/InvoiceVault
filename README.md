@@ -1,7 +1,7 @@
 # InvoiceVault
 
 <p align="center">
-  <img src="icons/logo.svg" alt="InvoiceVault Logo" width="160" height="160">
+  <img src="src-tauri/icons/icon.png" alt="InvoiceVault Logo" width="160" height="160">
 </p>
 
 InvoiceVault（票匣） 是一个本地优先的跨平台桌面端发票处理 Agent。把 PDF/图片发票导入本地归档，通过多模态 AI 模型识别为结构化数据，支持去重、语义检索、统计分析、批量导出和自然语言对话。
