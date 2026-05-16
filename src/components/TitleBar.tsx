@@ -2,7 +2,7 @@ import React from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X, Copy } from "lucide-react";
 
-const appIcon = new URL("../../icons/icon.png", import.meta.url).href;
+const appIcon = new URL("../../src-tauri/icons/icon.png", import.meta.url).href;
 
 export function TitleBar() {
   const appWindow = React.useMemo(() => getCurrentWindow(), []);

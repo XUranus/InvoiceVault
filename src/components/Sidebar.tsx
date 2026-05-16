@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 
-const appIcon = new URL("../../icons/icon.png", import.meta.url).href;
+const appIcon = new URL("../../src-tauri/icons/icon.png", import.meta.url).href;
 
 const TOP_NAV_ITEMS: { path: string; label: string; icon: LucideIcon }[] = [
   { path: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
