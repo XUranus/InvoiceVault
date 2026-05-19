@@ -40,6 +40,11 @@
       "icons/icon.ico"
     ],
     "resources": ["../sample/*"],
+    "windows": {
+      "nsis": {
+        "installerScript": "build/installer.nsh"
+      }
+    },
     "linux": {
       "appimage": {
         "bundleMediaFramework": false
