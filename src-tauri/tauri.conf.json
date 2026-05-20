@@ -40,7 +40,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["../sample/*", "resources/**"],
+    "resources": ["../sample/*", "resources/"],
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
