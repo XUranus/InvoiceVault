@@ -90,20 +90,24 @@ export function ImportPage() {
 
   const handlePickFiles = async () => {
     if (isImporting) return;
-    const selected = await open({
-      multiple: true,
-      directory: false,
-      filters: [
-        { name: "发票文件", extensions: ["pdf", "png", "jpg", "jpeg"] },
-      ],
-    });
-    if (!selected) return;
-    const paths = Array.isArray(selected) ? selected : [selected];
-    if (paths.length === 0) return;
-    await doImport(paths);
+    try {
+      const selected = await open({
+        multiple: true,
+        directory: false,
+        filters: [
+          { name: "发票文件", extensions: ["pdf", "png", "jpg", "jpeg"] },
+        ],
+      });
+      if (!selected) return;
+      const paths = Array.isArray(selected) ? selected : [selected];
+      if (paths.length === 0) return;
+      await doImport(paths);
+    } catch (err) {
+      setError(String(err));
+    }
   };
 
-  const handleDropAreaKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleDropAreaKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     handlePickFiles();
@@ -197,18 +201,18 @@ export function ImportPage() {
       </div>
 
       <div className="import-zone">
-        <div
+        <button
+          type="button"
           className={`drop-area ${isDraggingFiles ? "drop-area-active" : ""} ${isImporting ? "drop-area-disabled" : ""}`}
-          role="button"
-          tabIndex={isImporting ? -1 : 0}
           aria-disabled={isImporting}
+          disabled={isImporting}
           onClick={handlePickFiles}
           onKeyDown={handleDropAreaKeyDown}
         >
           <Paperclip size={32} className="drop-icon" />
           <p>{isDraggingFiles ? "松开以导入文件" : "拖入 PDF / PNG / JPG / JPEG 文件"}</p>
           <span className="drop-hint">也可以点击此区域选择文件</span>
-        </div>
+        </button>
       </div>
 
       {visibleActiveJobs.length > 0 ? (

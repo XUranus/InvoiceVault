@@ -787,6 +787,11 @@ textarea:focus {
 }
 
 .drop-area {
+  display: block;
+  width: 100%;
+  appearance: none;
+  color: inherit;
+  font: inherit;
   border: 2px dashed var(--color-drop-border);
   border-radius: var(--radius);
   padding: 36px 20px;
