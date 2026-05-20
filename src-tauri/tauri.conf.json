@@ -47,7 +47,10 @@
       },
       "nsis": {
         "installMode": "currentUser",
-        "displayLanguageSelector": true
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "installerHooks": "windows/nsis-hooks.nsh"
       }
     },
     "linux": {
