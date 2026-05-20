@@ -1,11 +1,11 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { open } from "@tauri-apps/plugin-dialog";
 import type { ImportJob, ImportJobListResult } from "../types";
 import {
   getInvoiceIdByRawFile,
   importFiles,
   listImportJobs,
+  pickInvoiceFiles,
   recognizeRawFile,
   rawFileHasInvoices,
 } from "../api";
@@ -24,6 +24,7 @@ export function ImportPage() {
   const onInvoicesAdded = useAppStore((s) => s.refreshInvoices);
   const onNavigateToInvoice = useNavigateToInvoice();
   const navigate = useNavigate();
+  const error = useAppStore((s) => s.error);
   const setError = useAppStore((s) => s.setError);
   const [isImporting, setIsImporting] = React.useState(false);
   const [recognizingJobId, setRecognizingJobId] = React.useState<number | null>(null);
@@ -73,7 +74,14 @@ export function ImportPage() {
       setIsImporting(true);
       setOptimisticJobs(paths.map(createOptimisticJob));
       try {
-        await importFiles(paths);
+        const jobs = await importFiles(paths);
+        const failedJobs = jobs.filter((job) => job.status === "failed");
+        if (failedJobs.length > 0) {
+          const detail = failedJobs
+            .map((job) => job.error_message || `${job.source_path} 导入失败`)
+            .join("\n");
+          setError(`导入失败：${detail}`);
+        }
         // Auto-recognition is triggered by backend after import
         // Poll for updated job list after a short delay
         await fetchJobs(1);
@@ -91,15 +99,7 @@ export function ImportPage() {
   const handlePickFiles = async () => {
     if (isImporting) return;
     try {
-      const selected = await open({
-        multiple: true,
-        directory: false,
-        filters: [
-          { name: "发票文件", extensions: ["pdf", "png", "jpg", "jpeg"] },
-        ],
-      });
-      if (!selected) return;
-      const paths = Array.isArray(selected) ? selected : [selected];
+      const paths = await pickInvoiceFiles();
       if (paths.length === 0) return;
       await doImport(paths);
     } catch (err) {
@@ -214,6 +214,12 @@ export function ImportPage() {
           <span className="drop-hint">也可以点击此区域选择文件</span>
         </button>
       </div>
+
+      {error ? (
+        <div className="alert alert-error" style={{ marginBottom: 16, whiteSpace: "pre-wrap" }}>
+          {error}
+        </div>
+      ) : null}
 
       {visibleActiveJobs.length > 0 ? (
         <div className="section">

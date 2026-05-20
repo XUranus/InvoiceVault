@@ -446,6 +446,10 @@ impl AppState {
             }
         }
 
+        if let Err(err) = &result {
+            error!(error = %err, files = ?paths, "Import request failed");
+        }
+
         result
     }
 
@@ -458,6 +462,13 @@ impl AppState {
         let source_paths: Vec<String> = paths.iter().map(|p| p.clone()).collect();
         info!(count = paths.len(), files = ?paths, "Importing files");
         let jobs = import_files(&mut db, &self.paths.raw_dir, paths, "manual")?;
+        for job in jobs.iter().filter(|job| job.status == "failed") {
+            warn!(
+                source_path = %job.source_path,
+                error = ?job.error_message,
+                "Import job failed"
+            );
+        }
         let total = jobs.len();
         let success = jobs.iter().filter(|j| j.status == "imported").count();
         let dups = jobs.iter().filter(|j| j.status == "duplicate").count();

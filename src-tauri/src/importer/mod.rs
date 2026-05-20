@@ -65,11 +65,72 @@ pub fn import_files(
 
     let mut summaries = Vec::with_capacity(paths.len());
     for source_path in paths {
-        if let Some(summary) = import_one(conn, raw_dir, PathBuf::from(source_path), source_type)? {
+        let source_path = normalize_source_path(&source_path);
+        if let Some(summary) = import_one(conn, raw_dir, source_path, source_type)? {
             summaries.push(summary);
         }
     }
     Ok(summaries)
+}
+
+fn normalize_source_path(source_path: &str) -> PathBuf {
+    let source_path = source_path.trim();
+    if let Some(uri_path) = strip_file_uri(source_path) {
+        return PathBuf::from(uri_path);
+    }
+    PathBuf::from(source_path)
+}
+
+fn strip_file_uri(value: &str) -> Option<String> {
+    let lower = value.to_ascii_lowercase();
+    let path = lower
+        .strip_prefix("file://")
+        .map(|_| &value["file://".len()..])?;
+    let path = path.strip_prefix("localhost/").unwrap_or(path);
+    let decoded = percent_decode_path(path);
+
+    #[cfg(target_os = "windows")]
+    {
+        if decoded.starts_with('/') && decoded.as_bytes().get(2) == Some(&b':') {
+            return Some(decoded[1..].replace('/', "\\"));
+        }
+        if decoded.starts_with("//") {
+            return Some(decoded.replace('/', "\\"));
+        }
+        return Some(decoded.replace('/', "\\"));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Some(decoded)
+    }
+}
+
+fn percent_decode_path(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(high), Some(low)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2])) {
+                out.push((high << 4) | low);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 pub fn list_import_jobs(
@@ -528,6 +589,36 @@ mod tests {
         assert_eq!(jobs.len(), 2);
         assert!(jobs.iter().all(|job| job.status == "imported"));
         assert!(jobs.iter().all(|job| job.storage_path.is_some()));
+    }
+
+    #[test]
+    fn import_files_accepts_file_uri_paths() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let source_path = temp_dir.path().join("receipt with space.pdf");
+        std::fs::write(&source_path, b"pdf-bytes").expect("write source");
+
+        let mut conn = Connection::open_in_memory().expect("open sqlite");
+        run_migrations(&mut conn).expect("migrate");
+
+        let file_uri = format!(
+            "file:///{}",
+            source_path.to_string_lossy().replace('\\', "/")
+        )
+        .replace(' ', "%20");
+        let jobs = import_files(
+            &mut conn,
+            &temp_dir.path().join("raw"),
+            vec![file_uri],
+            "manual",
+        )
+        .expect("import file uri");
+
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].status, "imported");
+        assert_eq!(
+            jobs[0].original_name.as_deref(),
+            Some("receipt with space.pdf")
+        );
     }
 
     #[test]

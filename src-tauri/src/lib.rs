@@ -53,6 +53,7 @@ use tauri::{
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent,
 };
+use tauri_plugin_dialog::DialogExt;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -221,6 +222,23 @@ fn import_files(
     state
         .import_files(request.paths, &app)
         .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn pick_invoice_files(app: AppHandle) -> Result<Vec<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("发票文件", &["pdf", "png", "jpg", "jpeg"])
+        .pick_files(move |paths| {
+            let selected = paths
+                .unwrap_or_default()
+                .into_iter()
+                .map(|path| path.to_string())
+                .collect::<Vec<_>>();
+            let _ = tx.send(selected);
+        });
+    rx.await.map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -1560,6 +1578,7 @@ pub fn run() {
             window_close,
             app_health,
             import_files,
+            pick_invoice_files,
             list_import_jobs,
             save_invoice_extraction,
             list_invoices,

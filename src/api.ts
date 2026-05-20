@@ -60,6 +60,10 @@ export async function importFiles(paths: string[]): Promise<ImportJob[]> {
   return invoke<ImportJob[]>("import_files", { request: { paths } });
 }
 
+export async function pickInvoiceFiles(): Promise<string[]> {
+  return invoke<string[]>("pick_invoice_files");
+}
+
 export async function listImportJobs(
   page?: number,
   pageSize?: number,
