@@ -6,8 +6,8 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::extractor;
 use crate::exporter;
+use crate::extractor;
 
 // ---------------------------------------------------------------------------
 // JSON-RPC 2.0 types
@@ -334,9 +334,11 @@ fn json_i64_vec(args: &Value, key: &str) -> Option<Vec<i64>> {
 }
 
 fn json_string_vec(args: &Value, key: &str) -> Option<Vec<String>> {
-    args.get(key)
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+    args.get(key).and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    })
 }
 
 fn success_text(text: String) -> JsonRpcResponse {
@@ -401,7 +403,9 @@ fn execute_tool(
                 page_size: args.get("page_size").and_then(|v| v.as_i64()),
             };
             match extractor::search_invoices(conn, params) {
-                Ok(result) => success_text(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                Ok(result) => {
+                    success_text(serde_json::to_string_pretty(&result).unwrap_or_default())
+                }
                 Err(e) => error_text(format!("搜索失败: {e}")),
             }
         }
@@ -411,7 +415,9 @@ fn execute_tool(
             };
             let thumbnails_dir = app_data_dir.join("thumbnails");
             match extractor::get_invoice_detail(conn, &thumbnails_dir, id) {
-                Ok(detail) => success_text(serde_json::to_string_pretty(&detail).unwrap_or_default()),
+                Ok(detail) => {
+                    success_text(serde_json::to_string_pretty(&detail).unwrap_or_default())
+                }
                 Err(e) => error_text(format!("获取详情失败: {e}")),
             }
         }
@@ -429,7 +435,8 @@ fn execute_tool(
             let next_month = if now.month() == 12 {
                 chrono::NaiveDate::from_ymd_opt(now.year() + 1, 1, 1).unwrap_or(month_start)
             } else {
-                chrono::NaiveDate::from_ymd_opt(now.year(), now.month() + 1, 1).unwrap_or(month_start)
+                chrono::NaiveDate::from_ymd_opt(now.year(), now.month() + 1, 1)
+                    .unwrap_or(month_start)
             };
             let month_end = next_month.pred_opt().unwrap_or(now);
             let content = json!({
@@ -463,7 +470,9 @@ fn execute_tool(
                 date_to: json_str(args, "date_to").map(String::from),
             };
             match exporter::export_invoices(conn, request) {
-                Ok(result) => success_text(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                Ok(result) => {
+                    success_text(serde_json::to_string_pretty(&result).unwrap_or_default())
+                }
                 Err(e) => error_text(format!("导出失败: {e}")),
             }
         }
@@ -473,10 +482,15 @@ fn execute_tool(
                 columns: json_string_vec(args, "columns"),
                 date_from: json_str(args, "date_from").map(String::from),
                 date_to: json_str(args, "date_to").map(String::from),
-                limit: args.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize),
+                limit: args
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize),
             };
             match exporter::preview_export(conn, request) {
-                Ok(result) => success_text(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                Ok(result) => {
+                    success_text(serde_json::to_string_pretty(&result).unwrap_or_default())
+                }
                 Err(e) => error_text(format!("预览失败: {e}")),
             }
         }
@@ -486,18 +500,34 @@ fn execute_tool(
             };
             let request = extractor::UpdateInvoiceRequest {
                 id,
-                invoice_type: args.get("invoice_type").map(|v| v.as_str().map(String::from)),
-                invoice_code: args.get("invoice_code").map(|v| v.as_str().map(String::from)),
-                invoice_number: args.get("invoice_number").map(|v| v.as_str().map(String::from)),
+                invoice_type: args
+                    .get("invoice_type")
+                    .map(|v| v.as_str().map(String::from)),
+                invoice_code: args
+                    .get("invoice_code")
+                    .map(|v| v.as_str().map(String::from)),
+                invoice_number: args
+                    .get("invoice_number")
+                    .map(|v| v.as_str().map(String::from)),
                 issue_date: args.get("issue_date").map(|v| v.as_str().map(String::from)),
-                seller_name: args.get("seller_name").map(|v| v.as_str().map(String::from)),
-                seller_tax_id: args.get("seller_tax_id").map(|v| v.as_str().map(String::from)),
+                seller_name: args
+                    .get("seller_name")
+                    .map(|v| v.as_str().map(String::from)),
+                seller_tax_id: args
+                    .get("seller_tax_id")
+                    .map(|v| v.as_str().map(String::from)),
                 buyer_name: args.get("buyer_name").map(|v| v.as_str().map(String::from)),
-                buyer_tax_id: args.get("buyer_tax_id").map(|v| v.as_str().map(String::from)),
+                buyer_tax_id: args
+                    .get("buyer_tax_id")
+                    .map(|v| v.as_str().map(String::from)),
                 currency: args.get("currency").map(|v| v.as_str().map(String::from)),
-                amount_without_tax: args.get("amount_without_tax").map(|v| v.as_str().map(String::from)),
+                amount_without_tax: args
+                    .get("amount_without_tax")
+                    .map(|v| v.as_str().map(String::from)),
                 tax_amount: args.get("tax_amount").map(|v| v.as_str().map(String::from)),
-                total_amount: args.get("total_amount").map(|v| v.as_str().map(String::from)),
+                total_amount: args
+                    .get("total_amount")
+                    .map(|v| v.as_str().map(String::from)),
                 category: args.get("category").map(|v| v.as_str().map(String::from)),
                 remarks: args.get("remarks").map(|v| v.as_str().map(String::from)),
                 confidence: None,
@@ -508,7 +538,9 @@ fn execute_tool(
             let db_path = app_data_dir.join("invoicevault.sqlite3");
             match rusqlite::Connection::open(&db_path) {
                 Ok(mut write_conn) => match extractor::update_invoice(&mut write_conn, request) {
-                    Ok(result) => success_text(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                    Ok(result) => {
+                        success_text(serde_json::to_string_pretty(&result).unwrap_or_default())
+                    }
                     Err(e) => error_text(format!("更新失败: {e}")),
                 },
                 Err(e) => error_text(format!("打开数据库失败: {e}")),
@@ -523,10 +555,14 @@ fn execute_tool(
             };
             let db_path = app_data_dir.join("invoicevault.sqlite3");
             match rusqlite::Connection::open(&db_path) {
-                Ok(mut write_conn) => match extractor::merge_invoices(&mut write_conn, target_id, source_ids) {
-                    Ok(result) => success_text(serde_json::to_string_pretty(&result).unwrap_or_default()),
-                    Err(e) => error_text(format!("合并失败: {e}")),
-                },
+                Ok(mut write_conn) => {
+                    match extractor::merge_invoices(&mut write_conn, target_id, source_ids) {
+                        Ok(result) => {
+                            success_text(serde_json::to_string_pretty(&result).unwrap_or_default())
+                        }
+                        Err(e) => error_text(format!("合并失败: {e}")),
+                    }
+                }
                 Err(e) => error_text(format!("打开数据库失败: {e}")),
             }
         }
@@ -539,10 +575,17 @@ fn execute_tool(
                 invoice_ids: json_i64_vec(args, "invoice_ids"),
                 date_from: json_str(args, "date_from").map(String::from),
                 date_to: json_str(args, "date_to").map(String::from),
-                thumbnails_dir: Some(app_data_dir.join("thumbnails").to_string_lossy().to_string()),
+                thumbnails_dir: Some(
+                    app_data_dir
+                        .join("thumbnails")
+                        .to_string_lossy()
+                        .to_string(),
+                ),
             };
             match exporter::export_pdf_report(conn, request) {
-                Ok(result) => success_text(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                Ok(result) => {
+                    success_text(serde_json::to_string_pretty(&result).unwrap_or_default())
+                }
                 Err(e) => error_text(format!("导出 PDF 失败: {e}")),
             }
         }
@@ -553,11 +596,14 @@ fn execute_tool(
             success_text(serde_json::to_string_pretty(&badge_config).unwrap_or_default())
         }
         "set_badge_config" => {
-            let config: crate::extractor::BadgeConfig =
-                match serde_json::from_value(args.get("groups").map(|g| json!({"groups": g})).unwrap_or(args.clone())) {
-                    Ok(c) => c,
-                    Err(e) => return error_text(format!("参数解析失败: {e}")),
-                };
+            let config: crate::extractor::BadgeConfig = match serde_json::from_value(
+                args.get("groups")
+                    .map(|g| json!({"groups": g}))
+                    .unwrap_or(args.clone()),
+            ) {
+                Ok(c) => c,
+                Err(e) => return error_text(format!("参数解析失败: {e}")),
+            };
             let sanitized = crate::app_core::sanitize_badge_config(config);
             if let Ok(json) = serde_json::to_string_pretty(&sanitized) {
                 if let Err(e) = std::fs::write(app_data_dir.join("badge_config.json"), json) {
@@ -577,8 +623,15 @@ fn execute_tool(
             let db_path = app_data_dir.join("invoicevault.sqlite3");
             match rusqlite::Connection::open(&db_path) {
                 Ok(mut write_conn) => {
-                    match extractor::set_invoice_badge(&mut write_conn, invoice_id, group_name.to_owned(), value) {
-                        Ok(badges) => success_text(serde_json::to_string_pretty(&badges).unwrap_or_default()),
+                    match extractor::set_invoice_badge(
+                        &mut write_conn,
+                        invoice_id,
+                        group_name.to_owned(),
+                        value,
+                    ) {
+                        Ok(badges) => {
+                            success_text(serde_json::to_string_pretty(&badges).unwrap_or_default())
+                        }
                         Err(e) => error_text(format!("设置标签失败: {e}")),
                     }
                 }
@@ -639,7 +692,12 @@ fn execute_tool(
                 .compression_method(zip::CompressionMethod::Deflated);
             let db_path = app_data_dir.join("invoicevault.sqlite3");
             if db_path.exists() {
-                let _ = crate::app_core::stream_file_to_zip(&mut zip_writer, "invoicevault.sqlite3", &db_path, options);
+                let _ = crate::app_core::stream_file_to_zip(
+                    &mut zip_writer,
+                    "invoicevault.sqlite3",
+                    &db_path,
+                    options,
+                );
             }
             if logs_dir.exists() {
                 if let Ok(entries) = std::fs::read_dir(&logs_dir) {
@@ -647,7 +705,12 @@ fn execute_tool(
                         let path = entry.path();
                         if path.is_file() {
                             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                                let _ = crate::app_core::stream_file_to_zip(&mut zip_writer, &format!("logs/{name}"), &path, options);
+                                let _ = crate::app_core::stream_file_to_zip(
+                                    &mut zip_writer,
+                                    &format!("logs/{name}"),
+                                    &path,
+                                    options,
+                                );
                             }
                         }
                     }
@@ -655,7 +718,9 @@ fn execute_tool(
             }
             match zip_writer.finish() {
                 Ok(finished) => match finished.metadata() {
-                    Ok(metadata) => success_text(json!({"file_path": output_path, "byte_size": metadata.len()}).to_string()),
+                    Ok(metadata) => success_text(
+                        json!({"file_path": output_path, "byte_size": metadata.len()}).to_string(),
+                    ),
                     Err(e) => error_text(e.to_string()),
                 },
                 Err(e) => error_text(e.to_string()),
@@ -672,12 +737,19 @@ fn execute_tool(
             let mut zip_writer = zip::ZipWriter::new(file);
             let options = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated);
-            if let Err(e) = crate::app_core::add_dir_to_zip(&mut zip_writer, app_data_dir, app_data_dir, options) {
+            if let Err(e) = crate::app_core::add_dir_to_zip(
+                &mut zip_writer,
+                app_data_dir,
+                app_data_dir,
+                options,
+            ) {
                 return error_text(format!("打包备份失败: {e}"));
             }
             match zip_writer.finish() {
                 Ok(finished) => match finished.metadata() {
-                    Ok(metadata) => success_text(json!({"file_path": output_path, "byte_size": metadata.len()}).to_string()),
+                    Ok(metadata) => success_text(
+                        json!({"file_path": output_path, "byte_size": metadata.len()}).to_string(),
+                    ),
                     Err(e) => error_text(e.to_string()),
                 },
                 Err(e) => error_text(e.to_string()),
@@ -688,7 +760,8 @@ fn execute_tool(
             let mut bytes_freed: u64 = 0;
             let raw_dir = app_data_dir.join("raw");
             if raw_dir.exists() {
-                let mut referenced_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+                let mut referenced_paths: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
                 if let Ok(mut stmt) = conn.prepare("SELECT storage_path FROM raw_files") {
                     if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
                         for row in rows.flatten() {
@@ -711,22 +784,32 @@ fn execute_tool(
                     }
                 }
             }
-            success_text(json!({
-                "files_removed": files_removed,
-                "db_records_removed": 0,
-                "bytes_freed": bytes_freed
-            }).to_string())
+            success_text(
+                json!({
+                    "files_removed": files_removed,
+                    "db_records_removed": 0,
+                    "bytes_freed": bytes_freed
+                })
+                .to_string(),
+            )
         }
         "get_app_info" => {
             let migration_version: i64 = conn
-                .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_migrations", [], |row| row.get(0))
+                .query_row(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                    [],
+                    |row| row.get(0),
+                )
                 .unwrap_or(0);
-            success_text(json!({
-                "version": env!("CARGO_PKG_VERSION"),
-                "app_data_dir": app_data_dir.to_string_lossy(),
-                "database_path": app_data_dir.join("invoicevault.sqlite3").to_string_lossy(),
-                "migration_version": migration_version,
-            }).to_string())
+            success_text(
+                json!({
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "app_data_dir": app_data_dir.to_string_lossy(),
+                    "database_path": app_data_dir.join("invoicevault.sqlite3").to_string_lossy(),
+                    "migration_version": migration_version,
+                })
+                .to_string(),
+            )
         }
         _ => error_text(format!("未知工具: {tool_name}")),
     }
@@ -736,7 +819,11 @@ fn execute_tool(
 // Request handling
 // ---------------------------------------------------------------------------
 
-fn handle_request(req: JsonRpcRequest, conn: &Connection, app_data_dir: &Path) -> Option<JsonRpcResponse> {
+fn handle_request(
+    req: JsonRpcRequest,
+    conn: &Connection,
+    app_data_dir: &Path,
+) -> Option<JsonRpcResponse> {
     // Notifications (no id) return no response
     if req.id.is_none() && req.method.starts_with("notifications/") {
         return None;
@@ -818,14 +905,22 @@ pub fn run_server(conn: Connection, app_data_dir: PathBuf) {
                         message: format!("Parse error: {e}"),
                     }),
                 };
-                let _ = writeln!(stdout, "{}", serde_json::to_string(&resp).unwrap_or_default());
+                let _ = writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::to_string(&resp).unwrap_or_default()
+                );
                 let _ = stdout.flush();
                 continue;
             }
         };
 
         if let Some(resp) = handle_request(req, &conn, &app_data_dir) {
-            let _ = writeln!(stdout, "{}", serde_json::to_string(&resp).unwrap_or_default());
+            let _ = writeln!(
+                stdout,
+                "{}",
+                serde_json::to_string(&resp).unwrap_or_default()
+            );
             let _ = stdout.flush();
         }
     }

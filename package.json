@@ -7,6 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "package:win-deps": "powershell -ExecutionPolicy Bypass -File scripts/package-windows-dependencies.ps1",
     "tauri": "tauri"
   },
   "dependencies": {

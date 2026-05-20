@@ -1,7 +1,15 @@
 fn main() {
-    // On non-Linux platforms, ONNX Runtime is dynamically linked.
-    // Find the cached ONNX Runtime dylib and copy it to resources/
-    // so Tauri's bundler can include it.
+    #[cfg(target_os = "windows")]
+    {
+        println!("cargo:rustc-link-arg-bin=invoicevault=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-bin=invoicevault=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
+        );
+    }
+
+    // On non-Linux platforms, ONNX Runtime is dynamically loaded at runtime.
+    // If a local DLL/dylib is supplied with ORT_DYLIB_PATH, copy it to
+    // resources/ so Tauri can bundle it.
     #[cfg(not(target_os = "linux"))]
     {
         use std::path::PathBuf;
@@ -12,57 +20,28 @@ fn main() {
             "onnxruntime.dll"
         };
 
-        // Try to find the dylib in the ort cache directory
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_default();
-        let ort_cache = PathBuf::from(&home).join(".cache/ort.pyke.io/dfbin");
-
-        let target_triple = if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "aarch64") {
-                "aarch64-apple-darwin"
-            } else {
-                "x86_64-apple-darwin"
-            }
-        } else if cfg!(target_os = "windows") {
-            "x86_64-pc-windows-msvc"
+        let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let resources_dir = if cfg!(target_os = "windows") {
+            manifest_dir.join("resources").join("win-x86_64")
         } else {
-            return;
+            manifest_dir.join("resources")
         };
-
-        let target_dir = ort_cache.join(target_triple);
-        if !target_dir.exists() {
-            println!(
-                "cargo:warning=ort cache not found at {}",
-                target_dir.display()
-            );
+        std::fs::create_dir_all(&resources_dir).unwrap();
+        let dest = resources_dir.join(lib_name);
+        if dest.exists() {
+            println!("cargo:rerun-if-changed={}", dest.display());
             return;
         }
 
-        // Find the hash directory (there should be exactly one)
-        let real_path = std::fs::read_dir(&target_dir)
-            .ok()
-            .and_then(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .find(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                    .map(|e| e.path().join(lib_name))
-            })
-            .filter(|p| p.exists());
-
+        let real_path = std::env::var_os("ORT_DYLIB_PATH")
+            .map(PathBuf::from)
+            .filter(|path| path.exists());
         let Some(real_path) = real_path else {
             println!(
-                "cargo:warning={lib_name} not found in {}",
-                target_dir.display()
+                "cargo:warning={lib_name} not found. Put it in src-tauri/resources/win-x86_64 on Windows, src-tauri/resources on macOS, or set ORT_DYLIB_PATH before building."
             );
             return;
         };
-
-        // Copy to src-tauri/resources/ so Tauri can bundle it
-        let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-        let resources_dir = manifest_dir.join("resources");
-        std::fs::create_dir_all(&resources_dir).unwrap();
-        let dest = resources_dir.join(lib_name);
 
         let should_copy = if dest.exists() {
             let src_modified = std::fs::metadata(&real_path)

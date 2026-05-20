@@ -3086,6 +3086,27 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.dependency-help {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-alert-warn-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-warn-text);
+  background: var(--color-alert-warn-bg);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dependency-help code {
+  justify-self: start;
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: var(--color-text);
+  background: var(--color-input-bg);
+}
+
 /* ---- Utilities ---- */
 .muted {
   color: var(--color-text-muted);
@@ -5927,6 +5948,7 @@ body,
 #root {
   width: 100%;
   height: 100%;
+  min-height: 100vh;
   min-width: 0;
   overflow: hidden;
 }
@@ -5947,8 +5969,8 @@ textarea {
 
 .app-layout {
   width: 100%;
-  height: 100%;
-  min-height: 0;
+  height: 100vh;
+  min-height: 100vh;
   overflow: hidden;
 }
 
@@ -7095,6 +7117,8 @@ body,
 }
 
 .titlebar {
+  position: relative;
+  z-index: 200;
   display: flex;
   align-items: center;
   height: var(--titlebar-height);
@@ -7104,6 +7128,15 @@ body,
   color: var(--color-text-secondary);
   background: var(--color-sidebar);
   border-bottom: 1px solid var(--glass-border);
+}
+
+.titlebar-drag-region {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+  cursor: default;
 }
 
 [data-theme="dark"] .titlebar {
@@ -7133,6 +7166,8 @@ body,
 }
 
 .titlebar-controls {
+  position: relative;
+  z-index: 1;
   margin-left: auto;
   display: flex;
   height: 100%;

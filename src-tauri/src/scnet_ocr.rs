@@ -172,8 +172,14 @@ pub fn merge_vlm_and_scnet(vlm_json: &str, scnet_json: &str) -> String {
     }
 
     // Confidence: take the higher value
-    let vlm_conf = vlm.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let scnet_conf = scnet.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let vlm_conf = vlm
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let scnet_conf = scnet
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     if scnet_conf > vlm_conf {
         if let Some(obj) = vlm.as_object_mut() {
             obj.insert("confidence".to_string(), json!(scnet_conf));
@@ -182,9 +188,7 @@ pub fn merge_vlm_and_scnet(vlm_json: &str, scnet_json: &str) -> String {
 
     // Add warning that SCNet was used for cross-validation
     if let Some(obj) = vlm.as_object_mut() {
-        let warnings = obj
-            .entry("warnings")
-            .or_insert_with(|| json!([]));
+        let warnings = obj.entry("warnings").or_insert_with(|| json!([]));
         if let Some(arr) = warnings.as_array_mut() {
             arr.push(json!("scnet_ocr_cross_validated"));
         }
@@ -217,14 +221,9 @@ fn override_field(target: &mut Value, source: &Value, field: &str) {
 
 /// Override a nested field like `seller.name` in `target` from `source`.
 fn override_nested_field(target: &mut Value, source: &Value, parent: &str, field: &str) {
-    let source_val = source
-        .get(parent)
-        .and_then(|p| p.get(field))
-        .cloned();
+    let source_val = source.get(parent).and_then(|p| p.get(field)).cloned();
 
-    let target_val = target
-        .get(parent)
-        .and_then(|p| p.get(field));
+    let target_val = target.get(parent).and_then(|p| p.get(field));
 
     let should_override = match target_val {
         None => source_val.is_some() && source_val != Some(Value::Null),
@@ -283,9 +282,18 @@ mod tests {
 
     #[test]
     fn normalize_date_handles_chinese_format() {
-        assert_eq!(normalize_date(Some("2026年04月30日")), Some("2026-04-30".to_string()));
-        assert_eq!(normalize_date(Some("20260430")), Some("2026-04-30".to_string()));
-        assert_eq!(normalize_date(Some("2026-04-30")), Some("2026-04-30".to_string()));
+        assert_eq!(
+            normalize_date(Some("2026年04月30日")),
+            Some("2026-04-30".to_string())
+        );
+        assert_eq!(
+            normalize_date(Some("20260430")),
+            Some("2026-04-30".to_string())
+        );
+        assert_eq!(
+            normalize_date(Some("2026-04-30")),
+            Some("2026-04-30".to_string())
+        );
         assert_eq!(normalize_date(None), None);
         assert_eq!(normalize_date(Some("")), None);
     }

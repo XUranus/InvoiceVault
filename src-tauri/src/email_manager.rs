@@ -207,7 +207,11 @@ fn pop3_send_cmd(conn: &mut Pop3Stream, cmd: &str) -> Result<String, EmailError>
 
 fn wrap_imap_login_error(e: imap::Error) -> EmailError {
     let msg = e.to_string();
-    if msg.contains("LOGIN") || msg.contains("login") || msg.contains("AUTHENTICATE") || msg.contains("authenticate") {
+    if msg.contains("LOGIN")
+        || msg.contains("login")
+        || msg.contains("AUTHENTICATE")
+        || msg.contains("authenticate")
+    {
         EmailError::Imap(format!(
             "{msg}。如果使用国内邮箱（163/QQ/Yeah等），请使用「授权码」而非登录密码"
         ))
@@ -219,9 +223,9 @@ fn wrap_imap_login_error(e: imap::Error) -> EmailError {
 /// Send ID command after login. Coremail servers (163.com etc.) require this
 /// before SELECT/EXAMINE will be allowed.
 fn imap_send_id(session: &mut imap::Session<imap::Connection>) {
-    if let Err(e) = session.run_command_and_read_response(
-        "ID (\"name\" \"InvoiceVault\" \"version\" \"1.0\")"
-    ) {
+    if let Err(e) =
+        session.run_command_and_read_response("ID (\"name\" \"InvoiceVault\" \"version\" \"1.0\")")
+    {
         debug!("IMAP ID command not supported or failed (non-critical): {e}");
     }
 }
@@ -313,7 +317,10 @@ impl EmailManager {
                    auth_method, use_ssl as i32, folder, name_keywords, max_email_age_days, poll_interval],
         )?;
         let id = db.last_insert_rowid();
-        info!("Email source added: id={id}, name={name}, protocol={protocol}, host={}", request.imap_host);
+        info!(
+            "Email source added: id={id}, name={name}, protocol={protocol}, host={}",
+            request.imap_host
+        );
         drop(db);
 
         self.get_email_source(id)
@@ -535,8 +542,8 @@ impl EmailManager {
         let count = mailbox.exists as i64;
 
         if let Err(e) = session.logout() {
-                    debug!("IMAP logout error (non-critical): {e}");
-                }
+            debug!("IMAP logout error (non-critical): {e}");
+        }
 
         Ok(EmailTestResult {
             success: true,
@@ -673,8 +680,8 @@ impl EmailManager {
         let fetched_count = uids.len();
         if uids.is_empty() {
             if let Err(e) = session.logout() {
-                    debug!("IMAP logout error (non-critical): {e}");
-                }
+                debug!("IMAP logout error (non-critical): {e}");
+            }
             return Ok(EmailSyncResult {
                 source_id: source.id,
                 fetched_count: 0,
@@ -727,8 +734,8 @@ impl EmailManager {
         }
 
         if let Err(e) = session.logout() {
-                    debug!("IMAP logout error (non-critical): {e}");
-                }
+            debug!("IMAP logout error (non-critical): {e}");
+        }
 
         // Import all extracted attachments
         let imported_count = if !tmp_files.is_empty() {

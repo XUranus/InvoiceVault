@@ -1,8 +1,6 @@
 use rusqlite::Connection;
 
-const MIGRATIONS: &[(i64, &str)] = &[
-    (1, include_str!("../../migrations/0001_initial.sql")),
-];
+const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../../migrations/0001_initial.sql"))];
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {

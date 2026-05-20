@@ -1,9 +1,11 @@
 receipts/
 node_modules/
 dist/
+invoicevault-dependencies-win-x86_64.zip
 target/
 src-tauri/target/
 src-tauri/gen/schemas/
+src-tauri/resources/win-x86_64/
 src-tauri/resources/libonnxruntime.*
 src-tauri/resources/onnxruntime.dll
 .DS_Store

@@ -27,7 +27,7 @@ use app_core::{
 };
 use chroma::{ChromaConfig, SimilarResult};
 use dedupe::{DedupeCheckResult, ResolveDuplicateRequest, ResolveDuplicateResult};
-use embedding::{EmbeddingTestResult, LocalEmbeddingEngine};
+use embedding::EmbeddingTestResult;
 use event::EventListResult;
 use exporter::{ExportInvoicesRequest, ExportResult, PdfReportRequest, PdfReportResult};
 use extractor::{
@@ -43,12 +43,15 @@ use llm::{
     test_llm_connection as run_llm_connection_test, LlmConnectionTestResult,
 };
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
+use std::time::Duration;
 use std::{path::Path, process::Command};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WindowEvent,
+    AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent,
 };
 use tracing::{error, info, warn};
 
@@ -64,6 +67,15 @@ const TRAY_ID: &str = "main-tray";
 const TRAY_WORKBENCH_ID: &str = "tray-workbench";
 const TRAY_VERSION_ID: &str = "tray-version";
 const TRAY_QUIT_ID: &str = "tray-quit";
+const SINGLE_INSTANCE_BIND_ADDR: &str = "127.0.0.1:0";
+const SINGLE_INSTANCE_LOCK_FILE: &str = "invoicevault.lock";
+const SINGLE_INSTANCE_PING_MESSAGE: &[u8] = b"invoicevault:ping\n";
+const SINGLE_INSTANCE_SHOW_MESSAGE: &[u8] = b"invoicevault:show\n";
+const SINGLE_INSTANCE_OK_MESSAGE: &[u8] = b"invoicevault:ok\n";
+const DEFAULT_WINDOW_WIDTH: f64 = 1260.0;
+const DEFAULT_WINDOW_HEIGHT: f64 = 860.0;
+const MIN_WINDOW_WIDTH: f64 = 1060.0;
+const MIN_WINDOW_HEIGHT: f64 = 760.0;
 
 #[derive(Debug, Serialize)]
 struct ExternalDependencyStatus {
@@ -80,6 +92,32 @@ struct AgentStreamPayload {
     session_id: i64,
     #[serde(flatten)]
     event: agent::AgentStreamEvent,
+}
+
+#[tauri::command]
+fn window_start_dragging(window: WebviewWindow) -> Result<(), String> {
+    window.start_dragging().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn window_minimize(window: WebviewWindow) -> Result<(), String> {
+    window.minimize().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn window_toggle_maximize(window: WebviewWindow) -> Result<bool, String> {
+    if window.is_maximized().map_err(|err| err.to_string())? {
+        window.unmaximize().map_err(|err| err.to_string())?;
+        Ok(false)
+    } else {
+        window.maximize().map_err(|err| err.to_string())?;
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+fn window_close(window: WebviewWindow) -> Result<(), String> {
+    window.close().map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -119,6 +157,54 @@ fn check_external_dependency(name: &str, command: &str, args: &[&str]) -> Extern
             error: Some(err.to_string()),
         },
     }
+}
+
+#[cfg(target_os = "windows")]
+fn configure_bundled_windows_dependencies(resource_dir: &Path) {
+    let deps_dir = [
+        resource_dir.join("win-x86_64"),
+        resource_dir.join("resources").join("win-x86_64"),
+    ]
+    .into_iter()
+    .find(|path| path.exists());
+    let Some(deps_dir) = deps_dir else {
+        return;
+    };
+
+    std::env::set_var("INVOICEVAULT_WIN_DEPS_DIR", &deps_dir);
+
+    let onnx_runtime_path = deps_dir.join("onnxruntime.dll");
+    if onnx_runtime_path.exists() {
+        std::env::set_var("ORT_DYLIB_PATH", &onnx_runtime_path);
+    }
+
+    let path_separator = ";";
+    let mut path_entries = vec![
+        deps_dir.clone(),
+        deps_dir.join("ImageMagick"),
+        deps_dir.join("poppler").join("bin"),
+        deps_dir.join("poppler").join("Library").join("bin"),
+        deps_dir.join("poppler"),
+    ];
+    path_entries.retain(|path| path.exists());
+
+    if path_entries.is_empty() {
+        return;
+    }
+
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut merged_path = path_entries
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(path_separator);
+
+    if !current_path.is_empty() {
+        merged_path.push_str(path_separator);
+        merged_path.push_str(&current_path.to_string_lossy());
+    }
+
+    std::env::set_var("PATH", merged_path);
 }
 
 #[tauri::command]
@@ -508,7 +594,10 @@ async fn recognize_raw_file(
             &rec_model,
             1,
         ) {
-            warn!("Failed to record recognition event for invoice {}: {e}", invoice.id);
+            warn!(
+                "Failed to record recognition event for invoice {}: {e}",
+                invoice.id
+            );
         }
         total_prompt_tokens += recognition.prompt_tokens;
         total_completion_tokens += recognition.completion_tokens;
@@ -706,7 +795,14 @@ async fn test_email_connection(
 ) -> Result<email_manager::EmailTestResult, String> {
     state
         .test_email_connection(
-            &protocol, &host, port, &username, &password, &auth_method, use_ssl, &folder,
+            &protocol,
+            &host,
+            port,
+            &username,
+            &password,
+            &auth_method,
+            use_ssl,
+            &folder,
         )
         .map_err(|err| err.to_string())
 }
@@ -726,6 +822,7 @@ fn get_chroma_config(state: State<'_, AppState>) -> Result<ChromaConfig, String>
 #[derive(Serialize)]
 struct LocalEmbeddingStatus {
     enabled: bool,
+    model_present: bool,
     model_loaded: bool,
     model_dir: Option<String>,
     dimensions: Option<usize>,
@@ -741,10 +838,12 @@ fn set_embedding_enabled(state: State<'_, AppState>, enabled: bool) -> Result<()
 #[tauri::command]
 fn get_embedding_status(state: State<'_, AppState>) -> Result<LocalEmbeddingStatus, String> {
     let (enabled, model_loaded, model_dir, dimensions) = state.embedding_status();
+    let (model_present, fallback_model_dir) = embedding_model_presence(state.app_data_dir());
     Ok(LocalEmbeddingStatus {
         enabled,
+        model_present,
         model_loaded,
-        model_dir,
+        model_dir: model_dir.or(fallback_model_dir),
         dimensions,
     })
 }
@@ -754,22 +853,36 @@ async fn download_embedding_model(
     state: State<'_, AppState>,
 ) -> Result<LocalEmbeddingStatus, String> {
     let app_data_dir = state.app_data_dir().to_path_buf();
-    let model_dir = embedding::ensure_model(&app_data_dir)
-        .await
-        .map_err(|e| e.to_string())?;
-    let engine = LocalEmbeddingEngine::load(&model_dir).map_err(|e| e.to_string())?;
-    state.set_embedding_engine(engine);
-    // Auto-enable after successful download
+    let model_dir = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        embedding::ensure_model(&app_data_dir),
+    )
+    .await
+    .map_err(|_| {
+        "模型下载超时。请检查网络或代理；也可以手动下载 Xenova/bge-small-zh-v1.5 的 onnx/model_q4.onnx 和 tokenizer.json 到应用数据目录的 models/bge-small-zh-v1.5。".to_owned()
+    })?
+    .map_err(|e| e.to_string())?;
     state
         .set_embedding_enabled(true)
         .map_err(|e| e.to_string())?;
     let (enabled, model_loaded, model_dir_path, dimensions) = state.embedding_status();
     Ok(LocalEmbeddingStatus {
         enabled,
+        model_present: true,
         model_loaded,
-        model_dir: model_dir_path,
+        model_dir: model_dir_path.or_else(|| Some(model_dir.to_string_lossy().into_owned())),
         dimensions,
     })
+}
+
+fn embedding_model_presence(app_data_dir: &Path) -> (bool, Option<String>) {
+    let model_dir = app_data_dir.join("models").join("bge-small-zh-v1.5");
+    let present = model_dir.join("onnx").join("model_q4.onnx").exists()
+        && model_dir.join("tokenizer.json").exists();
+    (
+        present,
+        present.then(|| model_dir.to_string_lossy().into_owned()),
+    )
 }
 
 #[tauri::command]
@@ -829,14 +942,25 @@ fn test_chroma_connection(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn test_embedding_connection(state: State<'_, AppState>) -> Result<EmbeddingTestResult, String> {
-    state
-        .test_embedding_connection()
-        .map_err(|err| err.to_string())
+async fn test_embedding_connection(app: AppHandle) -> Result<EmbeddingTestResult, String> {
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            state
+                .test_embedding_connection()
+                .map_err(|err| err.to_string())
+        }),
+    )
+    .await
+    .map_err(|_| "Embedding 测试超时。请确认 onnxruntime.dll 可用，并重启应用后重试。".to_owned())?
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-fn regenerate_all_embeddings(state: State<'_, AppState>) -> Result<RegenerateEmbeddingsResult, String> {
+fn regenerate_all_embeddings(
+    state: State<'_, AppState>,
+) -> Result<RegenerateEmbeddingsResult, String> {
     state
         .regenerate_all_embeddings()
         .map_err(|err| err.to_string())
@@ -1217,9 +1341,7 @@ fn set_price_config(
 }
 
 #[tauri::command]
-fn get_diagnostic_config(
-    state: State<'_, AppState>,
-) -> Result<diag::DiagnosticConfig, String> {
+fn get_diagnostic_config(state: State<'_, AppState>) -> Result<diag::DiagnosticConfig, String> {
     let app_data_dir = state.app_data_dir();
     Ok(diag::load_config(app_data_dir))
 }
@@ -1234,9 +1356,7 @@ fn set_diagnostic_config(
 }
 
 #[tauri::command]
-async fn run_llm_diagnostic(
-    state: State<'_, AppState>,
-) -> Result<diag::DiagnosticResult, String> {
+async fn run_llm_diagnostic(state: State<'_, AppState>) -> Result<diag::DiagnosticResult, String> {
     let app_data_dir = state.app_data_dir();
     let diag_config = diag::load_config(app_data_dir);
 
@@ -1256,7 +1376,26 @@ async fn run_llm_diagnostic(
     .await)
 }
 
+struct SingleInstanceGuard {
+    listener: Option<TcpListener>,
+    lock_path: std::path::PathBuf,
+}
+
+impl Drop for SingleInstanceGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
+}
+
 pub fn run() {
+    let Some(mut single_instance_guard) = claim_single_instance() else {
+        return;
+    };
+    let single_instance_listener = single_instance_guard
+        .listener
+        .take()
+        .expect("single instance listener");
+
     // Workaround: WebKitGTK in AppImages has rendering issues on some Linux systems.
     // The bundled wayland/EGL/GL libraries conflict with host GPU drivers, causing
     // white screens or EGL_BAD_ALLOC crashes. The build pipeline now strips these
@@ -1271,7 +1410,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
+        .setup(move |app| {
             // Set up logging directory and file-based tracing subscriber
             let app_data_dir = app.path().app_data_dir().expect("app data dir");
             let log_dir = app_data_dir.join("logs");
@@ -1298,6 +1437,9 @@ pub fn run() {
             #[cfg(not(target_os = "linux"))]
             {
                 if let Some(resource_dir) = app.path().resource_dir().ok() {
+                    #[cfg(target_os = "windows")]
+                    configure_bundled_windows_dependencies(&resource_dir);
+
                     let lib_name = if cfg!(target_os = "macos") {
                         "libonnxruntime.dylib"
                     } else {
@@ -1313,6 +1455,21 @@ pub fn run() {
             let state = AppState::initialize(app.handle())?;
             app.manage(state);
             setup_tray(app.handle())?;
+            setup_single_instance_listener(single_instance_listener, app.handle().clone());
+
+            // Loading ONNX Runtime can take several seconds on Windows. Keep it
+            // off the Tauri setup path so the WebView can become responsive.
+            {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = app_handle.state::<AppState>();
+                    match state.load_embedding_engine_if_available() {
+                        Ok(true) => info!("Local embedding engine loaded in background"),
+                        Ok(false) => {}
+                        Err(e) => error!("Failed to load local embedding engine: {e}"),
+                    }
+                });
+            }
 
             // Ensure diagnostic sample files are written to app data on first run
             {
@@ -1347,26 +1504,6 @@ pub fn run() {
                 }
             }
 
-            // Auto-regenerate embeddings on startup if engine is loaded
-            {
-                let state_ref = app.state::<AppState>();
-                let (enabled, model_loaded, _, _) = state_ref.embedding_status();
-                if enabled && model_loaded {
-                    let app_handle = app.handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        let state = app_handle.state::<AppState>();
-                        info!("Auto-regenerating all embeddings on startup...");
-                        match state.regenerate_all_embeddings() {
-                            Ok(result) => info!(
-                                "Embedding regeneration done: {}/{} succeeded, {} failed",
-                                result.success_count, result.total_invoices, result.failure_count,
-                            ),
-                            Err(e) => warn!("Embedding regeneration failed: {e}"),
-                        }
-                    });
-                }
-            }
-
             // Restore and persist window size
             let window = app
                 .get_webview_window(MAIN_WINDOW_LABEL)
@@ -1380,10 +1517,17 @@ pub fn run() {
             if let Ok(json) = std::fs::read_to_string(&state_path) {
                 if let Ok(saved) = serde_json::from_str::<WindowSizeState>(&json) {
                     use tauri::LogicalSize;
-                    let _ = window.set_size(LogicalSize {
-                        width: saved.width,
-                        height: saved.height,
-                    });
+                    let width = if saved.width.is_finite() {
+                        saved.width.clamp(MIN_WINDOW_WIDTH, 4096.0)
+                    } else {
+                        DEFAULT_WINDOW_WIDTH
+                    };
+                    let height = if saved.height.is_finite() {
+                        saved.height.clamp(MIN_WINDOW_HEIGHT, 2160.0)
+                    } else {
+                        DEFAULT_WINDOW_HEIGHT
+                    };
+                    let _ = window.set_size(LogicalSize { width, height });
                 }
             }
 
@@ -1410,6 +1554,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            window_start_dragging,
+            window_minimize,
+            window_toggle_maximize,
+            window_close,
             app_health,
             import_files,
             list_import_jobs,
@@ -1550,6 +1698,101 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+fn claim_single_instance() -> Option<SingleInstanceGuard> {
+    let lock_path = single_instance_lock_path();
+    if let Some(addr) = read_single_instance_lock(&lock_path) {
+        if notify_existing_instance(addr) {
+            return None;
+        }
+        let _ = std::fs::remove_file(&lock_path);
+    }
+
+    let listener = match TcpListener::bind(SINGLE_INSTANCE_BIND_ADDR) {
+        Ok(listener) => listener,
+        Err(err) => {
+            eprintln!("Failed to create InvoiceVault single-instance listener: {err}");
+            return None;
+        }
+    };
+    let addr = match listener.local_addr() {
+        Ok(addr) => addr,
+        Err(err) => {
+            eprintln!("Failed to read InvoiceVault single-instance listener address: {err}");
+            return None;
+        }
+    };
+    if let Some(parent) = lock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(err) = std::fs::write(&lock_path, addr.port().to_string()) {
+        eprintln!("Failed to write InvoiceVault single-instance lock: {err}");
+        return None;
+    }
+
+    Some(SingleInstanceGuard {
+        listener: Some(listener),
+        lock_path,
+    })
+}
+
+fn single_instance_lock_path() -> std::path::PathBuf {
+    dirs::data_local_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("InvoiceVault")
+        .join(SINGLE_INSTANCE_LOCK_FILE)
+}
+
+fn read_single_instance_lock(path: &Path) -> Option<SocketAddr> {
+    let port = std::fs::read_to_string(path)
+        .ok()?
+        .trim()
+        .parse::<u16>()
+        .ok()?;
+    Some(SocketAddr::from(([127, 0, 0, 1], port)))
+}
+
+fn notify_existing_instance(addr: SocketAddr) -> bool {
+    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(700)) {
+        Ok(stream) => stream,
+        Err(_) => return false,
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(700)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(700)));
+    if stream.write_all(SINGLE_INSTANCE_SHOW_MESSAGE).is_err() {
+        return false;
+    }
+    let mut response = [0_u8; 32];
+    match stream.read(&mut response) {
+        Ok(n) => &response[..n] == SINGLE_INSTANCE_OK_MESSAGE,
+        Err(_) => false,
+    }
+}
+
+fn setup_single_instance_listener(listener: TcpListener, app: AppHandle) {
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(mut stream) => {
+                    let mut request = [0_u8; 64];
+                    let n = stream.read(&mut request).unwrap_or(0);
+                    let message = &request[..n];
+                    if message == SINGLE_INSTANCE_SHOW_MESSAGE {
+                        restore_main_window(&app);
+                        let _ = stream.write_all(SINGLE_INSTANCE_OK_MESSAGE);
+                    } else if message == SINGLE_INSTANCE_PING_MESSAGE {
+                        let _ = stream.write_all(SINGLE_INSTANCE_OK_MESSAGE);
+                    }
+                }
+                Err(err) => {
+                    warn!("Single-instance listener failed: {err}");
+                    break;
+                }
+            }
+        }
+    });
 }
 
 fn restore_main_window(app: &AppHandle) {

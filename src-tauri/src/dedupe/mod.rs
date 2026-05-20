@@ -224,7 +224,10 @@ fn levenshtein(a: &str, b: &str) -> usize {
     prev[n]
 }
 
-pub(crate) fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Result<(), DedupeError> {
+pub(crate) fn detect_field_duplicates(
+    conn: &Connection,
+    invoice_id: i64,
+) -> Result<(), DedupeError> {
     let (invoice_code, invoice_number, issue_date, total_amount, seller_name, _buyer_name): (
         Option<String>,
         Option<String>,
@@ -362,7 +365,10 @@ pub(crate) fn detect_field_duplicates(conn: &Connection, invoice_id: i64) -> Res
     }
 
     // Upsert candidates and update duplicate_status
-    tracing::debug!("dedup invoice {invoice_id}: found {} candidates", candidates.len());
+    tracing::debug!(
+        "dedup invoice {invoice_id}: found {} candidates",
+        candidates.len()
+    );
     for (candidate_id, score, reason) in &candidates {
         tracing::debug!("  candidate: invoice_id={candidate_id}, score={score}, reason={reason}");
         conn.execute(
@@ -432,7 +438,9 @@ fn recalc_duplicate_status(conn: &Connection, invoice_id: i64) -> Result<(), Ded
         _ => "unique",
     };
 
-    tracing::debug!("dedup recalc invoice {invoice_id}: max_score={max_score:?} -> status={status}");
+    tracing::debug!(
+        "dedup recalc invoice {invoice_id}: max_score={max_score:?} -> status={status}"
+    );
 
     conn.execute(
         "UPDATE invoices SET duplicate_status = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
@@ -588,7 +596,11 @@ mod tests {
 
         // Verify initial status is 'unknown'
         let initial: String = conn
-            .query_row("SELECT duplicate_status FROM invoices WHERE id = ?1", [id1], |row| row.get(0))
+            .query_row(
+                "SELECT duplicate_status FROM invoices WHERE id = ?1",
+                [id1],
+                |row| row.get(0),
+            )
             .expect("read");
         assert_eq!(initial, "unknown");
 
@@ -597,7 +609,11 @@ mod tests {
 
         // Verify DB status changed
         let db_status: String = conn
-            .query_row("SELECT duplicate_status FROM invoices WHERE id = ?1", [id1], |row| row.get(0))
+            .query_row(
+                "SELECT duplicate_status FROM invoices WHERE id = ?1",
+                [id1],
+                |row| row.get(0),
+            )
             .expect("read");
         assert_eq!(db_status, "probable_duplicate");
 
@@ -626,7 +642,11 @@ mod tests {
         )
         .expect("search");
 
-        let invoice = search_result.invoices.iter().find(|inv| inv.id == id1).expect("found");
+        let invoice = search_result
+            .invoices
+            .iter()
+            .find(|inv| inv.id == id1)
+            .expect("found");
         assert_eq!(invoice.duplicate_status, "probable_duplicate");
     }
 
@@ -658,11 +678,22 @@ mod tests {
         let result = check_invoice_duplicates(&conn, id1).expect("check");
 
         // Should find candidate with score >= 80 (fuzzy number 30 + amount 25 + date 20 + seller 15 = 90, score = 85.5)
-        assert!(!result.candidates.is_empty(), "should find fuzzy match candidate");
-        assert!(result.candidates[0].score >= 80.0, "score should be >= 80, got {}", result.candidates[0].score);
+        assert!(
+            !result.candidates.is_empty(),
+            "should find fuzzy match candidate"
+        );
+        assert!(
+            result.candidates[0].score >= 80.0,
+            "score should be >= 80, got {}",
+            result.candidates[0].score
+        );
 
         let status: String = conn
-            .query_row("SELECT duplicate_status FROM invoices WHERE id = ?1", [id1], |row| row.get(0))
+            .query_row(
+                "SELECT duplicate_status FROM invoices WHERE id = ?1",
+                [id1],
+                |row| row.get(0),
+            )
             .expect("read status");
         assert_eq!(status, "possible_duplicate");
     }

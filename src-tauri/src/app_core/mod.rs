@@ -334,26 +334,15 @@ impl AppState {
             importing_paths: Arc::new(Mutex::new(HashSet::new())),
         };
 
-        // Load local embedding engine if enabled and model exists
         if embedding_enabled {
             let model_dir = state
                 .paths
                 .app_data_dir
                 .join("models")
                 .join(EMBEDDING_MODEL_NAME);
-            let onnx_path = model_dir.join("onnx").join("model_q4.onnx");
-            let tok_path = model_dir.join("tokenizer.json");
-            if onnx_path.exists() && tok_path.exists() {
-                match LocalEmbeddingEngine::load(&model_dir) {
-                    Ok(engine) => {
-                        *state.local_embedding.lock().expect("lock") = Some(engine);
-                        info!("Local embedding engine loaded from {}", model_dir.display());
-                    }
-                    Err(e) => {
-                        error!("Failed to load local embedding engine: {e}");
-                    }
-                }
-            } else {
+            if !model_dir.join("onnx").join("model_q4.onnx").exists()
+                || !model_dir.join("tokenizer.json").exists()
+            {
                 info!(
                     "Embedding model not found at {}, will download on first use",
                     model_dir.display()
@@ -366,6 +355,39 @@ impl AppState {
 
         info!("AppState initialized");
         Ok(state)
+    }
+
+    pub fn load_embedding_engine_if_available(&self) -> Result<bool, AppError> {
+        if !*self.embedding_enabled.lock().expect("lock") {
+            return Ok(false);
+        }
+
+        {
+            let engine_guard = self.local_embedding.lock().expect("lock");
+            if engine_guard.is_some() {
+                return Ok(true);
+            }
+        }
+
+        let model_dir = self
+            .paths
+            .app_data_dir
+            .join("models")
+            .join(EMBEDDING_MODEL_NAME);
+        let onnx_path = model_dir.join("onnx").join("model_q4.onnx");
+        let tok_path = model_dir.join("tokenizer.json");
+        if !onnx_path.exists() || !tok_path.exists() {
+            return Ok(false);
+        }
+
+        let engine = LocalEmbeddingEngine::load(&model_dir)?;
+        let mut engine_guard = self.local_embedding.lock().expect("lock");
+        if engine_guard.is_some() {
+            return Ok(true);
+        }
+        *engine_guard = Some(engine);
+        info!("Local embedding engine loaded from {}", model_dir.display());
+        Ok(true)
     }
 
     pub fn health(&self) -> Result<AppHealth, AppError> {
@@ -398,8 +420,14 @@ impl AppState {
     ) -> Result<Vec<ImportJobSummary>, AppError> {
         // Guard: skip paths already being processed in a concurrent call
         let paths: Vec<String> = {
-            let mut guard = self.importing_paths.lock().expect("importing_paths mutex poisoned");
-            paths.into_iter().filter(|p| guard.insert(p.clone())).collect()
+            let mut guard = self
+                .importing_paths
+                .lock()
+                .expect("importing_paths mutex poisoned");
+            paths
+                .into_iter()
+                .filter(|p| guard.insert(p.clone()))
+                .collect()
         };
         if paths.is_empty() {
             return Ok(vec![]);
@@ -409,7 +437,10 @@ impl AppState {
 
         // Remove guard entries regardless of success/failure
         {
-            let mut guard = self.importing_paths.lock().expect("importing_paths mutex poisoned");
+            let mut guard = self
+                .importing_paths
+                .lock()
+                .expect("importing_paths mutex poisoned");
             for p in &paths {
                 guard.remove(p);
             }
@@ -706,9 +737,7 @@ impl AppState {
                     }
                     // Clean up all generated thumbnail directories
                     for subdir in &["previews", "normalized", "pdf-pages"] {
-                        let dir_path = thumbnails_dir
-                            .join(subdir)
-                            .join(raw_file_id.to_string());
+                        let dir_path = thumbnails_dir.join(subdir).join(raw_file_id.to_string());
                         if dir_path.exists() {
                             if let Err(e) = std::fs::remove_dir_all(&dir_path) {
                                 warn!("Failed to remove {subdir} dir {}: {e}", dir_path.display());
@@ -727,7 +756,8 @@ impl AppState {
                     {
                         error!("Failed to delete invoices for raw_file {raw_file_id}: {e}");
                     }
-                    if let Err(e) = db.execute("DELETE FROM raw_files WHERE id = ?1", [raw_file_id]) {
+                    if let Err(e) = db.execute("DELETE FROM raw_files WHERE id = ?1", [raw_file_id])
+                    {
                         error!("Failed to delete raw_file {raw_file_id}: {e}");
                     }
                 }
@@ -777,7 +807,10 @@ impl AppState {
                     best.candidate_invoice_id,
                     best.score,
                 ) {
-                    warn!("Failed to record duplicate event for invoice {}: {e}", invoice.id);
+                    warn!(
+                        "Failed to record duplicate event for invoice {}: {e}",
+                        invoice.id
+                    );
                 }
             }
         }
@@ -803,7 +836,9 @@ impl AppState {
                                 if let Err(e) =
                                     chroma::upsert_embedding(&db, invoice_id, &embedding, &text)
                                 {
-                                    warn!("Failed to upsert embedding for invoice {invoice_id}: {e}");
+                                    warn!(
+                                        "Failed to upsert embedding for invoice {invoice_id}: {e}"
+                                    );
                                 }
                                 if let Err(e) = db.execute(
                                     "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
@@ -903,7 +938,10 @@ impl AppState {
                     best.candidate_invoice_id,
                     best.score,
                 ) {
-                    warn!("Failed to record duplicate event for invoice {}: {e}", result.invoice.id);
+                    warn!(
+                        "Failed to record duplicate event for invoice {}: {e}",
+                        result.invoice.id
+                    );
                 }
             }
         }
@@ -930,7 +968,9 @@ impl AppState {
                                 if let Err(e) =
                                     chroma::upsert_embedding(&db, invoice_id, &embedding, &text)
                                 {
-                                    warn!("Failed to upsert embedding for invoice {invoice_id}: {e}");
+                                    warn!(
+                                        "Failed to upsert embedding for invoice {invoice_id}: {e}"
+                                    );
                                 }
                                 if let Err(e) = db.execute(
                                     "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
@@ -1125,9 +1165,16 @@ impl AppState {
         use_ssl: bool,
         folder: &str,
     ) -> Result<EmailTestResult, AppError> {
-        Ok(self
-            .email_manager
-            .test_connection(protocol, host, port, username, password, auth_method, use_ssl, folder)?)
+        Ok(self.email_manager.test_connection(
+            protocol,
+            host,
+            port,
+            username,
+            password,
+            auth_method,
+            use_ssl,
+            folder,
+        )?)
     }
 
     pub fn get_dashboard_stats(
@@ -1180,27 +1227,11 @@ impl AppState {
             }
         }
 
-        // If enabling and engine not loaded, try to load
-        if enabled {
+        // Keep this setter cheap for the settings UI. The ONNX engine can take
+        // several seconds to initialize on Windows and is loaded on first use.
+        if !enabled {
             let mut engine_guard = self.local_embedding.lock().expect("lock");
-            if engine_guard.is_none() {
-                let model_dir = self
-                    .paths
-                    .app_data_dir
-                    .join("models")
-                    .join(EMBEDDING_MODEL_NAME);
-                if model_dir.exists() {
-                    match LocalEmbeddingEngine::load(&model_dir) {
-                        Ok(engine) => {
-                            *engine_guard = Some(engine);
-                            info!("Local embedding engine loaded");
-                        }
-                        Err(e) => {
-                            error!("Failed to load embedding engine: {e}");
-                        }
-                    }
-                }
-            }
+            *engine_guard = None;
         }
 
         let db = self.db.lock().expect("db lock");
@@ -1222,20 +1253,20 @@ impl AppState {
 
     pub fn embedding_status(&self) -> (bool, bool, Option<String>, Option<usize>) {
         let enabled = *self.embedding_enabled.lock().expect("lock");
-        let guard = self.local_embedding.lock().expect("lock");
-        let (model_loaded, model_dir, dimensions) = match *guard {
-            Some(ref engine) => (
-                true,
-                Some(engine.model_dir().to_string_lossy().into_owned()),
-                Some(engine.dimensions()),
-            ),
-            None => (false, None, None),
-        };
-        (enabled, model_loaded, model_dir, dimensions)
-    }
-
-    pub fn set_embedding_engine(&self, engine: LocalEmbeddingEngine) {
-        *self.local_embedding.lock().expect("lock") = Some(engine);
+        match self.local_embedding.try_lock() {
+            Ok(guard) => {
+                let (model_loaded, model_dir, dimensions) = match *guard {
+                    Some(ref engine) => (
+                        true,
+                        Some(engine.model_dir().to_string_lossy().into_owned()),
+                        Some(engine.dimensions()),
+                    ),
+                    None => (false, None, None),
+                };
+                (enabled, model_loaded, model_dir, dimensions)
+            }
+            Err(_) => (enabled, false, None, None),
+        }
     }
 
     /// Scan invoices and regenerate any missing preview thumbnails from normalized images.
@@ -1247,17 +1278,20 @@ impl AppState {
         let preview_root = self.paths.thumbnails_dir.join("previews");
         let normalized_root = self.paths.thumbnails_dir.join("normalized");
 
-        let rows: Vec<(i64, i64, Option<String>)> = match db.prepare(
-            "SELECT id, raw_file_id, source_page_range FROM invoices",
-        ) {
-            Ok(mut stmt) => match stmt.query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<String>>(2)?))
-            }) {
-                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        let rows: Vec<(i64, i64, Option<String>)> =
+            match db.prepare("SELECT id, raw_file_id, source_page_range FROM invoices") {
+                Ok(mut stmt) => match stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                }) {
+                    Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                    Err(_) => return,
+                },
                 Err(_) => return,
-            },
-            Err(_) => return,
-        };
+            };
 
         let mut fixed = 0usize;
         for (invoice_id, raw_file_id, source_page_range) in rows {
@@ -1446,6 +1480,7 @@ impl AppState {
     }
 
     pub fn test_embedding_connection(&self) -> Result<EmbeddingTestResult, AppError> {
+        self.load_embedding_engine_if_available()?;
         let mut guard = self.local_embedding.lock().expect("lock");
         let engine = guard
             .as_mut()
@@ -1454,6 +1489,7 @@ impl AppState {
     }
 
     pub fn regenerate_all_embeddings(&self) -> Result<RegenerateEmbeddingsResult, AppError> {
+        self.load_embedding_engine_if_available()?;
         let mut engine_guard = self.local_embedding.lock().expect("lock");
         let engine = engine_guard
             .as_mut()
@@ -1464,7 +1500,8 @@ impl AppState {
 
         let invoice_ids: Vec<i64> = {
             let mut stmt = db.prepare("SELECT id FROM invoices")?;
-            let ids: Vec<i64> = stmt.query_map([], |row| row.get(0))?
+            let ids: Vec<i64> = stmt
+                .query_map([], |row| row.get(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             ids
         };
@@ -1488,12 +1525,9 @@ impl AppState {
             let text = invoice_to_embedding_text(&detail);
             match generate_embedding(engine, &text) {
                 Ok(result) => {
-                    if let Err(e) = chroma::upsert_embedding(
-                        &db,
-                        invoice_id,
-                        &result.embedding,
-                        &text,
-                    ) {
+                    if let Err(e) =
+                        chroma::upsert_embedding(&db, invoice_id, &result.embedding, &text)
+                    {
                         warn!("Failed to upsert embedding for invoice {invoice_id}: {e}");
                         failure_count += 1;
                         continue;
@@ -1696,7 +1730,12 @@ impl AppState {
 
         // Add database file
         if self.paths.database_path.exists() {
-            stream_file_to_zip(&mut zip_writer, "invoicevault.sqlite3", &self.paths.database_path, options)?;
+            stream_file_to_zip(
+                &mut zip_writer,
+                "invoicevault.sqlite3",
+                &self.paths.database_path,
+                options,
+            )?;
         }
 
         // Add config files
@@ -1719,7 +1758,12 @@ impl AppState {
                     let path = entry.path();
                     if path.is_file() {
                         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                            stream_file_to_zip(&mut zip_writer, &format!("logs/{}", name), &path, options)?;
+                            stream_file_to_zip(
+                                &mut zip_writer,
+                                &format!("logs/{}", name),
+                                &path,
+                                options,
+                            )?;
                         }
                     }
                 }
@@ -1877,7 +1921,8 @@ impl AppState {
 
         for raw_id in &orphan_ids {
             // Delete dependent records and the raw_file itself in order
-            if let Err(e) = db.execute("DELETE FROM import_jobs WHERE raw_file_id = ?1", [*raw_id]) {
+            if let Err(e) = db.execute("DELETE FROM import_jobs WHERE raw_file_id = ?1", [*raw_id])
+            {
                 warn!("Failed to delete import_jobs for orphan raw_file {raw_id}: {e}");
             }
             if let Err(e) = db.execute(
@@ -2889,9 +2934,7 @@ fn make_tool_executor(
                 };
             }
             let config: BadgeConfig = match serde_json::from_value(
-                args.get("config")
-                    .cloned()
-                    .unwrap_or_else(|| args.clone()),
+                args.get("config").cloned().unwrap_or_else(|| args.clone()),
             ) {
                 Ok(c) => c,
                 Err(e) => {
@@ -2945,11 +2988,16 @@ fn make_tool_executor(
                     .get("group_name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("(取消)");
+                let value = args
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(取消)");
                 return ToolExecResult::ConfirmationRequired {
                     tool_name: "set_invoice_badge".to_owned(),
                     arguments: args.clone(),
-                    message: format!("将设置发票 #{invoice_id} 的标签 {group} = {value}，是否确认？"),
+                    message: format!(
+                        "将设置发票 #{invoice_id} 的标签 {group} = {value}，是否确认？"
+                    ),
                 };
             }
             let Some(invoice_id) = args.get("invoice_id").and_then(|v| v.as_i64()) else {
@@ -2998,9 +3046,7 @@ fn make_tool_executor(
                 };
             }
             let config: PriceConfig = match serde_json::from_value(
-                args.get("config")
-                    .cloned()
-                    .unwrap_or_else(|| args.clone()),
+                args.get("config").cloned().unwrap_or_else(|| args.clone()),
             ) {
                 Ok(c) => c,
                 Err(e) => {
@@ -3048,9 +3094,7 @@ fn make_tool_executor(
                     message: "theme 必须是 'light' 或 'dark'".to_owned(),
                 };
             }
-            if let Ok(json) =
-                serde_json::to_string_pretty(&serde_json::json!({ "theme": theme }))
-            {
+            if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({ "theme": theme })) {
                 if let Err(e) = std::fs::write(app_data_dir.join("theme.json"), json) {
                     return ToolExecResult::Error {
                         message: format!("写入主题配置失败: {e}"),
@@ -3111,12 +3155,7 @@ fn make_tool_executor(
             ] {
                 let config_path = app_data_dir.join(config_name);
                 if config_path.exists() {
-                    let _ = stream_file_to_zip(
-                        &mut zip_writer,
-                        config_name,
-                        &config_path,
-                        options,
-                    );
+                    let _ = stream_file_to_zip(&mut zip_writer, config_name, &config_path, options);
                 }
             }
             if logs_dir.exists() {
@@ -3138,12 +3177,7 @@ fn make_tool_executor(
             }
             let llm_audit_dir = app_data_dir.join("llm_audit");
             if llm_audit_dir.exists() {
-                let _ = add_dir_to_zip(
-                    &mut zip_writer,
-                    &app_data_dir,
-                    &llm_audit_dir,
-                    options,
-                );
+                let _ = add_dir_to_zip(&mut zip_writer, &app_data_dir, &llm_audit_dir, options);
             }
             if !ok {
                 return ToolExecResult::Error { message: err_msg };
@@ -3195,9 +3229,7 @@ fn make_tool_executor(
             let mut zip_writer = zip::ZipWriter::new(file);
             let options = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated);
-            if let Err(e) =
-                add_dir_to_zip(&mut zip_writer, &app_data_dir, &app_data_dir, options)
-            {
+            if let Err(e) = add_dir_to_zip(&mut zip_writer, &app_data_dir, &app_data_dir, options) {
                 return ToolExecResult::Error {
                     message: format!("打包备份失败: {e}"),
                 };
@@ -3241,9 +3273,7 @@ fn make_tool_executor(
                 let mut referenced_paths: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
                 if let Ok(mut stmt) = conn.prepare("SELECT storage_path FROM raw_files") {
-                    if let Ok(rows) =
-                        stmt.query_map([], |row| row.get::<_, String>(0))
-                    {
+                    if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
                         for row in rows.flatten() {
                             referenced_paths.insert(row);
                         }
@@ -3659,7 +3689,9 @@ pub fn stream_file_to_zip(
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         zip_writer.write_all(&buf[..n]).map_err(io_err)?;
     }
     Ok(())

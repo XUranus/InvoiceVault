@@ -419,6 +419,7 @@ export type ChromaConfig = {
 
 export type LocalEmbeddingStatus = {
   enabled: boolean;
+  model_present: boolean;
   model_loaded: boolean;
   model_dir: string | null;
   dimensions: number | null;

@@ -19,7 +19,7 @@ jobs:
   # Build jobs (run in parallel)
   # ---------------------------------------------------------------------------
   build-windows:
-    name: Windows MSI
+    name: Windows NSIS
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -42,14 +42,27 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Download bundled Windows dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "${{ vars.WINDOWS_DEPS_URL }}"
+          if ([string]::IsNullOrWhiteSpace($url)) {
+            $url = "https://github.com/XUranus/InvoiceVault/releases/download/build/invoicevault-dependencies-win-x86_64.zip"
+          }
+          New-Item -ItemType Directory -Force -Path "src-tauri/resources" | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "invoicevault-dependencies-win-x86_64.zip"
+          Expand-Archive -Path "invoicevault-dependencies-win-x86_64.zip" -DestinationPath "src-tauri/resources" -Force
+          Get-ChildItem -Recurse "src-tauri/resources/win-x86_64" | Select-Object FullName, Length
+
       - name: Build Tauri bundle
-        run: npm run tauri -- build --bundles msi
+        run: npm run tauri -- build --bundles nsis
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Windows-MSI
-          path: src-tauri/target/release/bundle/msi/*.msi
+          name: Windows-NSIS
+          path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
 
   build-macos:

@@ -400,6 +400,9 @@ export function AdvancedPage() {
                   {dependency.version ?? dependency.error ?? "未返回版本信息"}
                 </span>
               </div>
+              {!dependency.available ? (
+                <ExternalDependencyHelp command={dependency.command} />
+              ) : null}
             </div>
           ))}
           {!checkingDependencies && dependencyStatuses.length === 0 ? (
@@ -569,6 +572,30 @@ export function AdvancedPage() {
       ) : null}
     </>
   );
+}
+
+function ExternalDependencyHelp({ command }: { command: string }) {
+  if (command === "pdftoppm") {
+    return (
+      <div className="dependency-help">
+        <strong>Windows 安装 Poppler</strong>
+        <span>下载 Poppler for Windows，解压后把包含 pdftoppm.exe 的 bin 目录加入 PATH。</span>
+        <code>pdftoppm -h</code>
+      </div>
+    );
+  }
+
+  if (command === "magick") {
+    return (
+      <div className="dependency-help">
+        <strong>Windows 安装 ImageMagick</strong>
+        <span>安装官方 Windows 版 ImageMagick，安装时勾选添加到 PATH，安装后重启应用。</span>
+        <code>magick -version</code>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function formatFileSize(bytes: number): string {

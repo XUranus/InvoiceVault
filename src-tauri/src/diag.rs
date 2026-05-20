@@ -104,7 +104,9 @@ pub fn load_config(app_data_dir: &Path) -> DiagnosticConfig {
     if let Ok(json) = std::fs::read_to_string(&config_path) {
         if let Ok(mut config) = serde_json::from_str::<DiagnosticConfig>(&json) {
             // Rewrite test_image_path to absolute under app_data_dir
-            if !config.test_image_path.is_empty() && !Path::new(&config.test_image_path).is_absolute() {
+            if !config.test_image_path.is_empty()
+                && !Path::new(&config.test_image_path).is_absolute()
+            {
                 let abs = samples_dir.join(&config.test_image_path);
                 config.test_image_path = abs.to_string_lossy().into_owned();
             }
@@ -114,7 +116,10 @@ pub fn load_config(app_data_dir: &Path) -> DiagnosticConfig {
 
     // No config yet — build default with absolute image path and ground truth
     let config = DiagnosticConfig {
-        test_image_path: samples_dir.join("fake-invoice-1.png").to_string_lossy().into_owned(),
+        test_image_path: samples_dir
+            .join("fake-invoice-1.png")
+            .to_string_lossy()
+            .into_owned(),
         ground_truth: GroundTruth {
             invoice_number: Some("TEST20250400098765".into()),
             issue_date: Some("2025-04-30".into()),
@@ -188,7 +193,9 @@ pub async fn run_diagnostic(
             let mime = infer_mime(&test_image_path);
             let start = Instant::now();
             info!("Diagnostic: sending test image to recognition");
-            match recognize_invoice_with_retries(llm_config.clone(), &test_image_path, &mime, audit).await {
+            match recognize_invoice_with_retries(llm_config.clone(), &test_image_path, &mime, audit)
+                .await
+            {
                 Ok(result) => {
                     let parsed = serde_json::from_str::<serde_json::Value>(&result.response_json);
                     match parsed {

@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "InvoiceVault",
         "width": 1260,
         "height": 860,
@@ -39,7 +40,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["../sample/*"],
+    "resources": ["../sample/*", "resources/**"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": true
+      }
+    },
     "linux": {
       "appimage": {
         "bundleMediaFramework": false

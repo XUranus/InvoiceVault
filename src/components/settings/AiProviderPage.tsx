@@ -68,6 +68,7 @@ export function AiProviderPage() {
   // --- Embedding Panel (local model) ---
   const [embStatus, setEmbStatus] = React.useState<LocalEmbeddingStatus>({
     enabled: true,
+    model_present: false,
     model_loaded: false,
     model_dir: null,
     dimensions: null,
@@ -183,7 +184,7 @@ export function AiProviderPage() {
     try {
       const status = await downloadEmbeddingModel();
       setEmbStatus(status);
-      setEmbDownloadMsg("模型下载完成");
+      setEmbDownloadMsg(status.model_loaded ? "模型已下载并加载" : "模型文件已就绪");
     } catch (err) {
       setEmbDownloadMsg(null);
       setEmbTestError(String(err));
@@ -383,8 +384,8 @@ export function AiProviderPage() {
         <label className="settings-toggle-card">
           <input
             type="checkbox"
-            checked={embStatus.model_loaded && embStatus.enabled}
-            disabled={!embStatus.model_loaded}
+            checked={embStatus.model_present && embStatus.enabled}
+            disabled={!embStatus.model_present}
             onChange={(e) => handleToggleEmbedding(e.target.checked)}
           />
           <span>
@@ -397,7 +398,7 @@ export function AiProviderPage() {
           <div className="test-result-row">
             <span>模型状态</span>
             <strong>
-              {embStatus.model_loaded ? "已加载" : "未下载"}
+              {embStatus.model_loaded ? "已加载" : embStatus.model_present ? "文件已就绪" : "未下载"}
             </strong>
           </div>
           {embStatus.dimensions != null ? (
@@ -417,7 +418,7 @@ export function AiProviderPage() {
         </div>
 
         <div className="provider-actions" style={{ marginTop: 12 }}>
-          {!embStatus.model_loaded ? (
+          {!embStatus.model_present ? (
             <button
               className="btn-primary"
               onClick={handleDownloadModel}
@@ -429,14 +430,14 @@ export function AiProviderPage() {
           <button
             className="btn-primary"
             onClick={handleTestEmbedding}
-            disabled={isTestingEmb || !embStatus.model_loaded}
+            disabled={isTestingEmb || !embStatus.model_present}
           >
             {isTestingEmb ? "测试中..." : "测试推理"}
           </button>
           <button
             className="btn-primary"
             onClick={handleRegenerateEmbeddings}
-            disabled={isRegeneratingEmb || !embStatus.model_loaded || !embStatus.enabled}
+            disabled={isRegeneratingEmb || !embStatus.model_present || !embStatus.enabled}
           >
             {isRegeneratingEmb ? "生成中..." : "重新生成全部 Embedding"}
           </button>

@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use serde::Serialize;
 use tracing::info;
@@ -9,6 +12,10 @@ const TOKENIZER_FILE: &str = "tokenizer.json";
 const MODEL_DIR_NAME: &str = "bge-small-zh-v1.5";
 const DIMENSIONS: usize = 384;
 const MAX_TOKEN_LENGTH: usize = 512;
+#[cfg(target_os = "windows")]
+const ONNX_RUNTIME_DLL: &str = "onnxruntime.dll";
+
+static ORT_INIT_RESULT: OnceLock<Result<(), String>> = OnceLock::new();
 
 #[derive(Debug, thiserror::Error)]
 pub enum EmbeddingError {
@@ -44,6 +51,8 @@ pub struct LocalEmbeddingEngine {
 
 impl LocalEmbeddingEngine {
     pub fn load(model_dir: &Path) -> Result<Self, EmbeddingError> {
+        ensure_onnx_runtime_loaded().map_err(EmbeddingError::Load)?;
+
         let onnx_path = model_dir.join(ONNX_FILE);
         let tokenizer_path = model_dir.join(TOKENIZER_FILE);
 
@@ -66,14 +75,13 @@ impl LocalEmbeddingEngine {
             .commit_from_file(&onnx_path)
             .map_err(|e| EmbeddingError::Load(format!("Failed to load ONNX model: {e}")))?;
 
-        let tokenizer = tokenizers::Tokenizer::from_file(
-            tokenizer_path.to_str().ok_or_else(|| {
+        let tokenizer =
+            tokenizers::Tokenizer::from_file(tokenizer_path.to_str().ok_or_else(|| {
                 EmbeddingError::Load(format!(
                     "Tokenizer path is not valid UTF-8: {}",
                     tokenizer_path.display()
                 ))
-            })?,
-        )
+            })?)
             .map_err(|e| EmbeddingError::Load(format!("Failed to load tokenizer: {e}")))?;
 
         info!("Local embedding engine loaded from {}", model_dir.display());
@@ -92,6 +100,92 @@ impl LocalEmbeddingEngine {
     pub fn dimensions(&self) -> usize {
         DIMENSIONS
     }
+}
+
+fn ensure_onnx_runtime_loaded() -> Result<(), String> {
+    ORT_INIT_RESULT
+        .get_or_init(|| {
+            #[cfg(target_os = "windows")]
+            {
+                let dll_path = find_onnxruntime_dll().ok_or_else(|| {
+                    "ONNX Runtime DLL not found. Put onnxruntime.dll in src-tauri/resources for dev/build, or set ORT_DYLIB_PATH to the full DLL path.".to_owned()
+                })?;
+                info!("Using ONNX Runtime DLL at {}", dll_path.display());
+                ort::init_from(&dll_path)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to load ONNX Runtime from {}: {e}",
+                            dll_path.display()
+                        )
+                    })?
+                    .commit();
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            ort::init().commit();
+
+            Ok(())
+        })
+        .as_ref()
+        .map(|_| ())
+        .map_err(Clone::clone)
+}
+
+#[cfg(target_os = "windows")]
+fn find_onnxruntime_dll() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("ORT_DYLIB_PATH").map(PathBuf::from) {
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut candidates = vec![
+        manifest_dir
+            .join("resources")
+            .join("win-x86_64")
+            .join(ONNX_RUNTIME_DLL),
+        manifest_dir.join("resources").join(ONNX_RUNTIME_DLL),
+        manifest_dir
+            .join("target")
+            .join("debug")
+            .join(ONNX_RUNTIME_DLL),
+        manifest_dir
+            .join("target")
+            .join("release")
+            .join(ONNX_RUNTIME_DLL),
+    ];
+
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+        candidates.push(
+            local_app_data
+                .join("Programs")
+                .join("onnxruntime")
+                .join("lib")
+                .join(ONNX_RUNTIME_DLL),
+        );
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(ONNX_RUNTIME_DLL));
+            candidates.push(dir.join("win-x86_64").join(ONNX_RUNTIME_DLL));
+            candidates.push(dir.join("resources").join(ONNX_RUNTIME_DLL));
+            candidates.push(
+                dir.join("resources")
+                    .join("win-x86_64")
+                    .join(ONNX_RUNTIME_DLL),
+            );
+            candidates.push(
+                dir.join("resources")
+                    .join("resources")
+                    .join("win-x86_64")
+                    .join(ONNX_RUNTIME_DLL),
+            );
+        }
+    }
+
+    candidates.into_iter().find(|path| path.exists())
 }
 
 /// Ensure model files exist. Downloads from HuggingFace if missing.

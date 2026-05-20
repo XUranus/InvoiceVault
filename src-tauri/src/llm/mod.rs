@@ -349,7 +349,10 @@ pub async fn recognize_invoice_image(
         let status_code = status.as_u16();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            error!("LLM recognition HTTP {status} (attempt {attempt}): {}", truncate(&body, 200));
+            error!(
+                "LLM recognition HTTP {status} (attempt {attempt}): {}",
+                truncate(&body, 200)
+            );
             let llm_err = LlmError::ProviderStatus {
                 status: status_code,
                 body: truncate(&body, 500),
@@ -469,7 +472,10 @@ pub async fn recognize_invoice_with_retries(
     let mut vlm_result = recognize_vlm_only(config.clone(), image_path, mime_type, audit).await?;
 
     // Step 2: Optional SCNet OCR cross-validation
-    let scnet_key = config.scnet_ocr_api_key.as_deref().filter(|k| !k.is_empty());
+    let scnet_key = config
+        .scnet_ocr_api_key
+        .as_deref()
+        .filter(|k| !k.is_empty());
     if let Some(api_key) = scnet_key {
         info!("SCNet OCR enabled, running cross-validation");
         let scnet_started = Utc::now();
@@ -491,10 +497,8 @@ pub async fn recognize_invoice_with_retries(
                         error: None,
                     },
                 );
-                let merged_json = crate::scnet_ocr::merge_vlm_and_scnet(
-                    &vlm_result.response_json,
-                    &scnet_json,
-                );
+                let merged_json =
+                    crate::scnet_ocr::merge_vlm_and_scnet(&vlm_result.response_json, &scnet_json);
                 info!("SCNet OCR merged successfully with VLM result in {elapsed}ms");
                 vlm_result.response_json = merged_json;
                 vlm_result.response_preview = truncate(&vlm_result.response_json, 160);
@@ -564,14 +568,8 @@ async fn recognize_vlm_only(
 
         info!("VLM recognition attempt {attempt}/{MAX_VLM_ATTEMPTS}, temperature={temp}");
 
-        let result = recognize_invoice_image(
-            config.clone(),
-            image_path,
-            mime_type,
-            temp,
-            audit,
-        )
-        .await?;
+        let result =
+            recognize_invoice_image(config.clone(), image_path, mime_type, temp, audit).await?;
 
         // Check if it's not an invoice — return immediately
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&result.response_json) {
@@ -653,7 +651,10 @@ async fn audit_invoice_results(
         serde_json::to_string_pretty(&candidates_formatted).unwrap_or_default()
     );
 
-    info!("Sending VLM audit request to LLM, {} candidates", candidate_jsons.len());
+    info!(
+        "Sending VLM audit request to LLM, {} candidates",
+        candidate_jsons.len()
+    );
 
     let started = Instant::now();
     let request = ChatCompletionRequest {
@@ -764,8 +765,8 @@ async fn audit_invoice_results(
     let selected_json = &candidate_jsons[selected_index];
 
     // Inject audit confidence into the selected result JSON
-    let mut selected_value: serde_json::Value = serde_json::from_str(selected_json)
-        .unwrap_or_else(|_| serde_json::json!({}));
+    let mut selected_value: serde_json::Value =
+        serde_json::from_str(selected_json).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(obj) = selected_value.as_object_mut() {
         obj.insert(
             "confidence".to_string(),
@@ -776,10 +777,14 @@ async fn audit_invoice_results(
             serde_json::json!(audit_confidence < CONFIDENCE_THRESHOLD),
         );
     }
-    let final_json = serde_json::to_string(&selected_value).unwrap_or_else(|_| selected_json.clone());
+    let final_json =
+        serde_json::to_string(&selected_value).unwrap_or_else(|_| selected_json.clone());
 
     let prompt_tokens = api_response.usage.as_ref().map_or(0, |u| u.prompt_tokens);
-    let completion_tokens = api_response.usage.as_ref().map_or(0, |u| u.completion_tokens);
+    let completion_tokens = api_response
+        .usage
+        .as_ref()
+        .map_or(0, |u| u.completion_tokens);
     let total_tokens = api_response.usage.as_ref().map_or(0, |u| u.total_tokens);
 
     info!(

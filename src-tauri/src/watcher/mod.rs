@@ -189,7 +189,8 @@ impl WatcherManager {
         info!("Watch dir added: id={id}, path={}", request.path);
         drop(db);
 
-        if let Err(e) = self.start_watching(id, path, recursive, extensions, stable_wait_ms as u64) {
+        if let Err(e) = self.start_watching(id, path, recursive, extensions, stable_wait_ms as u64)
+        {
             warn!("Failed to start watching newly added dir id={id}: {e}");
         }
         self.get_status(id)
@@ -680,13 +681,16 @@ fn process_pending(
             let dups = jobs.iter().filter(|j| j.status == "duplicate").count();
             let failed = jobs.iter().filter(|j| j.status == "failed").count();
             let raw_ids: Vec<i64> = pairs.iter().map(|(_, raw_id)| *raw_id).collect();
-            if let Err(e) = event::record_import_event(&conn, total, success, dups, failed, &[], &raw_ids) {
+            if let Err(e) =
+                event::record_import_event(&conn, total, success, dups, failed, &[], &raw_ids)
+            {
                 warn!("Failed to record watcher import event: {e}");
             }
 
             // Mark jobs as "recognizing"
             for (job_id, _) in &pairs {
-                if let Err(e) = update_import_job_status(&conn, *job_id, None, "recognizing", None) {
+                if let Err(e) = update_import_job_status(&conn, *job_id, None, "recognizing", None)
+                {
                     warn!("Failed to update import job {job_id} status to recognizing: {e}");
                 }
             }
@@ -822,14 +826,20 @@ pub async fn recognize_raw_file_async(
             }
         };
 
-        let recognition =
-            match recognize_invoice_with_retries(config.clone(), &prepared.image_path, &prepared.mime_type, audit).await {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("Watcher: recognition failed for raw_file {raw_file_id}: {e}");
-                    continue;
-                }
-            };
+        let recognition = match recognize_invoice_with_retries(
+            config.clone(),
+            &prepared.image_path,
+            &prepared.mime_type,
+            audit,
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Watcher: recognition failed for raw_file {raw_file_id}: {e}");
+                continue;
+            }
+        };
 
         let invoice = match db.lock() {
             Ok(mut conn) => save_invoice_extraction(
@@ -859,7 +869,10 @@ pub async fn recognize_raw_file_async(
                     &recognition.model,
                     1,
                 ) {
-                    warn!("Failed to record recognition event for invoice {}: {e}", invoice.id);
+                    warn!(
+                        "Failed to record recognition event for invoice {}: {e}",
+                        invoice.id
+                    );
                 }
             }
         }

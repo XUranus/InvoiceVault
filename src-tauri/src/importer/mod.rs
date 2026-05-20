@@ -65,12 +65,7 @@ pub fn import_files(
 
     let mut summaries = Vec::with_capacity(paths.len());
     for source_path in paths {
-        if let Some(summary) = import_one(
-            conn,
-            raw_dir,
-            PathBuf::from(source_path),
-            source_type,
-        )? {
+        if let Some(summary) = import_one(conn, raw_dir, PathBuf::from(source_path), source_type)? {
             summaries.push(summary);
         }
     }
@@ -224,7 +219,10 @@ fn raw_file_has_invoice(conn: &Connection, raw_file_id: i64) -> Result<bool, Imp
     Ok(count > 0)
 }
 
-fn raw_file_has_running_recognition(conn: &Connection, raw_file_id: i64) -> Result<bool, ImportError> {
+fn raw_file_has_running_recognition(
+    conn: &Connection,
+    raw_file_id: i64,
+) -> Result<bool, ImportError> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM import_jobs WHERE raw_file_id = ?1 AND status = 'recognizing'",
         [raw_file_id],
@@ -484,7 +482,8 @@ mod tests {
         conn.execute(
             "INSERT INTO invoices (raw_file_id) VALUES (?1)",
             rusqlite::params![raw_id],
-        ).expect("insert invoice");
+        )
+        .expect("insert invoice");
 
         let third = import_files(
             &mut conn,

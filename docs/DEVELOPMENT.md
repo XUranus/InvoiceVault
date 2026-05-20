@@ -43,6 +43,44 @@ cd src-tauri && cargo check
 npm run tauri build -- --no-bundle
 ```
 
+## Windows 开发和打包
+
+Windows 10/11 本地开发建议使用 MSVC 工具链：
+
+```powershell
+rustup default stable-x86_64-pc-windows-msvc
+rustup target add x86_64-pc-windows-msvc
+npm ci
+npm run build
+cd src-tauri
+cargo check
+cd ..
+npm run tauri dev
+```
+
+系统依赖需要先放进 `PATH`：
+
+```powershell
+pdftoppm -h
+magick -version
+```
+
+Windows 发布优先生成 NSIS 安装包：
+
+```powershell
+npm run tauri -- build --bundles nsis
+```
+
+产物位于：
+
+```text
+src-tauri/target/release/bundle/nsis/*.exe
+```
+
+Tauri 安装器会在目标机器缺少 WebView2 Runtime 时使用在线 bootstrapper 安装。应用本身的数据、SQLite、RAW 文件、缩略图和日志仍写入系统应用数据目录，不写入安装目录。
+
+如果安装后启动时报 `无法定位程序输入点 TaskDialogIndirect`，先确认产物是用当前 `build.rs` 重新构建的。Windows 构建会把 Common Controls v6 manifest 嵌入 `invoicevault.exe`，否则 `tauri-plugin-dialog` 依赖的原生任务对话框可能加载旧版 `comctl32` 并在启动时失败。
+
 PDF 识别依赖 Poppler `pdftoppm`：
 
 ```bash

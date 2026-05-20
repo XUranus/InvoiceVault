@@ -73,8 +73,9 @@ fn main() {
 
     // Run storage migrations to ensure schema is up to date
     {
-        let mut conn_rw = rusqlite::Connection::open_with_flags(&db, OpenFlags::SQLITE_OPEN_READ_WRITE)
-            .expect("open db for migrations");
+        let mut conn_rw =
+            rusqlite::Connection::open_with_flags(&db, OpenFlags::SQLITE_OPEN_READ_WRITE)
+                .expect("open db for migrations");
         if let Err(e) = invoicevault_lib::storage::run_migrations(&mut conn_rw) {
             eprintln!("Warning: Failed to run migrations: {e}");
         }
