@@ -119,6 +119,34 @@ export function useAppInitializer() {
     navigate,
   ]);
 
+  // Native window drag-drop fallback. On Windows, WebView-level file-drop
+  // events can be swallowed before the frontend handler sees them.
+  useEffect(() => {
+    let cleanupDragState: (() => void) | null = null;
+    let cleanupImportError: (() => void) | null = null;
+
+    listen<{ dragging: boolean }>("native-drag-state", (event) => {
+      setIsDraggingFiles(event.payload.dragging);
+    })
+      .then((fn) => {
+        cleanupDragState = fn;
+      })
+      .catch(() => {});
+
+    listen<string>("native-import-error", (event) => {
+      setError(event.payload);
+    })
+      .then((fn) => {
+        cleanupImportError = fn;
+      })
+      .catch(() => {});
+
+    return () => {
+      cleanupDragState?.();
+      cleanupImportError?.();
+    };
+  }, [setIsDraggingFiles, setError]);
+
   // Watcher auto-import listener
   useEffect(() => {
     let cleanup: (() => void) | null = null;

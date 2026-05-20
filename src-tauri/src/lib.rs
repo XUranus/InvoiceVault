@@ -51,7 +51,7 @@ use std::{path::Path, process::Command};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent,
+    AppHandle, DragDropEvent, Emitter, Manager, State, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_dialog::DialogExt;
 use tracing::{error, info, warn};
@@ -60,6 +60,19 @@ use tracing::{error, info, warn};
 struct WindowSizeState {
     width: f64,
     height: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct NativeDragStateEvent {
+    dragging: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ManualImportEvent {
+    watch_dir_id: i64,
+    watch_dir_path: String,
+    imported_count: usize,
+    jobs: Vec<ImportJobSummary>,
 }
 use watcher::{AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus};
 
@@ -77,6 +90,27 @@ const DEFAULT_WINDOW_WIDTH: f64 = 1260.0;
 const DEFAULT_WINDOW_HEIGHT: f64 = 860.0;
 const MIN_WINDOW_WIDTH: f64 = 1060.0;
 const MIN_WINDOW_HEIGHT: f64 = 760.0;
+
+#[cfg(target_os = "windows")]
+fn windows_webview_zoom_for_scale(scale_factor: f64) -> f64 {
+    if !scale_factor.is_finite() || scale_factor <= 1.25 {
+        1.0
+    } else if scale_factor <= 1.5 {
+        0.94
+    } else if scale_factor <= 1.75 {
+        0.9
+    } else {
+        0.86
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn apply_windows_dpi_zoom(window: &WebviewWindow, scale_factor: f64) {
+    let zoom = windows_webview_zoom_for_scale(scale_factor);
+    if let Err(err) = window.set_zoom(zoom) {
+        warn!("Failed to apply Windows WebView zoom for DPI scale {scale_factor}: {err}");
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct ExternalDependencyStatus {
@@ -1549,6 +1583,11 @@ pub fn run() {
                 }
             }
 
+            #[cfg(target_os = "windows")]
+            if let Ok(scale_factor) = window.scale_factor() {
+                apply_windows_dpi_zoom(&window, scale_factor);
+            }
+
             let save_path = state_path.clone();
             let window_app = window.app_handle().clone();
             window.on_window_event(move |event| match event {
@@ -1565,6 +1604,60 @@ pub fn run() {
                     }) {
                         let _ = std::fs::write(&save_path, json);
                     }
+                }
+                WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                    #[cfg(target_os = "windows")]
+                    if let Some(window) = window_app.get_webview_window(MAIN_WINDOW_LABEL) {
+                        apply_windows_dpi_zoom(&window, *scale_factor);
+                    }
+                }
+                WindowEvent::DragDrop(DragDropEvent::Enter { .. })
+                | WindowEvent::DragDrop(DragDropEvent::Over { .. }) => {
+                    let _ = window_app
+                        .emit("native-drag-state", NativeDragStateEvent { dragging: true });
+                }
+                WindowEvent::DragDrop(DragDropEvent::Leave) => {
+                    let _ = window_app.emit(
+                        "native-drag-state",
+                        NativeDragStateEvent { dragging: false },
+                    );
+                }
+                WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
+                    let _ = window_app.emit(
+                        "native-drag-state",
+                        NativeDragStateEvent { dragging: false },
+                    );
+                    if paths.is_empty() {
+                        return;
+                    }
+
+                    let app_handle = window_app.clone();
+                    let paths = paths
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect::<Vec<_>>();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        let state = app_handle.state::<AppState>();
+                        match state.import_files(paths, &app_handle) {
+                            Ok(jobs) => {
+                                let imported_count =
+                                    jobs.iter().filter(|job| job.status == "imported").count();
+                                let _ = app_handle.emit(
+                                    "watcher-import",
+                                    ManualImportEvent {
+                                        watch_dir_id: 0,
+                                        watch_dir_path: "manual-drop".to_owned(),
+                                        imported_count,
+                                        jobs,
+                                    },
+                                );
+                            }
+                            Err(err) => {
+                                error!("Native file drop import failed: {err}");
+                                let _ = app_handle.emit("native-import-error", err.to_string());
+                            }
+                        }
+                    });
                 }
                 _ => {}
             });
