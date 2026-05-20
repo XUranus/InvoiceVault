@@ -81,6 +81,9 @@ export function AiProviderPage() {
   const [isRegeneratingEmb, setIsRegeneratingEmb] = React.useState(false);
   const [embRegenMsg, setEmbRegenMsg] = React.useState<string | null>(null);
 
+  // --- Loading ---
+  const [loading, setLoading] = React.useState(true);
+
   // --- Audit ---
   const auditEnabled = useLlmStore((s) => s.auditEnabled);
   const setAuditEnabled = useLlmStore((s) => s.setAuditEnabled);
@@ -91,12 +94,20 @@ export function AiProviderPage() {
   // Load embedding status on mount
   React.useEffect(() => {
     let cancelled = false;
-    getEmbeddingStatus()
+    const timeout = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error("getEmbeddingStatus timeout")), 5000)
+    );
+    Promise.race([getEmbeddingStatus(), timeout])
       .then((status) => {
         if (cancelled || !status) return;
         setEmbStatus(status);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn("AiProviderPage: getEmbeddingStatus failed or timed out:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -232,6 +243,14 @@ export function AiProviderPage() {
       // ignore
     }
   };
+
+  if (loading) {
+    return (
+      <div className="page">
+        <p className="muted">加载配置中...</p>
+      </div>
+    );
+  }
 
   return (
     <>

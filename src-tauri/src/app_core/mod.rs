@@ -259,11 +259,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn initialize(app: &AppHandle) -> Result<Self, AppError> {
+        info!("[init] AppState::initialize: start");
         let app_data_dir = app
             .path()
             .app_data_dir()
             .map_err(|_| AppError::MissingAppDataDir)?;
         let paths = create_app_paths(&app_data_dir)?;
+        info!("[init] opening database");
         let mut db = Connection::open(&paths.database_path)?;
         run_migrations(&mut db)?;
         let recovered_jobs = recover_interrupted_import_jobs(&db)?;
@@ -271,6 +273,7 @@ impl AppState {
             warn!("Recovered {recovered_jobs} interrupted import jobs");
         }
         let db = Arc::new(Mutex::new(db));
+        info!("[init] database ready");
 
         let chroma_config = ChromaConfig::default();
 
@@ -300,6 +303,7 @@ impl AppState {
         let price_config = Self::load_config_raw::<PriceConfig>(&app_data_dir, "price_config.json")
             .unwrap_or_default();
 
+        info!("[init] creating WatcherManager");
         let watcher_manager = WatcherManager::new(
             Arc::clone(&db),
             paths.raw_dir.clone(),
@@ -308,8 +312,9 @@ impl AppState {
             Arc::clone(&llm_config),
             Arc::clone(&llm_audit_enabled),
             app.clone(),
-        )?;
+        );
 
+        info!("[init] creating EmailManager");
         let email_manager = EmailManager::new(
             Arc::clone(&db),
             paths.raw_dir.clone(),
@@ -317,6 +322,7 @@ impl AppState {
             Arc::clone(&llm_config),
             Arc::clone(&llm_audit_enabled),
         );
+        info!("[init] managers created");
 
         let state = Self {
             app_handle: app.clone(),
@@ -349,9 +355,6 @@ impl AppState {
                 );
             }
         }
-
-        // Regenerate any missing preview thumbnails from normalized images
-        state.regenerate_missing_previews();
 
         info!("AppState initialized");
         Ok(state)
@@ -403,6 +406,10 @@ impl AppState {
             database_path: display_path(&self.paths.database_path),
             migration_version,
         })
+    }
+
+    pub fn resume_watchers(&self) -> Result<(), AppError> {
+        self.watcher_manager.resume_enabled().map_err(AppError::from)
     }
 
     pub fn app_data_dir(&self) -> &Path {
@@ -1281,7 +1288,7 @@ impl AppState {
     }
 
     /// Scan invoices and regenerate any missing preview thumbnails from normalized images.
-    fn regenerate_missing_previews(&self) {
+    pub fn regenerate_missing_previews(&self) {
         let db = match self.db.lock() {
             Ok(db) => db,
             Err(_) => return,
@@ -1331,7 +1338,7 @@ impl AppState {
                 warn!("Invoice {invoice_id}: failed to create preview dir: {e}");
                 continue;
             }
-            let output = Command::new("magick")
+            let mut child = match Command::new("magick")
                 .arg(&normalized_path)
                 .arg("-auto-orient")
                 .arg("-resize")
@@ -1346,8 +1353,40 @@ impl AppState {
                 .arg("-quality")
                 .arg("85")
                 .arg(&preview_path)
-                .output();
-            match output {
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(e) => {
+                    warn!("Invoice {invoice_id}: magick not found or failed to spawn: {e}");
+                    break; // magick not installed, stop trying
+                }
+            };
+
+            let timeout = std::time::Duration::from_secs(30);
+            let start = std::time::Instant::now();
+            let timed_out = loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break false,
+                    Ok(None) => {
+                        if start.elapsed() >= timeout {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break true;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    Err(_) => break true,
+                }
+            };
+
+            if timed_out {
+                warn!("Invoice {invoice_id}: magick timed out (30s)");
+                continue;
+            }
+
+            match child.wait_with_output() {
                 Ok(o) if o.status.success() => {
                     fixed += 1;
                     info!("Regenerated missing preview for invoice {invoice_id}");
@@ -1357,7 +1396,7 @@ impl AppState {
                     warn!("Invoice {invoice_id}: magick failed: {stderr}");
                 }
                 Err(e) => {
-                    warn!("Invoice {invoice_id}: magick not found or failed to run: {e}");
+                    warn!("Invoice {invoice_id}: magick output error: {e}");
                 }
             }
         }

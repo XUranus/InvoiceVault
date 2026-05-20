@@ -47,7 +47,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
-use std::{path::Path, process::Command};
+use std::{path::Path, process::{Command, Stdio}};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
@@ -156,15 +156,66 @@ fn window_close(window: WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn check_external_dependencies() -> Vec<ExternalDependencyStatus> {
-    vec![
-        check_external_dependency("Poppler PDF renderer", "pdftoppm", &["-h"]),
-        check_external_dependency("ImageMagick", "magick", &["-version"]),
-    ]
+async fn check_external_dependencies() -> Vec<ExternalDependencyStatus> {
+    info!("[dep] check_external_dependencies: start");
+    let result = tauri::async_runtime::spawn_blocking(|| {
+        vec![
+            check_external_dependency("Poppler PDF renderer", "pdftoppm", &["-h"]),
+            check_external_dependency("ImageMagick", "magick", &["-version"]),
+        ]
+    })
+    .await
+    .unwrap_or_default();
+    info!("[dep] check_external_dependencies: done");
+    result
 }
 
 fn check_external_dependency(name: &str, command: &str, args: &[&str]) -> ExternalDependencyStatus {
-    match Command::new(command).args(args).output() {
+    let mut child = match Command::new(command).args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return ExternalDependencyStatus {
+                name: name.to_owned(),
+                command: command.to_owned(),
+                available: false,
+                version: None,
+                error: Some(err.to_string()),
+            };
+        }
+    };
+
+    let timeout = Duration::from_secs(10);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => break,
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return ExternalDependencyStatus {
+                        name: name.to_owned(),
+                        command: command.to_owned(),
+                        available: false,
+                        version: None,
+                        error: Some("检测超时（10s）".to_owned()),
+                    };
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(err) => {
+                return ExternalDependencyStatus {
+                    name: name.to_owned(),
+                    command: command.to_owned(),
+                    available: false,
+                    version: None,
+                    error: Some(err.to_string()),
+                };
+            }
+        }
+    }
+
+    match child.wait_with_output() {
         Ok(output) => {
             let combined = format!(
                 "{}\n{}",
@@ -243,19 +294,33 @@ fn configure_bundled_windows_dependencies(resource_dir: &Path) {
 }
 
 #[tauri::command]
-fn app_health(state: State<'_, AppState>) -> Result<AppHealth, String> {
-    state.health().map_err(|err| err.to_string())
+fn frontend_heartbeat(seq: u64) {
+    info!("[hb] frontend heartbeat #{}", seq);
 }
 
 #[tauri::command]
-fn import_files(
+async fn app_health(app: AppHandle) -> Result<AppHealth, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.health().map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn import_files(
     app: AppHandle,
-    state: State<'_, AppState>,
     request: ImportRequest,
 ) -> Result<Vec<ImportJobSummary>, String> {
-    state
-        .import_files(request.paths, &app)
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .import_files(request.paths, &app)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -302,11 +367,16 @@ fn list_invoices(state: State<'_, AppState>) -> Result<Vec<InvoiceSummary>, Stri
 }
 
 #[tauri::command]
-fn search_invoices(
-    state: State<'_, AppState>,
+async fn search_invoices(
+    app: AppHandle,
     params: InvoiceSearchParams,
 ) -> Result<InvoiceSearchResult, String> {
-    state.search_invoices(params).map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.search_invoices(params).map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -327,10 +397,15 @@ fn mark_invoice_viewed(state: State<'_, AppState>, invoice_id: i64) -> Result<bo
 }
 
 #[tauri::command]
-fn count_unviewed_invoices(state: State<'_, AppState>) -> Result<i64, String> {
-    state
-        .count_unviewed_invoices()
-        .map_err(|err| err.to_string())
+async fn count_unviewed_invoices(app: AppHandle) -> Result<i64, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .count_unviewed_invoices()
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -694,14 +769,19 @@ struct RecognitionInput {
 }
 
 #[tauri::command]
-fn get_dashboard_stats(
-    state: State<'_, AppState>,
+async fn get_dashboard_stats(
+    app: AppHandle,
     date_from: Option<String>,
     date_to: Option<String>,
 ) -> Result<DashboardStats, String> {
-    state
-        .get_dashboard_stats(date_from, date_to)
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .get_dashboard_stats(date_from, date_to)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -799,10 +879,18 @@ fn remove_email_source(state: State<'_, AppState>, id: i64) -> Result<(), String
 }
 
 #[tauri::command]
-fn list_email_sources(
-    state: State<'_, AppState>,
+async fn list_email_sources(
+    app: AppHandle,
 ) -> Result<Vec<email_manager::EmailSource>, String> {
-    state.list_email_sources().map_err(|err| err.to_string())
+    info!("[poll] list_email_sources: start");
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.list_email_sources().map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?;
+    info!("[poll] list_email_sources: done");
+    result
 }
 
 #[tauri::command]
@@ -817,7 +905,7 @@ fn toggle_email_source(
 }
 
 #[tauri::command]
-async fn sync_email_source(
+fn sync_email_source(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<email_manager::EmailSyncResult, String> {
@@ -826,11 +914,19 @@ async fn sync_email_source(
 
 #[tauri::command]
 async fn sync_all_email_sources(
-    state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Vec<email_manager::EmailSyncResult>, String> {
-    state
-        .sync_all_email_sources()
-        .map_err(|err| err.to_string())
+    info!("[poll] sync_all_email_sources: start");
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .sync_all_email_sources()
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?;
+    info!("[poll] sync_all_email_sources: done");
+    result
 }
 
 #[tauri::command]
@@ -888,16 +984,25 @@ fn set_embedding_enabled(state: State<'_, AppState>, enabled: bool) -> Result<()
 }
 
 #[tauri::command]
-fn get_embedding_status(state: State<'_, AppState>) -> Result<LocalEmbeddingStatus, String> {
-    let (enabled, model_loaded, model_dir, dimensions) = state.embedding_status();
-    let (model_present, fallback_model_dir) = embedding_model_presence(state.app_data_dir());
-    Ok(LocalEmbeddingStatus {
-        enabled,
-        model_present,
-        model_loaded,
-        model_dir: model_dir.or(fallback_model_dir),
-        dimensions,
+async fn get_embedding_status(app: AppHandle) -> Result<LocalEmbeddingStatus, String> {
+    info!("[emb] get_embedding_status: start");
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let (enabled, model_loaded, model_dir, dimensions) = state.embedding_status();
+        let (model_present, fallback_model_dir) =
+            embedding_model_presence(state.app_data_dir());
+        Ok(LocalEmbeddingStatus {
+            enabled,
+            model_present,
+            model_loaded,
+            model_dir: model_dir.or(fallback_model_dir),
+            dimensions,
+        })
     })
+    .await
+    .map_err(|err| err.to_string())?;
+    info!("[emb] get_embedding_status: done");
+    result
 }
 
 #[tauri::command]
@@ -996,7 +1101,7 @@ fn test_chroma_connection(state: State<'_, AppState>) -> Result<bool, String> {
 #[tauri::command]
 async fn test_embedding_connection(app: AppHandle) -> Result<EmbeddingTestResult, String> {
     tokio::time::timeout(
-        Duration::from_secs(30),
+        Duration::from_secs(120),
         tauri::async_runtime::spawn_blocking(move || {
             let state = app.state::<AppState>();
             state
@@ -1005,7 +1110,7 @@ async fn test_embedding_connection(app: AppHandle) -> Result<EmbeddingTestResult
         }),
     )
     .await
-    .map_err(|_| "Embedding 测试超时。请确认 onnxruntime.dll 可用，并重启应用后重试。".to_owned())?
+    .map_err(|_| "Embedding 测试超时（>120s）。ONNX Runtime 首次加载可能较慢，请重启应用后重试。".to_owned())?
     .map_err(|err| err.to_string())?
 }
 
@@ -1241,26 +1346,36 @@ async fn confirm_agent_action_stream(
 }
 
 #[tauri::command]
-fn list_events(
-    state: State<'_, AppState>,
+async fn list_events(
+    app: AppHandle,
     page: Option<i64>,
     page_size: Option<i64>,
     event_type: Option<String>,
 ) -> Result<EventListResult, String> {
-    state
-        .list_events(
-            page.unwrap_or(1),
-            page_size.unwrap_or(20),
-            event_type.as_deref(),
-        )
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .list_events(
+                page.unwrap_or(1),
+                page_size.unwrap_or(20),
+                event_type.as_deref(),
+            )
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-fn get_unread_event_count(state: State<'_, AppState>) -> Result<i64, String> {
-    state
-        .get_unread_event_count()
-        .map_err(|err| err.to_string())
+async fn get_unread_event_count(app: AppHandle) -> Result<i64, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .get_unread_event_count()
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -1286,8 +1401,13 @@ fn set_llm_config(state: State<'_, AppState>, config: LlmProviderConfig) -> Resu
 }
 
 #[tauri::command]
-fn get_llm_config(state: State<'_, AppState>) -> Result<Option<LlmProviderConfig>, String> {
-    Ok(state.get_llm_config())
+async fn get_llm_config(app: AppHandle) -> Result<Option<LlmProviderConfig>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        Ok(state.get_llm_config())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -1302,22 +1422,30 @@ fn get_llm_audit_enabled(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn get_recognition_queue_status(
-    state: State<'_, AppState>,
+async fn get_recognition_queue_status(
+    app: AppHandle,
 ) -> Result<RecognitionQueueStatus, String> {
-    let db = state.db().lock().expect("db lock");
-    let running: i64 = db
-        .query_row(
-            "SELECT COUNT(*) FROM import_jobs WHERE status = 'recognizing'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-    Ok(RecognitionQueueStatus {
-        pending: 0,
-        running,
-        max_concurrent: 0,
+    info!("[poll] get_recognition_queue_status: start");
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let db = state.db().lock().expect("db lock");
+        let running: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM import_jobs WHERE status = 'recognizing'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        Ok(RecognitionQueueStatus {
+            pending: 0,
+            running,
+            max_concurrent: 0,
+        })
     })
+    .await
+    .map_err(|err| err.to_string())?;
+    info!("[poll] get_recognition_queue_status: done");
+    result
 }
 
 #[tauri::command]
@@ -1448,15 +1576,20 @@ pub fn run() {
         .take()
         .expect("single instance listener");
 
-    // Workaround: WebKitGTK in AppImages has rendering issues on some Linux systems.
-    // The bundled wayland/EGL/GL libraries conflict with host GPU drivers, causing
-    // white screens or EGL_BAD_ALLOC crashes. The build pipeline now strips these
-    // conflicting libs, and these env vars provide an additional safety net.
-    // Only set when running inside an AppImage (APPIMAGE env var set by the runtime).
+    // Workaround: WebKitGTK's compositor thread can deadlock on some Linux systems
+    // (especially aarch64 with Mesa/Rockchip GPU drivers), causing the entire
+    // webview to freeze. Disabling compositing mode forces all rendering onto the
+    // main thread, avoiding the compositor thread bug.
+    // See: https://bugs.webkit.org/show_bug.cgi?id=263930
+    #[cfg(target_os = "linux")]
+    {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
+
+    // Additional AppImage-specific workarounds
     if std::env::var("APPIMAGE").is_ok() {
         std::env::set_var("GDK_BACKEND", "x11");
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
     }
 
     tauri::Builder::default()
@@ -1504,22 +1637,43 @@ pub fn run() {
                 }
             }
 
+            let setup_start = std::time::Instant::now();
+            info!("[setup] AppState::initialize: start");
             let state = AppState::initialize(app.handle())?;
+            info!("[setup] AppState::initialize: done in {}ms", setup_start.elapsed().as_millis());
             app.manage(state);
             setup_tray(app.handle())?;
             setup_single_instance_listener(single_instance_listener, app.handle().clone());
 
-            // Loading ONNX Runtime can take several seconds on Windows. Keep it
-            // off the Tauri setup path so the WebView can become responsive.
+            // NOTE: Embedding engine (ONNX Runtime) loading is intentionally NOT done at startup.
+            // The dlopen + ORT global init can conflict with WebKitGTK on Linux, causing the
+            // webview to freeze. The engine is loaded lazily when the user triggers
+            // test_embedding_connection or regenerate_all_embeddings.
+
+            // Defer watcher directory resumption to a background thread.
+            // resume_enabled queries DB and spawns watcher threads per enabled dir.
             {
                 let app_handle = app.handle().clone();
                 std::thread::spawn(move || {
+                    let resume_start = std::time::Instant::now();
                     let state = app_handle.state::<AppState>();
-                    match state.load_embedding_engine_if_available() {
-                        Ok(true) => info!("Local embedding engine loaded in background"),
-                        Ok(false) => {}
-                        Err(e) => error!("Failed to load local embedding engine: {e}"),
+                    if let Err(e) = state.resume_watchers() {
+                        warn!("[setup] resume_enabled failed: {e}");
                     }
+                    info!("[setup] watcher resume_enabled: done in {}ms", resume_start.elapsed().as_millis());
+                });
+            }
+
+            // Preview thumbnail regeneration can be slow (calls magick for each invoice).
+            // Run it in background so the UI becomes responsive immediately.
+            {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let bg_start = std::time::Instant::now();
+                    info!("[bg] regenerate_missing_previews: start");
+                    let state = app_handle.state::<AppState>();
+                    state.regenerate_missing_previews();
+                    info!("[bg] regenerate_missing_previews: done in {}ms", bg_start.elapsed().as_millis());
                 });
             }
 
@@ -1662,6 +1816,7 @@ pub fn run() {
                 _ => {}
             });
 
+            info!("[setup] Tauri setup complete in {}ms", setup_start.elapsed().as_millis());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1670,6 +1825,7 @@ pub fn run() {
             window_toggle_maximize,
             window_close,
             app_health,
+            frontend_heartbeat,
             import_files,
             pick_invoice_files,
             list_import_jobs,

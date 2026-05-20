@@ -575,7 +575,29 @@ export function AdvancedPage() {
 }
 
 function ExternalDependencyHelp({ command }: { command: string }) {
+  const isWindows = navigator.platform.startsWith("Win");
+  const isMac = navigator.platform.startsWith("Mac");
+  const isLinux = !isWindows && !isMac;
+
   if (command === "pdftoppm") {
+    if (isLinux) {
+      return (
+        <div className="dependency-help">
+          <strong>Linux 安装 Poppler</strong>
+          <span>Poppler 包含 pdftoppm 工具，用于 PDF 渲染。</span>
+          <code>sudo apt install poppler-utils</code>
+        </div>
+      );
+    }
+    if (isMac) {
+      return (
+        <div className="dependency-help">
+          <strong>macOS 安装 Poppler</strong>
+          <span>使用 Homebrew 安装 Poppler。</span>
+          <code>brew install poppler</code>
+        </div>
+      );
+    }
     return (
       <div className="dependency-help">
         <strong>Windows 安装 Poppler</strong>
@@ -586,6 +608,24 @@ function ExternalDependencyHelp({ command }: { command: string }) {
   }
 
   if (command === "magick") {
+    if (isLinux) {
+      return (
+        <div className="dependency-help">
+          <strong>Linux 安装 ImageMagick</strong>
+          <span>ImageMagick 用于图片处理和格式转换。</span>
+          <code>sudo apt install imagemagick</code>
+        </div>
+      );
+    }
+    if (isMac) {
+      return (
+        <div className="dependency-help">
+          <strong>macOS 安装 ImageMagick</strong>
+          <span>使用 Homebrew 安装 ImageMagick。</span>
+          <code>brew install imagemagick</code>
+        </div>
+      );
+    }
     return (
       <div className="dependency-help">
         <strong>Windows 安装 ImageMagick</strong>

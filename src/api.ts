@@ -599,3 +599,7 @@ export async function setDiagnosticConfig(
 export async function runLlmDiagnostic(): Promise<DiagnosticResult> {
   return invoke<DiagnosticResult>("run_llm_diagnostic");
 }
+
+export async function frontendHeartbeat(seq: number): Promise<void> {
+  return invoke<void>("frontend_heartbeat", { seq });
+}

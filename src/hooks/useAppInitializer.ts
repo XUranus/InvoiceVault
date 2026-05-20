@@ -8,6 +8,7 @@ import {
   getRecognitionQueueStatus,
   syncAllEmailSources,
   listEmailSources,
+  frontendHeartbeat,
 } from "../api";
 import { useAppStore } from "../stores/appStore";
 import { useLlmStore } from "../stores/llmStore";
@@ -54,13 +55,9 @@ export function useAppInitializer() {
         setTheme(t);
       }
     })
-      .then((fn) => {
-        cleanup = fn;
-      })
+      .then((fn) => { cleanup = fn; })
       .catch(() => {});
-    return () => {
-      cleanup?.();
-    };
+    return () => { cleanup?.(); };
   }, [setTheme]);
 
   // Initialize data on mount
@@ -76,112 +73,60 @@ export function useAppInitializer() {
   }, [initialize, loadConfigFromBackend]);
 
   // Global drag-drop handler
-  // Uses module-level guard to survive React StrictMode double-mount
   useEffect(() => {
     if (dragDropRegistered) return;
     dragDropRegistered = true;
-
     getCurrentWebview()
       .onDragDropEvent((event) => {
         const evtType = (event.payload as { type: string }).type;
-
         if (evtType === "enter" || evtType === "over") {
-          setIsDraggingFiles(true);
-          return;
+          setIsDraggingFiles(true); return;
         }
-
         if (evtType === "leave") {
-          setIsDraggingFiles(false);
-          return;
+          setIsDraggingFiles(false); return;
         }
-
         setIsDraggingFiles(false);
         const paths: string[] = (event.payload as { paths: string[] }).paths ?? [];
         if (paths.length === 0) return;
-
-        // Guard against duplicate drop events from Tauri on Linux/GTK
         if (dropImportInProgress) return;
         dropImportInProgress = true;
-
         importFiles(paths)
-          .then(() => {
-            triggerImportRefresh();
-            navigate("/import");
-          })
+          .then(() => { triggerImportRefresh(); navigate("/import"); })
           .catch((err) => setError(String(err)))
           .finally(() => { dropImportInProgress = false; });
       })
       .catch(() => {});
-  }, [
-    setIsDraggingFiles,
-    setError,
-    triggerImportRefresh,
-    navigate,
-  ]);
+  }, [setIsDraggingFiles, setError, triggerImportRefresh, navigate]);
 
-  // Native window drag-drop fallback. On Windows, WebView-level file-drop
-  // events can be swallowed before the frontend handler sees them.
+  // Native window drag-drop fallback
   useEffect(() => {
-    let cleanupDragState: (() => void) | null = null;
-    let cleanupImportError: (() => void) | null = null;
-
+    let c1: (() => void) | null = null;
+    let c2: (() => void) | null = null;
     listen<{ dragging: boolean }>("native-drag-state", (event) => {
       setIsDraggingFiles(event.payload.dragging);
-    })
-      .then((fn) => {
-        cleanupDragState = fn;
-      })
-      .catch(() => {});
-
+    }).then((fn) => { c1 = fn; }).catch(() => {});
     listen<string>("native-import-error", (event) => {
       setError(event.payload);
-    })
-      .then((fn) => {
-        cleanupImportError = fn;
-      })
-      .catch(() => {});
-
-    return () => {
-      cleanupDragState?.();
-      cleanupImportError?.();
-    };
+    }).then((fn) => { c2 = fn; }).catch(() => {});
+    return () => { c1?.(); c2?.(); };
   }, [setIsDraggingFiles, setError]);
 
   // Watcher auto-import listener
   useEffect(() => {
     let cleanup: (() => void) | null = null;
-    listen<WatcherImportEvent>(
-      "watcher-import",
-      (_event) => {
-        triggerImportRefresh();
-        refreshInvoices();
-        triggerDashboardRefresh();
-      },
-    )
-      .then((fn) => {
-        cleanup = fn;
-      })
-      .catch(() => {});
-    return () => {
-      cleanup?.();
-    };
+    listen<WatcherImportEvent>("watcher-import", () => {
+      triggerImportRefresh(); refreshInvoices(); triggerDashboardRefresh();
+    }).then((fn) => { cleanup = fn; }).catch(() => {});
+    return () => { cleanup?.(); };
   }, [triggerImportRefresh, refreshInvoices, triggerDashboardRefresh]);
 
   // Background recognition completion listener
   useEffect(() => {
     let cleanup: (() => void) | null = null;
     listen("recognition-complete", () => {
-      refreshInvoices();
-      triggerImportRefresh();
-      triggerDashboardRefresh();
-    })
-      .then((fn) => {
-        cleanup = fn;
-      })
-      .catch(() => {});
-    return () => {
-      cleanup?.();
-    };
+      refreshInvoices(); triggerImportRefresh(); triggerDashboardRefresh();
+    }).then((fn) => { cleanup = fn; }).catch(() => {});
+    return () => { cleanup?.(); };
   }, [refreshInvoices, triggerImportRefresh, triggerDashboardRefresh]);
 
   // Recognition queue polling
@@ -199,49 +144,41 @@ export function useAppInitializer() {
     return () => clearInterval(interval);
   }, [setImportBadgeCount]);
 
-  // Email sync polling (per-source configurable interval)
+  // Email sync polling
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
-
     const tick = async () => {
       if (stopped) return;
       try {
-        // Determine the minimum poll interval from enabled sources
         const sources = await listEmailSources();
-        const enabledSources = sources.filter((s) => s.enabled);
-        if (enabledSources.length > 0) {
-          const results = await syncAllEmailSources();
-          const totalImported = results.reduce(
-            (sum, r) => sum + r.imported_count,
-            0,
-          );
-          if (totalImported > 0) {
-            triggerImportRefresh();
-            refreshInvoices();
-            triggerDashboardRefresh();
-          }
-        }
-        // Use the minimum interval among enabled sources, default 60s
-        const minInterval = enabledSources.length > 0
-          ? Math.min(...enabledSources.map((s) => s.poll_interval_seconds || 60))
-          : 60;
-        if (!stopped) {
-          timer = setTimeout(tick, Math.max(minInterval, 10) * 1000);
-        }
+        const hasAutoSync = sources.some(
+          (s) => s.enabled && s.auto_sync,
+        );
+        if (!hasAutoSync) return;
+        await syncAllEmailSources();
+        triggerImportRefresh();
+        refreshInvoices();
+        triggerDashboardRefresh();
       } catch {
+        // ignore sync errors
+      } finally {
         if (!stopped) {
-          timer = setTimeout(tick, 60000);
+          timer = setTimeout(tick, 60_000);
         }
       }
     };
-
-    // Start after a short delay to let the app initialize
     timer = setTimeout(tick, 5000);
-
-    return () => {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    };
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
   }, [triggerImportRefresh, refreshInvoices, triggerDashboardRefresh]);
+
+  // Frontend heartbeat
+  useEffect(() => {
+    let seq = 0;
+    const interval = setInterval(() => {
+      seq++;
+      frontendHeartbeat(seq).catch(() => {});
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 }

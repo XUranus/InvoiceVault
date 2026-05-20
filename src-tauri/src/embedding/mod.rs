@@ -121,8 +121,37 @@ fn ensure_onnx_runtime_loaded() -> Result<(), String> {
                     .commit();
             }
 
-            #[cfg(not(target_os = "windows"))]
-            ort::init().commit();
+            #[cfg(target_os = "linux")]
+            {
+                let so_path = find_onnxruntime_so().ok_or_else(|| {
+                    "ONNX Runtime .so not found. Put libonnxruntime.so in src-tauri/resources for dev/build, or set ORT_DYLIB_PATH to the full .so path.".to_owned()
+                })?;
+                info!("Using ONNX Runtime .so at {}", so_path.display());
+                ort::init_from(&so_path)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to load ONNX Runtime from {}: {e}",
+                            so_path.display()
+                        )
+                    })?
+                    .commit();
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                let dylib_path = find_onnxruntime_dylib().ok_or_else(|| {
+                    "ONNX Runtime .dylib not found. Put libonnxruntime.dylib in src-tauri/resources for dev/build, or set ORT_DYLIB_PATH to the full .dylib path.".to_owned()
+                })?;
+                info!("Using ONNX Runtime .dylib at {}", dylib_path.display());
+                ort::init_from(&dylib_path)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to load ONNX Runtime from {}: {e}",
+                            dylib_path.display()
+                        )
+                    })?
+                    .commit();
+            }
 
             Ok(())
         })
@@ -182,6 +211,46 @@ fn find_onnxruntime_dll() -> Option<PathBuf> {
                     .join("win-x86_64")
                     .join(ONNX_RUNTIME_DLL),
             );
+        }
+    }
+
+    candidates.into_iter().find(|path| path.exists())
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const ONNX_RUNTIME_LINUX_SO: &str = "libonnxruntime.so";
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const ONNX_RUNTIME_MACOS_DYLIB: &str = "libonnxruntime.dylib";
+
+#[cfg(target_os = "linux")]
+fn find_onnxruntime_so() -> Option<PathBuf> {
+    find_onnxruntime_lib(ONNX_RUNTIME_LINUX_SO)
+}
+
+#[cfg(target_os = "macos")]
+fn find_onnxruntime_dylib() -> Option<PathBuf> {
+    find_onnxruntime_lib(ONNX_RUNTIME_MACOS_DYLIB)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_onnxruntime_lib(lib_name: &str) -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("ORT_DYLIB_PATH").map(PathBuf::from) {
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut candidates = vec![
+        manifest_dir.join("resources").join(lib_name),
+        manifest_dir.join("target").join("debug").join(lib_name),
+        manifest_dir.join("target").join("release").join(lib_name),
+    ];
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(lib_name));
+            candidates.push(dir.join("resources").join(lib_name));
         }
     }
 

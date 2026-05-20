@@ -116,8 +116,8 @@ impl WatcherManager {
         llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
         llm_audit_enabled: Arc<Mutex<bool>>,
         app_handle: AppHandle,
-    ) -> Result<Self, WatcherError> {
-        let manager = Self {
+    ) -> Self {
+        Self {
             db,
             raw_dir,
             thumbnails_dir,
@@ -126,12 +126,10 @@ impl WatcherManager {
             llm_audit_enabled,
             handles: Mutex::new(HashMap::new()),
             app_handle,
-        };
-        manager.resume_enabled()?;
-        Ok(manager)
+        }
     }
 
-    fn resume_enabled(&self) -> Result<(), WatcherError> {
+    pub fn resume_enabled(&self) -> Result<(), WatcherError> {
         let db = self.db.lock().expect("db lock");
         let mut stmt = db.prepare(
             "SELECT id, path, extensions, recursive, stable_wait_ms FROM watch_dirs WHERE enabled = 1",
