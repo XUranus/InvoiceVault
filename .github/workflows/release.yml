@@ -198,7 +198,7 @@ jobs:
         id: build
         with:
           arch: aarch64
-          distro: ubuntu24.04
+          distro: ubuntu22.04
           githubToken: ${{ github.token }}
           dockerRunArgs: |
             --volume "${{ github.workspace }}:/workspace"
