@@ -115,7 +115,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    name: Linux AppImage
+    name: Linux x86_64 AppImage
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -182,7 +182,81 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Linux-AppImage
+          name: Linux-AppImage-x86_64
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  build-linux-aarch64:
+    name: Linux aarch64 AppImage
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build in aarch64 container
+        uses: uraimo/run-on-arch-action@v2
+        id: build
+        with:
+          arch: aarch64
+          distro: ubuntu24.04
+          githubToken: ${{ github.token }}
+          dockerRunArgs: |
+            --volume "${{ github.workspace }}:/workspace"
+          install: |
+            apt-get update
+            apt-get install -y \
+              build-essential \
+              curl \
+              wget \
+              file \
+              patchelf \
+              libssl-dev \
+              libgtk-3-dev \
+              libayatana-appindicator3-dev \
+              librsvg2-dev \
+              libwebkit2gtk-4.1-dev \
+              libxdo-dev \
+              pkg-config \
+              npm
+          run: |
+            cd /workspace
+
+            # Install Node.js 22 via NodeSource (container npm is usually outdated)
+            curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+            apt-get install -y nodejs
+
+            # Install Rust
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            . "$HOME/.cargo/env"
+
+            # Install frontend deps
+            npm ci
+
+            # Build AppImage
+            npm run tauri -- build --bundles appimage
+
+      - name: Strip incompatible libraries from AppImage
+        run: |
+          APPIMAGE=$(ls src-tauri/target/release/bundle/appimage/*.AppImage)
+          chmod +x "$APPIMAGE"
+
+          "$APPIMAGE" --appimage-extract
+          rm "$APPIMAGE"
+
+          find squashfs-root -name "libwayland-*.so*" -delete
+          find squashfs-root -name "libEGL.so*" -delete
+          find squashfs-root -name "libGL.so*" -delete
+
+          curl -fsSL -o /tmp/appimagetool \
+            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage"
+          chmod +x /tmp/appimagetool
+          ARCH=aarch64 /tmp/appimagetool --appimage-extract-and-run squashfs-root "$APPIMAGE"
+          rm -rf squashfs-root
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Linux-AppImage-aarch64
           path: src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
@@ -191,7 +265,7 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Publish Release
-    needs: [build-windows, build-macos, build-linux]
+    needs: [build-windows, build-macos, build-linux, build-linux-aarch64]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
