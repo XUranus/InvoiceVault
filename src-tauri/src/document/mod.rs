@@ -1,10 +1,10 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::process_utils::command_no_window;
 use tracing::error;
 
 #[derive(Debug, Clone)]
@@ -48,7 +48,7 @@ pub fn render_pdf_pages(
     fs::create_dir_all(&render_dir)?;
 
     let output_prefix = render_dir.join("page");
-    let output = Command::new("pdftoppm")
+    let output = command_no_window("pdftoppm")
         .arg("-jpeg")
         .arg("-r")
         .arg("180")
@@ -148,7 +148,7 @@ fn run_magick_resize(
     max_dimension: u16,
     quality: u8,
 ) -> Result<(), DocumentError> {
-    let output = Command::new("magick")
+    let output = command_no_window("magick")
         .arg(input_path)
         .arg("-auto-orient")
         .arg("-resize")

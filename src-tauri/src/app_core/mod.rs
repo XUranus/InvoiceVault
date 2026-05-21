@@ -3,7 +3,6 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    process::Command,
     sync::{Arc, Mutex},
 };
 
@@ -58,6 +57,7 @@ use crate::{
         ImportJobListResult, ImportJobSummary,
     },
     llm::{LlmAuditConfig, LlmProviderConfig},
+    process_utils::command_no_window,
     storage::{run_migrations, StorageError},
     watcher::{
         AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus, WatcherError, WatcherManager,
@@ -409,7 +409,9 @@ impl AppState {
     }
 
     pub fn resume_watchers(&self) -> Result<(), AppError> {
-        self.watcher_manager.resume_enabled().map_err(AppError::from)
+        self.watcher_manager
+            .resume_enabled()
+            .map_err(AppError::from)
     }
 
     pub fn app_data_dir(&self) -> &Path {
@@ -1338,7 +1340,7 @@ impl AppState {
                 warn!("Invoice {invoice_id}: failed to create preview dir: {e}");
                 continue;
             }
-            let mut child = match Command::new("magick")
+            let mut child = match command_no_window("magick")
                 .arg(&normalized_path)
                 .arg("-auto-orient")
                 .arg("-resize")
@@ -3697,21 +3699,21 @@ fn display_path(path: &Path) -> String {
 fn open_path_with_system(path: &Path) -> Result<(), AppError> {
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut command = Command::new("explorer");
+        let mut command = command_no_window("explorer");
         command.arg(path);
         command
     };
 
     #[cfg(target_os = "macos")]
     let mut command = {
-        let mut command = Command::new("open");
+        let mut command = command_no_window("open");
         command.arg(path);
         command
     };
 
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut command = {
-        let mut command = Command::new("xdg-open");
+        let mut command = command_no_window("xdg-open");
         command.arg(path);
         command
     };

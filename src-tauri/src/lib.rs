@@ -12,6 +12,7 @@ pub mod extractor;
 mod importer;
 mod llm;
 pub mod mcp;
+mod process_utils;
 mod raw_store;
 pub mod scnet_ocr;
 pub mod storage;
@@ -45,9 +46,10 @@ use llm::{
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::Path;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{path::Path, process::{Command, Stdio}};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
@@ -55,6 +57,8 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 use tracing::{error, info, warn};
+
+use crate::process_utils::command_no_window;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WindowSizeState {
@@ -171,7 +175,12 @@ async fn check_external_dependencies() -> Vec<ExternalDependencyStatus> {
 }
 
 fn check_external_dependency(name: &str, command: &str, args: &[&str]) -> ExternalDependencyStatus {
-    let mut child = match Command::new(command).args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+    let mut child = match command_no_window(command)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
         Ok(child) => child,
         Err(err) => {
             return ExternalDependencyStatus {
@@ -428,21 +437,21 @@ fn open_file_url_with_system_handler(path: &Path) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut command = Command::new("rundll32");
+        let mut command = command_no_window("rundll32");
         command.arg("url.dll,FileProtocolHandler").arg(&url);
         command
     };
 
     #[cfg(target_os = "macos")]
     let mut command = {
-        let mut command = Command::new("open");
+        let mut command = command_no_window("open");
         command.arg(&url);
         command
     };
 
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut command = {
-        let mut command = Command::new("xdg-open");
+        let mut command = command_no_window("xdg-open");
         command.arg(&url);
         command
     };
@@ -879,9 +888,7 @@ fn remove_email_source(state: State<'_, AppState>, id: i64) -> Result<(), String
 }
 
 #[tauri::command]
-async fn list_email_sources(
-    app: AppHandle,
-) -> Result<Vec<email_manager::EmailSource>, String> {
+async fn list_email_sources(app: AppHandle) -> Result<Vec<email_manager::EmailSource>, String> {
     info!("[poll] list_email_sources: start");
     let result = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
@@ -989,8 +996,7 @@ async fn get_embedding_status(app: AppHandle) -> Result<LocalEmbeddingStatus, St
     let result = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let (enabled, model_loaded, model_dir, dimensions) = state.embedding_status();
-        let (model_present, fallback_model_dir) =
-            embedding_model_presence(state.app_data_dir());
+        let (model_present, fallback_model_dir) = embedding_model_presence(state.app_data_dir());
         Ok(LocalEmbeddingStatus {
             enabled,
             model_present,
@@ -1110,7 +1116,9 @@ async fn test_embedding_connection(app: AppHandle) -> Result<EmbeddingTestResult
         }),
     )
     .await
-    .map_err(|_| "Embedding 测试超时（>120s）。ONNX Runtime 首次加载可能较慢，请重启应用后重试。".to_owned())?
+    .map_err(|_| {
+        "Embedding 测试超时（>120s）。ONNX Runtime 首次加载可能较慢，请重启应用后重试。".to_owned()
+    })?
     .map_err(|err| err.to_string())?
 }
 
@@ -1422,9 +1430,7 @@ fn get_llm_audit_enabled(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn get_recognition_queue_status(
-    app: AppHandle,
-) -> Result<RecognitionQueueStatus, String> {
+async fn get_recognition_queue_status(app: AppHandle) -> Result<RecognitionQueueStatus, String> {
     info!("[poll] get_recognition_queue_status: start");
     let result = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
@@ -1640,7 +1646,10 @@ pub fn run() {
             let setup_start = std::time::Instant::now();
             info!("[setup] AppState::initialize: start");
             let state = AppState::initialize(app.handle())?;
-            info!("[setup] AppState::initialize: done in {}ms", setup_start.elapsed().as_millis());
+            info!(
+                "[setup] AppState::initialize: done in {}ms",
+                setup_start.elapsed().as_millis()
+            );
             app.manage(state);
             setup_tray(app.handle())?;
             setup_single_instance_listener(single_instance_listener, app.handle().clone());
@@ -1660,7 +1669,10 @@ pub fn run() {
                     if let Err(e) = state.resume_watchers() {
                         warn!("[setup] resume_enabled failed: {e}");
                     }
-                    info!("[setup] watcher resume_enabled: done in {}ms", resume_start.elapsed().as_millis());
+                    info!(
+                        "[setup] watcher resume_enabled: done in {}ms",
+                        resume_start.elapsed().as_millis()
+                    );
                 });
             }
 
@@ -1673,7 +1685,10 @@ pub fn run() {
                     info!("[bg] regenerate_missing_previews: start");
                     let state = app_handle.state::<AppState>();
                     state.regenerate_missing_previews();
-                    info!("[bg] regenerate_missing_previews: done in {}ms", bg_start.elapsed().as_millis());
+                    info!(
+                        "[bg] regenerate_missing_previews: done in {}ms",
+                        bg_start.elapsed().as_millis()
+                    );
                 });
             }
 
@@ -1816,7 +1831,10 @@ pub fn run() {
                 _ => {}
             });
 
-            info!("[setup] Tauri setup complete in {}ms", setup_start.elapsed().as_millis());
+            info!(
+                "[setup] Tauri setup complete in {}ms",
+                setup_start.elapsed().as_millis()
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
