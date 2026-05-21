@@ -1883,7 +1883,16 @@ impl AppState {
             .compression_method(zip::CompressionMethod::Deflated);
 
         let base = &self.paths.app_data_dir;
-        add_dir_to_zip(&mut zip_writer, base, base, options)?;
+        // Skip large/regenerable directories to keep backup small
+        let skip_dirs = [
+            "storage",       // raw file archives (large binary files)
+            "WebKitCache",   // webview cache (regenerable)
+            "models",        // ONNX embedding models (downloadable)
+            "localStorage",  // webview local storage
+            "CacheStorage",  // webview cache storage
+            "sample",        // sample/test files
+        ];
+        add_dir_to_zip_with_skip(&mut zip_writer, base, base, options, &skip_dirs)?;
 
         let finished = zip_writer
             .finish()
@@ -3748,6 +3757,26 @@ pub fn add_dir_to_zip(
     dir: &Path,
     options: zip::write::SimpleFileOptions,
 ) -> Result<(), AppError> {
+    add_dir_to_zip_inner(zip_writer, base, dir, options, &[])
+}
+
+pub fn add_dir_to_zip_with_skip(
+    zip_writer: &mut zip::ZipWriter<std::fs::File>,
+    base: &Path,
+    dir: &Path,
+    options: zip::write::SimpleFileOptions,
+    skip_dirs: &[&str],
+) -> Result<(), AppError> {
+    add_dir_to_zip_inner(zip_writer, base, dir, options, skip_dirs)
+}
+
+fn add_dir_to_zip_inner(
+    zip_writer: &mut zip::ZipWriter<std::fs::File>,
+    base: &Path,
+    dir: &Path,
+    options: zip::write::SimpleFileOptions,
+    skip_dirs: &[&str],
+) -> Result<(), AppError> {
     if !dir.exists() {
         return Ok(());
     }
@@ -3759,7 +3788,11 @@ pub fn add_dir_to_zip(
             let name = relative.to_string_lossy().replace('\\', "/");
             stream_file_to_zip(zip_writer, &name, &path, options)?;
         } else if path.is_dir() {
-            add_dir_to_zip(zip_writer, base, &path, options)?;
+            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if skip_dirs.contains(&dir_name) {
+                continue;
+            }
+            add_dir_to_zip_inner(zip_writer, base, &path, options, skip_dirs)?;
         }
     }
     Ok(())
