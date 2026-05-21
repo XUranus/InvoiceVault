@@ -8,6 +8,7 @@ type AppStore = {
   theme: "light" | "dark";
   invoices: Invoice[];
   isDraggingFiles: boolean;
+  dragImportPaths: string[];
   unreadEventCount: number;
   importBadgeCount: number;
   invoiceBadgeCount: number;
@@ -21,6 +22,8 @@ type AppStore = {
   setTheme: (theme: "light" | "dark") => void;
   setInvoices: (list: Invoice[]) => void;
   setIsDraggingFiles: (v: boolean) => void;
+  setDragImportPaths: (paths: string[]) => void;
+  clearDragImportPaths: () => void;
   setUnreadEventCount: (n: number) => void;
   setImportBadgeCount: (n: number) => void;
   setInvoiceBadgeCount: (n: number) => void;
@@ -38,6 +41,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     (localStorage.getItem("theme") as "light" | "dark" | null) ?? "light",
   invoices: [],
   isDraggingFiles: false,
+  dragImportPaths: [],
   unreadEventCount: 0,
   importBadgeCount: 0,
   invoiceBadgeCount: 0,
@@ -60,6 +64,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   setInvoices: (invoices) => set({ invoices }),
   setIsDraggingFiles: (isDraggingFiles) => set({ isDraggingFiles }),
+  setDragImportPaths: (dragImportPaths) => set({ dragImportPaths }),
+  clearDragImportPaths: () => set({ dragImportPaths: [] }),
   setUnreadEventCount: (unreadEventCount) =>
     set({ unreadEventCount }),
   setImportBadgeCount: (importBadgeCount) => set({ importBadgeCount }),

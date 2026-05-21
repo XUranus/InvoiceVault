@@ -72,11 +72,8 @@ struct NativeDragStateEvent {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct ManualImportEvent {
-    watch_dir_id: i64,
-    watch_dir_path: String,
-    imported_count: usize,
-    jobs: Vec<ImportJobSummary>,
+struct NativeFileDropEvent {
+    paths: Vec<String>,
 }
 use watcher::{AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus};
 
@@ -1800,33 +1797,11 @@ pub fn run() {
                         return;
                     }
 
-                    let app_handle = window_app.clone();
                     let paths = paths
                         .iter()
                         .map(|path| path.to_string_lossy().into_owned())
                         .collect::<Vec<_>>();
-                    tauri::async_runtime::spawn_blocking(move || {
-                        let state = app_handle.state::<AppState>();
-                        match state.import_files(paths, &app_handle) {
-                            Ok(jobs) => {
-                                let imported_count =
-                                    jobs.iter().filter(|job| job.status == "imported").count();
-                                let _ = app_handle.emit(
-                                    "watcher-import",
-                                    ManualImportEvent {
-                                        watch_dir_id: 0,
-                                        watch_dir_path: "manual-drop".to_owned(),
-                                        imported_count,
-                                        jobs,
-                                    },
-                                );
-                            }
-                            Err(err) => {
-                                error!("Native file drop import failed: {err}");
-                                let _ = app_handle.emit("native-import-error", err.to_string());
-                            }
-                        }
-                    });
+                    let _ = window_app.emit("native-file-drop", NativeFileDropEvent { paths });
                 }
                 _ => {}
             });

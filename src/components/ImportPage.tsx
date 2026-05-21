@@ -18,6 +18,7 @@ import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 
 export function ImportPage() {
   const isDraggingFiles = useAppStore((s) => s.isDraggingFiles);
+  const dragImportPaths = useAppStore((s) => s.dragImportPaths);
   const llm = useLlmStore((s) => s.llm);
   const auditEnabled = useLlmStore((s) => s.auditEnabled);
   const refreshKey = useRefreshStore((s) => s.importKey);
@@ -183,10 +184,14 @@ export function ImportPage() {
   };
 
   const allJobs = result?.jobs ?? [];
-  const visibleJobs = [...optimisticJobs, ...allJobs];
+  const dragOptimisticJobs = React.useMemo(
+    () => dragImportPaths.map(createOptimisticJob),
+    [dragImportPaths],
+  );
+  const pendingOptimisticJobs = [...dragOptimisticJobs, ...optimisticJobs];
   const activeJobs = allJobs.filter(isActiveImportJob);
   const visibleActiveJobs = [
-    ...optimisticJobs,
+    ...pendingOptimisticJobs,
     ...activeJobs,
   ];
   const completedJobs = allJobs.filter((j) => !isActiveImportJob(j));

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
@@ -31,6 +31,8 @@ export function useAppInitializer() {
   const initialize = useAppStore((s) => s.initialize);
   const loadConfigFromBackend = useLlmStore((s) => s.loadConfigFromBackend);
   const setIsDraggingFiles = useAppStore((s) => s.setIsDraggingFiles);
+  const setDragImportPaths = useAppStore((s) => s.setDragImportPaths);
+  const clearDragImportPaths = useAppStore((s) => s.clearDragImportPaths);
   const setError = useAppStore((s) => s.setError);
   const setImportBadgeCount = useAppStore((s) => s.setImportBadgeCount);
   const refreshInvoices = useAppStore((s) => s.refreshInvoices);
@@ -72,6 +74,34 @@ export function useAppInitializer() {
     }).catch(() => {});
   }, [initialize, loadConfigFromBackend]);
 
+  const handleDroppedFiles = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      if (dropImportInProgress) return;
+      dropImportInProgress = true;
+      setIsDraggingFiles(false);
+      setDragImportPaths(paths);
+      navigate("/import");
+      importFiles(paths)
+        .then(() => {
+          triggerImportRefresh();
+        })
+        .catch((err) => setError(String(err)))
+        .finally(() => {
+          clearDragImportPaths();
+          dropImportInProgress = false;
+        });
+    },
+    [
+      clearDragImportPaths,
+      navigate,
+      setDragImportPaths,
+      setError,
+      setIsDraggingFiles,
+      triggerImportRefresh,
+    ],
+  );
+
   // Global drag-drop handler
   useEffect(() => {
     if (dragDropRegistered) return;
@@ -87,29 +117,31 @@ export function useAppInitializer() {
         }
         setIsDraggingFiles(false);
         const paths: string[] = (event.payload as { paths: string[] }).paths ?? [];
-        if (paths.length === 0) return;
-        if (dropImportInProgress) return;
-        dropImportInProgress = true;
-        importFiles(paths)
-          .then(() => { triggerImportRefresh(); navigate("/import"); })
-          .catch((err) => setError(String(err)))
-          .finally(() => { dropImportInProgress = false; });
+        handleDroppedFiles(paths);
       })
       .catch(() => {});
-  }, [setIsDraggingFiles, setError, triggerImportRefresh, navigate]);
+  }, [setIsDraggingFiles, handleDroppedFiles]);
 
   // Native window drag-drop fallback
   useEffect(() => {
-    let c1: (() => void) | null = null;
-    let c2: (() => void) | null = null;
+    let cleanupDragState: (() => void) | null = null;
+    let cleanupDrop: (() => void) | null = null;
+    let cleanupImportError: (() => void) | null = null;
     listen<{ dragging: boolean }>("native-drag-state", (event) => {
       setIsDraggingFiles(event.payload.dragging);
-    }).then((fn) => { c1 = fn; }).catch(() => {});
+    }).then((fn) => { cleanupDragState = fn; }).catch(() => {});
+    listen<{ paths: string[] }>("native-file-drop", (event) => {
+      handleDroppedFiles(event.payload.paths);
+    }).then((fn) => { cleanupDrop = fn; }).catch(() => {});
     listen<string>("native-import-error", (event) => {
       setError(event.payload);
-    }).then((fn) => { c2 = fn; }).catch(() => {});
-    return () => { c1?.(); c2?.(); };
-  }, [setIsDraggingFiles, setError]);
+    }).then((fn) => { cleanupImportError = fn; }).catch(() => {});
+    return () => {
+      cleanupDragState?.();
+      cleanupDrop?.();
+      cleanupImportError?.();
+    };
+  }, [setIsDraggingFiles, setError, handleDroppedFiles]);
 
   // Watcher auto-import listener
   useEffect(() => {
