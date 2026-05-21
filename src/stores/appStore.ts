@@ -32,6 +32,7 @@ type AppStore = {
   dismissOnboarding: () => void;
   initialize: () => Promise<void>;
   refreshInvoices: () => Promise<void>;
+  refreshUnviewedCount: () => Promise<void>;
 };
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -126,6 +127,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ invoices: result.invoices, invoiceBadgeCount });
     } catch (err) {
       set({ error: String(err) });
+    }
+  },
+
+  refreshUnviewedCount: async () => {
+    try {
+      const invoiceBadgeCount = await countUnviewedInvoices();
+      set({ invoiceBadgeCount });
+    } catch {
+      // ignore
     }
   },
 }));

@@ -34,7 +34,7 @@ use exporter::{ExportInvoicesRequest, ExportResult, PdfReportRequest, PdfReportR
 use extractor::{
     BadgeConfig, DashboardStats, InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow,
     InvoiceSearchParams, InvoiceSearchResult, InvoiceSummary, MergeInvoicesResult,
-    SaveInvoiceExtractionRequest, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
+    SaveInvoiceExtractionRequest, TagOption, UpdateInvoiceItemsRequest, UpdateInvoiceRequest,
     UpdateInvoiceResult,
 };
 use importer::{ImportJobListResult, ImportJobSummary, ImportRequest};
@@ -56,7 +56,7 @@ use tauri::{
     AppHandle, DragDropEvent, Emitter, Manager, State, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_dialog::DialogExt;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::process_utils::command_no_window;
 
@@ -162,7 +162,6 @@ async fn check_external_dependencies() -> Vec<ExternalDependencyStatus> {
     let result = tauri::async_runtime::spawn_blocking(|| {
         vec![
             check_external_dependency("Poppler PDF renderer", "pdftoppm", &["-h"]),
-            check_external_dependency("ImageMagick", "magick", &["-version"]),
         ]
     })
     .await
@@ -273,7 +272,6 @@ fn configure_bundled_windows_dependencies(resource_dir: &Path) {
     let path_separator = ";";
     let mut path_entries = vec![
         deps_dir.clone(),
-        deps_dir.join("ImageMagick"),
         deps_dir.join("poppler").join("bin"),
         deps_dir.join("poppler").join("Library").join("bin"),
         deps_dir.join("poppler"),
@@ -301,7 +299,7 @@ fn configure_bundled_windows_dependencies(resource_dir: &Path) {
 
 #[tauri::command]
 fn frontend_heartbeat(seq: u64) {
-    info!("[hb] frontend heartbeat #{}", seq);
+    trace!("[hb] frontend heartbeat #{}", seq);
 }
 
 #[tauri::command]
@@ -347,14 +345,19 @@ async fn pick_invoice_files(app: AppHandle) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn list_import_jobs(
-    state: State<'_, AppState>,
+async fn list_import_jobs(
+    app: AppHandle,
     page: Option<i64>,
     page_size: Option<i64>,
 ) -> Result<ImportJobListResult, String> {
-    state
-        .list_import_jobs(page.unwrap_or(1), page_size.unwrap_or(50))
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .list_import_jobs(page.unwrap_or(1), page_size.unwrap_or(50))
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -368,8 +371,13 @@ fn save_invoice_extraction(
 }
 
 #[tauri::command]
-fn list_invoices(state: State<'_, AppState>) -> Result<Vec<InvoiceSummary>, String> {
-    state.list_invoices().map_err(|err| err.to_string())
+async fn list_invoices(app: AppHandle) -> Result<Vec<InvoiceSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.list_invoices().map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -386,13 +394,28 @@ async fn search_invoices(
 }
 
 #[tauri::command]
-fn get_invoice_detail(
-    state: State<'_, AppState>,
+async fn get_tag_options(app: AppHandle) -> Result<Vec<TagOption>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.get_tag_options().map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn get_invoice_detail(
+    app: AppHandle,
     invoice_id: i64,
 ) -> Result<InvoiceDetail, String> {
-    state
-        .get_invoice_detail(invoice_id)
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .get_invoice_detail(invoice_id)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -482,38 +505,58 @@ fn percent_encode_file_path(value: &str) -> String {
 }
 
 #[tauri::command]
-fn update_invoice(
-    state: State<'_, AppState>,
+async fn update_invoice(
+    app: AppHandle,
     request: UpdateInvoiceRequest,
 ) -> Result<UpdateInvoiceResult, String> {
-    state.update_invoice(request).map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.update_invoice(request).map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-fn update_invoice_items(
-    state: State<'_, AppState>,
+async fn update_invoice_items(
+    app: AppHandle,
     request: UpdateInvoiceItemsRequest,
 ) -> Result<Vec<InvoiceItemRow>, String> {
-    state
-        .update_invoice_items(request)
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .update_invoice_items(request)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-fn batch_update_invoices(
-    state: State<'_, AppState>,
+async fn batch_update_invoices(
+    app: AppHandle,
     request: extractor::BatchUpdateRequest,
 ) -> Result<Vec<InvoiceSummary>, String> {
-    state
-        .batch_update_invoices(request)
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .batch_update_invoices(request)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-fn batch_delete_invoices(state: State<'_, AppState>, ids: Vec<i64>) -> Result<usize, String> {
-    state
-        .batch_delete_invoices(ids)
-        .map_err(|err| err.to_string())
+async fn batch_delete_invoices(app: AppHandle, ids: Vec<i64>) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .batch_delete_invoices(ids)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -537,41 +580,61 @@ fn resolve_duplicate(
 }
 
 #[tauri::command]
-fn regenerate_all_duplicates(state: State<'_, AppState>) -> Result<usize, String> {
-    state
-        .regenerate_all_duplicates()
-        .map_err(|err| err.to_string())
+async fn regenerate_all_duplicates(app: AppHandle) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .regenerate_all_duplicates()
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-fn export_invoices(
-    state: State<'_, AppState>,
+async fn export_invoices(
+    app: AppHandle,
     request: ExportInvoicesRequest,
 ) -> Result<ExportResult, String> {
-    state
-        .export_invoices(request)
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .export_invoices(request)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-fn merge_invoices(
-    state: State<'_, AppState>,
+async fn merge_invoices(
+    app: AppHandle,
     target_invoice_id: i64,
     source_invoice_ids: Vec<i64>,
 ) -> Result<MergeInvoicesResult, String> {
-    state
-        .merge_invoices(target_invoice_id, source_invoice_ids)
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .merge_invoices(target_invoice_id, source_invoice_ids)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-fn export_pdf_report(
-    state: State<'_, AppState>,
+async fn export_pdf_report(
+    app: AppHandle,
     request: PdfReportRequest,
 ) -> Result<PdfReportResult, String> {
-    state
-        .export_pdf_report(request)
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .export_pdf_report(request)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[derive(Debug, Deserialize)]
@@ -886,14 +949,14 @@ fn remove_email_source(state: State<'_, AppState>, id: i64) -> Result<(), String
 
 #[tauri::command]
 async fn list_email_sources(app: AppHandle) -> Result<Vec<email_manager::EmailSource>, String> {
-    info!("[poll] list_email_sources: start");
+    debug!("[poll] list_email_sources: start");
     let result = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         state.list_email_sources().map_err(|err| err.to_string())
     })
     .await
     .map_err(|err| err.to_string())?;
-    info!("[poll] list_email_sources: done");
+    debug!("[poll] list_email_sources: done");
     result
 }
 
@@ -920,7 +983,7 @@ fn sync_email_source(
 async fn sync_all_email_sources(
     app: AppHandle,
 ) -> Result<Vec<email_manager::EmailSyncResult>, String> {
-    info!("[poll] sync_all_email_sources: start");
+    debug!("[poll] sync_all_email_sources: start");
     let result = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         state
@@ -929,7 +992,7 @@ async fn sync_all_email_sources(
     })
     .await
     .map_err(|err| err.to_string())?;
-    info!("[poll] sync_all_email_sources: done");
+    debug!("[poll] sync_all_email_sources: done");
     result
 }
 
@@ -989,7 +1052,7 @@ fn set_embedding_enabled(state: State<'_, AppState>, enabled: bool) -> Result<()
 
 #[tauri::command]
 async fn get_embedding_status(app: AppHandle) -> Result<LocalEmbeddingStatus, String> {
-    info!("[emb] get_embedding_status: start");
+    debug!("[emb] get_embedding_status: start");
     let result = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let (enabled, model_loaded, model_dir, dimensions) = state.embedding_status();
@@ -1004,7 +1067,7 @@ async fn get_embedding_status(app: AppHandle) -> Result<LocalEmbeddingStatus, St
     })
     .await
     .map_err(|err| err.to_string())?;
-    info!("[emb] get_embedding_status: done");
+    debug!("[emb] get_embedding_status: done");
     result
 }
 
@@ -1428,7 +1491,7 @@ fn get_llm_audit_enabled(state: State<'_, AppState>) -> Result<bool, String> {
 
 #[tauri::command]
 async fn get_recognition_queue_status(app: AppHandle) -> Result<RecognitionQueueStatus, String> {
-    info!("[poll] get_recognition_queue_status: start");
+    debug!("[poll] get_recognition_queue_status: start");
     let result = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let db = state.db().lock().expect("db lock");
@@ -1447,7 +1510,7 @@ async fn get_recognition_queue_status(app: AppHandle) -> Result<RecognitionQueue
     })
     .await
     .map_err(|err| err.to_string())?;
-    info!("[poll] get_recognition_queue_status: done");
+    debug!("[poll] get_recognition_queue_status: done");
     result
 }
 
@@ -1673,7 +1736,7 @@ pub fn run() {
                 });
             }
 
-            // Preview thumbnail regeneration can be slow (calls magick for each invoice).
+            // Preview thumbnail regeneration can be slow (image resize for each invoice).
             // Run it in background so the UI becomes responsive immediately.
             {
                 let app_handle = app.handle().clone();
@@ -1825,6 +1888,7 @@ pub fn run() {
             save_invoice_extraction,
             list_invoices,
             search_invoices,
+            get_tag_options,
             get_invoice_detail,
             mark_invoice_viewed,
             count_unviewed_invoices,

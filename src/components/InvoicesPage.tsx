@@ -11,6 +11,7 @@ import {
   mergeInvoices,
   exportPdfReport,
   regenerateAllDuplicates,
+  getTagOptions,
 } from "../api";
 import { InvoiceListControls } from "./InvoiceListControls";
 import { ExportButton } from "./ExportButton";
@@ -134,9 +135,9 @@ export function InvoicesPage() {
 
   React.useEffect(() => {
     let cancelled = false;
-    searchInvoices({ page: 1, page_size: 500 })
+    getTagOptions()
       .then((result) => {
-        if (!cancelled) setTagOptions(buildTagOptions(result.invoices));
+        if (!cancelled) setTagOptions(result);
       })
       .catch(() => {
         if (!cancelled) setTagOptions([]);
@@ -905,20 +906,6 @@ function buildInvoiceTags(invoice: Invoice): Array<{ label: string; tone: "succe
   }
 
   return tags;
-}
-
-function buildTagOptions(invoices: Invoice[]): InvoiceTagOption[] {
-  const counts = new Map<string, number>();
-  for (const invoice of invoices) {
-    const labels = new Set(buildInvoiceTags(invoice).map((tag) => tag.label));
-    for (const label of labels) {
-      counts.set(label, (counts.get(label) ?? 0) + 1);
-    }
-  }
-  return Array.from(counts.entries())
-    .map(([label, count]) => ({ label, count }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "zh-CN"))
-    .slice(0, 30);
 }
 
 function fileTypeTag(mimeType: string | null): { label: string; tone: "neutral" | "info" } | null {

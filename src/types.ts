@@ -96,6 +96,11 @@ export type InvoiceSearchResult = {
   total_pages: number;
 };
 
+export type TagOption = {
+  label: string;
+  count: number;
+};
+
 export type InvoiceItemRow = {
   id: number;
   name: string;

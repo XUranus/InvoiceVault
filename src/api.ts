@@ -6,6 +6,7 @@ import type {
   Invoice,
   InvoiceSearchParams,
   InvoiceSearchResult,
+  TagOption,
   InvoiceDetail,
   UpdateInvoiceRequest,
   UpdateInvoiceResult,
@@ -75,6 +76,10 @@ export async function searchInvoices(
   params: InvoiceSearchParams,
 ): Promise<InvoiceSearchResult> {
   return invoke<InvoiceSearchResult>("search_invoices", { params });
+}
+
+export async function getTagOptions(): Promise<TagOption[]> {
+  return invoke<TagOption[]>("get_tag_options");
 }
 
 export async function getInvoiceDetail(

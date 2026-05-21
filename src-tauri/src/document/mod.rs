@@ -1,10 +1,11 @@
 use std::{
     fs,
+    io::BufReader,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::process_utils::command_no_window;
+use image::{codecs::jpeg::JpegEncoder, DynamicImage, GenericImageView, ImageReader};
 use tracing::error;
 
 #[derive(Debug, Clone)]
@@ -24,16 +25,14 @@ pub struct PreparedImage {
 pub enum DocumentError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("image decode error: {0}")]
+    ImageDecode(#[from] image::ImageError),
     #[error("PDF renderer `pdftoppm` was not found in PATH")]
     MissingPdfRenderer,
     #[error("PDF renderer failed with status {status}: {stderr}")]
     PdfRendererFailed { status: String, stderr: String },
     #[error("PDF renderer did not produce any page images")]
     NoRenderedPages,
-    #[error("image processor `magick` was not found in PATH")]
-    MissingImageProcessor,
-    #[error("image processor failed with status {status}: {stderr}")]
-    ImageProcessorFailed { status: String, stderr: String },
 }
 
 pub fn render_pdf_pages(
@@ -48,7 +47,7 @@ pub fn render_pdf_pages(
     fs::create_dir_all(&render_dir)?;
 
     let output_prefix = render_dir.join("page");
-    let output = command_no_window("pdftoppm")
+    let output = crate::process_utils::command_no_window("pdftoppm")
         .arg("-jpeg")
         .arg("-r")
         .arg("180")
@@ -110,14 +109,101 @@ pub fn prepare_image_for_recognition(
     let normalized_path = normalized_dir.join(format!("{label}.jpg"));
     let thumbnail_path = thumbnail_dir.join(format!("{label}.jpg"));
 
-    run_magick_resize(image_path, &normalized_path, 1800, 85)?;
-    run_magick_resize(image_path, &thumbnail_path, 800, 85)?;
+    resize_and_save(image_path, &normalized_path, 1800, 85)?;
+    resize_and_save(image_path, &thumbnail_path, 800, 85)?;
 
     Ok(PreparedImage {
         image_path: normalized_path,
         thumbnail_path,
         mime_type: "image/jpeg".to_owned(),
     })
+}
+
+/// Read EXIF orientation from a JPEG file. Returns 1 (normal) if not found or on error.
+fn read_exif_orientation(path: &Path) -> u32 {
+    let Ok(file) = fs::File::open(path) else {
+        return 1;
+    };
+    let mut bufreader = BufReader::new(&file);
+    let Ok(exifreader) = exif::Reader::new().read_from_container(&mut bufreader) else {
+        return 1;
+    };
+    if let Some(field) = exifreader.get_field(exif::Tag::Orientation, exif::In::PRIMARY) {
+        match field.value.get_uint(0) {
+            Some(v @ 1..=8) => v,
+            _ => 1,
+        }
+    } else {
+        1
+    }
+}
+
+/// Apply EXIF orientation to an image by rotating/flipping it so it displays correctly.
+fn apply_orientation(img: DynamicImage, orientation: u32) -> DynamicImage {
+    match orientation {
+        1 => img,
+        2 => img.fliph(),
+        3 => img.rotate180(),
+        4 => img.flipv(),
+        5 => img.fliph().rotate90(),
+        6 => img.rotate90(),
+        7 => img.fliph().rotate270(),
+        8 => img.rotate270(),
+        _ => img,
+    }
+}
+
+/// Composite alpha onto a white background, returning an RGB image.
+fn flatten_alpha(img: DynamicImage) -> DynamicImage {
+    if !img.color().has_alpha() {
+        return img;
+    }
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let mut rgb = image::RgbImage::new(w, h);
+    for (src, dst) in rgba.pixels().zip(rgb.pixels_mut()) {
+        let [r, g, b, a] = src.0;
+        let alpha = a as f32 / 255.0;
+        let inv = 1.0 - alpha;
+        dst.0[0] = (r as f32 * alpha + 255.0 * inv) as u8;
+        dst.0[1] = (g as f32 * alpha + 255.0 * inv) as u8;
+        dst.0[2] = (b as f32 * alpha + 255.0 * inv) as u8;
+    }
+    DynamicImage::ImageRgb8(rgb)
+}
+
+/// Resize, auto-orient, flatten alpha, and save as JPEG with the given quality.
+pub fn resize_and_save(
+    input_path: &Path,
+    output_path: &Path,
+    max_dimension: u32,
+    quality: u8,
+) -> Result<(), DocumentError> {
+    let reader = ImageReader::open(input_path)?.with_guessed_format()?;
+    let img = reader.decode()?;
+
+    // Apply EXIF orientation (only meaningful for JPEG inputs)
+    let orientation = read_exif_orientation(input_path);
+    let img = apply_orientation(img, orientation);
+
+    // Flatten alpha onto white background
+    let img = flatten_alpha(img);
+
+    // Resize: only downscale, never upscale
+    let (w, h) = img.dimensions();
+    let needs_resize = w > max_dimension || h > max_dimension;
+    let img = if needs_resize {
+        img.resize(max_dimension, max_dimension, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+
+    // Write JPEG — no EXIF/metadata is written, effectively stripping it
+    let output_file = fs::File::create(output_path)?;
+    let mut encoder = JpegEncoder::new_with_quality(output_file, quality);
+    encoder.encode_image(&img)?;
+
+    Ok(())
 }
 
 fn rendered_page_paths(render_dir: &Path) -> Result<Vec<(usize, PathBuf)>, DocumentError> {
@@ -140,51 +226,6 @@ fn rendered_page_paths(render_dir: &Path) -> Result<Vec<(usize, PathBuf)>, Docum
     }
 
     Ok(pages)
-}
-
-fn run_magick_resize(
-    input_path: &Path,
-    output_path: &Path,
-    max_dimension: u16,
-    quality: u8,
-) -> Result<(), DocumentError> {
-    let output = command_no_window("magick")
-        .arg(input_path)
-        .arg("-auto-orient")
-        .arg("-resize")
-        .arg(format!("{max_dimension}x{max_dimension}>"))
-        .arg("-background")
-        .arg("white")
-        .arg("-alpha")
-        .arg("remove")
-        .arg("-alpha")
-        .arg("off")
-        .arg("-strip")
-        .arg("-quality")
-        .arg(quality.to_string())
-        .arg(output_path)
-        .output()
-        .map_err(|err| {
-            if err.kind() == std::io::ErrorKind::NotFound {
-                DocumentError::MissingImageProcessor
-            } else {
-                DocumentError::Io(err)
-            }
-        })?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(800)
-            .collect::<String>();
-        error!("Image processor (magick) failed: {stderr}");
-        Err(DocumentError::ImageProcessorFailed {
-            status: output.status.to_string(),
-            stderr,
-        })
-    }
 }
 
 fn page_number_from_stem(stem: &str) -> Option<usize> {
@@ -212,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn prepares_sample_image_when_magick_is_available() {
+    fn prepares_sample_image() {
         let repo_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let sample_path = repo_dir
             .join("receipts")
@@ -225,7 +266,8 @@ mod tests {
                 assert!(prepared.thumbnail_path.exists());
                 assert_eq!(prepared.mime_type, "image/jpeg");
             }
-            Err(DocumentError::MissingImageProcessor) => {}
+            Err(DocumentError::Io(ref e))
+                if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(err) => panic!("prepare image failed: {err}"),
         }
     }

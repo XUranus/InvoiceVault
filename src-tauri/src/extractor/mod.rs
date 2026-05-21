@@ -1427,7 +1427,6 @@ pub fn get_dashboard_stats(
     date_from: Option<&str>,
     date_to: Option<&str>,
 ) -> Result<DashboardStats, ExtractorError> {
-    // Build date filter fragments: no filtering when both are None
     let where_clause: String = {
         let mut clauses: Vec<String> = Vec::new();
         if let Some(from) = date_from {
@@ -1443,14 +1442,23 @@ pub fn get_dashboard_stats(
         }
     };
 
-    let (total_invoices, total_amount): (i64, f64) = conn.query_row(
+    let this_month = chrono::Local::now().format("%Y-%m-01").to_string();
+
+    // Consolidated: total, amount, avg confidence, this_month, pending, duplicates
+    // merged from 6 separate queries into 1 using conditional aggregation
+    let (total_invoices, total_amount, average_confidence, this_month_count, this_month_amount, pending_count, duplicate_count): (i64, f64, f64, i64, f64, i64, i64) = conn.query_row(
         &format!(
-            "SELECT COUNT(*), {} FROM invoices WHERE 1=1{}",
-            sum_amount(),
-            where_clause
+            "SELECT COUNT(*), {sum}, COALESCE(AVG(confidence), 0.0),
+                    COALESCE(SUM(CASE WHEN issue_date >= ?1 THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN issue_date >= ?1 THEN CAST(total_amount AS REAL) ELSE 0 END), 0.0),
+                    COALESCE(SUM(CASE WHEN status = 'pending_confirmation' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN duplicate_status IN ('possible_duplicate', 'probable_duplicate') THEN 1 ELSE 0 END), 0)
+             FROM invoices WHERE 1=1{where}",
+            sum = sum_amount(),
+            where = where_clause
         ),
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        [&this_month],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
     )?;
 
     let currency = conn
@@ -1460,43 +1468,6 @@ pub fn get_dashboard_stats(
             |row| row.get(0),
         )
         .unwrap_or_else(|_| "CNY".to_string());
-
-    let average_confidence: f64 = conn.query_row(
-        &format!(
-            "SELECT COALESCE(AVG(confidence), 0.0) FROM invoices WHERE confidence IS NOT NULL{}",
-            where_clause
-        ),
-        [],
-        |row| row.get(0),
-    )?;
-
-    let this_month = chrono::Local::now().format("%Y-%m-01").to_string();
-    let (this_month_count, this_month_amount): (i64, f64) = conn.query_row(
-        &format!(
-            "SELECT COUNT(*), {} FROM invoices WHERE issue_date >= ?1",
-            sum_amount()
-        ),
-        [&this_month],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-
-    let pending_count: i64 = conn.query_row(
-        &format!(
-            "SELECT COUNT(*) FROM invoices WHERE status = 'pending_confirmation'{}",
-            where_clause
-        ),
-        [],
-        |row| row.get(0),
-    )?;
-
-    let duplicate_count: i64 = conn.query_row(
-        &format!(
-            "SELECT COUNT(*) FROM invoices WHERE duplicate_status IN ('possible_duplicate', 'probable_duplicate'){}",
-            where_clause
-        ),
-        [],
-        |row| row.get(0),
-    )?;
 
     let mut trend_stmt = conn.prepare(&format!(
         "SELECT strftime('%Y-%m', issue_date) as month, COUNT(*), {}
@@ -1736,20 +1707,39 @@ pub fn batch_delete_invoices(conn: &Connection, ids: &[i64]) -> Result<usize, Ex
         &format!("DELETE FROM invoices WHERE id IN ({})", ids_str),
         [],
     )?;
-    // Also clean up raw_files and import_jobs for the deleted invoices
-    for raw_id in &raw_file_ids {
-        let remaining: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM invoices WHERE raw_file_id = ?1",
-            [raw_id],
-            |row| row.get(0),
-        )?;
-        if remaining == 0 {
+    // Also clean up orphaned raw_files: find which of our raw_file_ids now have zero invoices
+    if !raw_file_ids.is_empty() {
+        let orphan_ids_str = raw_file_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT rf.id FROM raw_files rf
+             WHERE rf.id IN ({orphan_ids_str})
+               AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.raw_file_id = rf.id)"
+        ))?;
+        let orphans: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !orphans.is_empty() {
+            let orphan_str = orphans
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
             conn.execute(
-                "DELETE FROM extraction_runs WHERE raw_file_id = ?1",
-                [raw_id],
+                &format!("DELETE FROM extraction_runs WHERE raw_file_id IN ({orphan_str})"),
+                [],
             )?;
-            conn.execute("DELETE FROM import_jobs WHERE raw_file_id = ?1", [raw_id])?;
-            conn.execute("DELETE FROM raw_files WHERE id = ?1", [raw_id])?;
+            conn.execute(
+                &format!("DELETE FROM import_jobs WHERE raw_file_id IN ({orphan_str})"),
+                [],
+            )?;
+            conn.execute(
+                &format!("DELETE FROM raw_files WHERE id IN ({orphan_str})"),
+                [],
+            )?;
         }
     }
     Ok(count)
@@ -1986,6 +1976,66 @@ fn parse_page_range(range: &str) -> Vec<usize> {
     range.parse::<usize>().ok().into_iter().collect()
 }
 
+// ---- Tag Options (lightweight) ----
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TagOption {
+    pub label: String,
+    pub count: i64,
+}
+
+pub fn get_tag_options(conn: &Connection) -> Result<Vec<TagOption>, ExtractorError> {
+    let mut stmt = conn.prepare(
+        "SELECT label, SUM(cnt) as total FROM (
+                SELECT COALESCE(category, '') AS label, COUNT(*) AS cnt
+                FROM invoices WHERE category IS NOT NULL AND category != ''
+                GROUP BY category
+                UNION ALL
+                SELECT
+                    CASE
+                        WHEN invoice_type LIKE '%专用%' THEN '专票'
+                        WHEN invoice_type LIKE '%普通%' THEN '普票'
+                        ELSE invoice_type
+                    END AS label,
+                    COUNT(*) AS cnt
+                FROM invoices WHERE invoice_type IS NOT NULL AND invoice_type != ''
+                GROUP BY label
+                UNION ALL
+                SELECT value AS label, COUNT(DISTINCT invoice_id) AS cnt
+                FROM invoice_badges
+                GROUP BY value
+                UNION ALL
+                SELECT 'PDF' AS label, COUNT(DISTINCT inv.id) AS cnt
+                FROM invoices inv JOIN raw_files rf ON rf.id = inv.raw_file_id
+                WHERE rf.mime_type = 'application/pdf'
+                UNION ALL
+                SELECT '图片' AS label, COUNT(DISTINCT inv.id) AS cnt
+                FROM invoices inv JOIN raw_files rf ON rf.id = inv.raw_file_id
+                WHERE rf.mime_type LIKE 'image/%'
+                UNION ALL
+                SELECT '文件' AS label, COUNT(DISTINCT inv.id) AS cnt
+                FROM invoices inv JOIN raw_files rf ON rf.id = inv.raw_file_id
+                WHERE rf.mime_type IS NOT NULL
+                    AND rf.mime_type != 'application/pdf'
+                    AND rf.mime_type NOT LIKE 'image/%'
+            ) WHERE label != ''
+            GROUP BY label
+            ORDER BY total DESC
+            LIMIT 30",
+    )?;
+
+    let options = stmt
+        .query_map([], |row| {
+            Ok(TagOption {
+                label: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(options)
+}
+
 pub fn insert_usage_log(
     conn: &Connection,
     operation: &str,
@@ -2025,98 +2075,48 @@ pub fn get_llm_usage(
     date_from: Option<&str>,
     date_to: Option<&str>,
 ) -> Result<LlmUsageStats, ExtractorError> {
-    let date_filter = |alias: &str| -> (String, Vec<String>) {
-        let mut clauses = vec![format!("{alias}.operation IS NOT NULL")];
-        let mut params = Vec::new();
-        if let Some(from) = date_from {
-            clauses.push(format!("{alias}.created_at >= ?{}", params.len() + 1));
-            params.push(from.to_owned());
-        }
-        if let Some(to) = date_to {
-            clauses.push(format!("{alias}.created_at <= ?{}", params.len() + 1));
-            params.push(format!("{to} 23:59:59"));
-        }
-        (format!("WHERE {}", clauses.join(" AND ")), params)
+    // Consolidated: total_calls, llm_calls, embedding_calls, tokens
+    // merged from 6 separate queries into 1 using conditional aggregation
+    let mut clauses: Vec<String> = Vec::new();
+    let mut params: Vec<String> = Vec::new();
+
+    if let Some(from) = date_from {
+        clauses.push(format!("created_at >= ?{}", params.len() + 1));
+        params.push(from.to_owned());
+    }
+    if let Some(to) = date_to {
+        clauses.push(format!("created_at <= ?{}", params.len() + 1));
+        params.push(format!("{to} 23:59:59"));
+    }
+
+    let where_clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
     };
 
-    let (where_all, params_all) = date_filter("u");
-
-    let total_calls: i64 = conn.query_row(
-        &format!("SELECT COALESCE(COUNT(*), 0) FROM usage_log u {where_all}"),
-        rusqlite::params_from_iter(params_all.iter()),
-        |row| row.get(0),
+    let (total_calls, llm_calls, embedding_calls, total_prompt_tokens, total_completion_tokens, total_tokens): (i64, i64, i64, i64, i64, i64) = conn.query_row(
+        &format!(
+            "SELECT
+                COALESCE(COUNT(*), 0),
+                COALESCE(SUM(CASE WHEN operation = 'llm_recognition' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN operation = 'embedding' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(prompt_tokens), 0),
+                COALESCE(SUM(completion_tokens), 0),
+                COALESCE(SUM(total_tokens), 0)
+             FROM usage_log{where_clause}"
+        ),
+        rusqlite::params_from_iter(params.iter()),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
     )?;
 
-    let (where_llm, params_llm) = {
-        let mut clauses = vec!["operation = 'llm_recognition'".to_string()];
-        let mut params = Vec::new();
-        if let Some(from) = date_from {
-            clauses.push(format!("created_at >= ?{}", params.len() + 1));
-            params.push(from.to_owned());
-        }
-        if let Some(to) = date_to {
-            clauses.push(format!("created_at <= ?{}", params.len() + 1));
-            params.push(format!("{to} 23:59:59"));
-        }
-        (format!("WHERE {}", clauses.join(" AND ")), params)
-    };
-
-    let llm_calls: i64 = conn.query_row(
-        &format!("SELECT COALESCE(COUNT(*), 0) FROM usage_log {where_llm}"),
-        rusqlite::params_from_iter(params_llm.iter()),
-        |row| row.get(0),
-    )?;
-
-    let (where_emb, params_emb) = {
-        let mut clauses = vec!["operation = 'embedding'".to_string()];
-        let mut params = Vec::new();
-        if let Some(from) = date_from {
-            clauses.push(format!("created_at >= ?{}", params.len() + 1));
-            params.push(from.to_owned());
-        }
-        if let Some(to) = date_to {
-            clauses.push(format!("created_at <= ?{}", params.len() + 1));
-            params.push(format!("{to} 23:59:59"));
-        }
-        (format!("WHERE {}", clauses.join(" AND ")), params)
-    };
-
-    let embedding_calls: i64 = conn.query_row(
-        &format!("SELECT COALESCE(COUNT(*), 0) FROM usage_log {where_emb}"),
-        rusqlite::params_from_iter(params_emb.iter()),
-        |row| row.get(0),
-    )?;
-
-    let total_prompt_tokens: i64 = conn.query_row(
-        &format!("SELECT COALESCE(SUM(prompt_tokens), 0) FROM usage_log u {where_all}"),
-        rusqlite::params_from_iter(params_all.iter()),
-        |row| row.get(0),
-    )?;
-
-    let total_completion_tokens: i64 = conn.query_row(
-        &format!("SELECT COALESCE(SUM(completion_tokens), 0) FROM usage_log u {where_all}"),
-        rusqlite::params_from_iter(params_all.iter()),
-        |row| row.get(0),
-    )?;
-
-    let total_tokens: i64 = conn.query_row(
-        &format!("SELECT COALESCE(SUM(total_tokens), 0) FROM usage_log u {where_all}"),
-        rusqlite::params_from_iter(params_all.iter()),
-        |row| row.get(0),
-    )?;
-
-    // This month stats (always current month, independent of date filter)
+    // Consolidated: this_month_calls + this_month_tokens merged into 1 query
     let this_month_start = chrono::Local::now().format("%Y-%m-01").to_string();
-    let this_month_calls: i64 = conn.query_row(
-        "SELECT COALESCE(COUNT(*), 0) FROM usage_log WHERE created_at >= ?1",
+    let (this_month_calls, this_month_tokens): (i64, i64) = conn.query_row(
+        "SELECT COALESCE(COUNT(*), 0), COALESCE(SUM(total_tokens), 0)
+         FROM usage_log WHERE created_at >= ?1",
         [&this_month_start],
-        |row| row.get(0),
-    )?;
-
-    let this_month_tokens: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(total_tokens), 0) FROM usage_log WHERE created_at >= ?1",
-        [&this_month_start],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
 
     Ok(LlmUsageStats {

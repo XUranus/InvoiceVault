@@ -255,6 +255,16 @@ pub struct AppState {
     llm_config: Arc<Mutex<Option<LlmProviderConfig>>>,
     llm_audit_enabled: Arc<Mutex<bool>>,
     importing_paths: Arc<Mutex<HashSet<String>>>,
+    dashboard_cache: moka::sync::Cache<String, crate::extractor::DashboardStats>,
+    llm_usage_cache: moka::sync::Cache<String, crate::extractor::LlmUsageStats>,
+}
+
+fn cache_key(date_from: &Option<String>, date_to: &Option<String>) -> String {
+    format!(
+        "{}|{}",
+        date_from.as_deref().unwrap_or(""),
+        date_to.as_deref().unwrap_or("")
+    )
 }
 
 impl AppState {
@@ -338,6 +348,14 @@ impl AppState {
             llm_config,
             llm_audit_enabled,
             importing_paths: Arc::new(Mutex::new(HashSet::new())),
+            dashboard_cache: moka::sync::Cache::builder()
+                .max_capacity(8)
+                .time_to_live(std::time::Duration::from_secs(60))
+                .build(),
+            llm_usage_cache: moka::sync::Cache::builder()
+                .max_capacity(8)
+                .time_to_live(std::time::Duration::from_secs(60))
+                .build(),
         };
 
         if embedding_enabled {
@@ -890,6 +908,7 @@ impl AppState {
             }
         }
 
+        self.invalidate_dashboard_cache();
         Ok(invoice)
     }
 
@@ -904,6 +923,11 @@ impl AppState {
     ) -> Result<InvoiceSearchResult, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(search_invoices(&db, params)?)
+    }
+
+    pub fn get_tag_options(&self) -> Result<Vec<crate::extractor::TagOption>, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(crate::extractor::get_tag_options(&db)?)
     }
 
     pub fn get_invoice_detail(&self, invoice_id: i64) -> Result<InvoiceDetail, AppError> {
@@ -1022,6 +1046,7 @@ impl AppState {
             }
         }
 
+        self.invalidate_dashboard_cache();
         Ok(result)
     }
 
@@ -1038,12 +1063,16 @@ impl AppState {
         request: BatchUpdateRequest,
     ) -> Result<Vec<InvoiceSummary>, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
-        Ok(batch_update_invoices(&db, &request)?)
+        let result = batch_update_invoices(&db, &request)?;
+        self.invalidate_dashboard_cache();
+        Ok(result)
     }
 
     pub fn batch_delete_invoices(&self, ids: Vec<i64>) -> Result<usize, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
-        Ok(batch_delete_invoices(&db, &ids)?)
+        let result = batch_delete_invoices(&db, &ids)?;
+        self.invalidate_dashboard_cache();
+        Ok(result)
     }
 
     pub fn check_invoice_duplicates(&self, invoice_id: i64) -> Result<DedupeCheckResult, AppError> {
@@ -1098,11 +1127,13 @@ impl AppState {
         source_invoice_ids: Vec<i64>,
     ) -> Result<MergeInvoicesResult, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
-        Ok(merge_invoices(
+        let result = merge_invoices(
             &mut db,
             target_invoice_id,
             source_invoice_ids,
-        )?)
+        )?;
+        self.invalidate_dashboard_cache();
+        Ok(result)
     }
 
     pub fn export_pdf_report(
@@ -1202,12 +1233,18 @@ impl AppState {
         date_from: Option<String>,
         date_to: Option<String>,
     ) -> Result<DashboardStats, AppError> {
+        let key = cache_key(&date_from, &date_to);
+        if let Some(stats) = self.dashboard_cache.get(&key) {
+            return Ok(stats);
+        }
         let db = self.db.lock().expect("database mutex poisoned");
-        Ok(get_dashboard_stats(
-            &db,
-            date_from.as_deref(),
-            date_to.as_deref(),
-        )?)
+        let stats = get_dashboard_stats(&db, date_from.as_deref(), date_to.as_deref())?;
+        self.dashboard_cache.insert(key, stats.clone());
+        Ok(stats)
+    }
+
+    fn invalidate_dashboard_cache(&self) {
+        self.dashboard_cache.invalidate_all();
     }
 
     pub fn set_chroma_config(&self, config: ChromaConfig) -> Result<(), AppError> {
@@ -1340,65 +1377,13 @@ impl AppState {
                 warn!("Invoice {invoice_id}: failed to create preview dir: {e}");
                 continue;
             }
-            let mut child = match command_no_window("magick")
-                .arg(&normalized_path)
-                .arg("-auto-orient")
-                .arg("-resize")
-                .arg("800x800>")
-                .arg("-background")
-                .arg("white")
-                .arg("-alpha")
-                .arg("remove")
-                .arg("-alpha")
-                .arg("off")
-                .arg("-strip")
-                .arg("-quality")
-                .arg("85")
-                .arg(&preview_path)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-            {
-                Ok(child) => child,
-                Err(e) => {
-                    warn!("Invoice {invoice_id}: magick not found or failed to spawn: {e}");
-                    break; // magick not installed, stop trying
-                }
-            };
-
-            let timeout = std::time::Duration::from_secs(30);
-            let start = std::time::Instant::now();
-            let timed_out = loop {
-                match child.try_wait() {
-                    Ok(Some(_)) => break false,
-                    Ok(None) => {
-                        if start.elapsed() >= timeout {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            break true;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                    Err(_) => break true,
-                }
-            };
-
-            if timed_out {
-                warn!("Invoice {invoice_id}: magick timed out (30s)");
-                continue;
-            }
-
-            match child.wait_with_output() {
-                Ok(o) if o.status.success() => {
+            match crate::document::resize_and_save(&normalized_path, &preview_path, 800, 85) {
+                Ok(()) => {
                     fixed += 1;
                     info!("Regenerated missing preview for invoice {invoice_id}");
                 }
-                Ok(o) => {
-                    let stderr = String::from_utf8_lossy(&o.stderr);
-                    warn!("Invoice {invoice_id}: magick failed: {stderr}");
-                }
                 Err(e) => {
-                    warn!("Invoice {invoice_id}: magick output error: {e}");
+                    warn!("Invoice {invoice_id}: preview resize failed: {e}");
                 }
             }
         }
@@ -1462,12 +1447,18 @@ impl AppState {
         date_from: Option<String>,
         date_to: Option<String>,
     ) -> Result<crate::extractor::LlmUsageStats, AppError> {
+        let key = cache_key(&date_from, &date_to);
+        if let Some(stats) = self.llm_usage_cache.get(&key) {
+            return Ok(stats);
+        }
         let db = self.db.lock().expect("database mutex poisoned");
-        Ok(crate::extractor::get_llm_usage(
-            &db,
-            date_from.as_deref(),
-            date_to.as_deref(),
-        )?)
+        let stats = crate::extractor::get_llm_usage(&db, date_from.as_deref(), date_to.as_deref())?;
+        self.llm_usage_cache.insert(key, stats.clone());
+        Ok(stats)
+    }
+
+    fn invalidate_llm_usage_cache(&self) {
+        self.llm_usage_cache.invalidate_all();
     }
 
     pub fn set_invoice_badge(
@@ -1724,14 +1715,16 @@ impl AppState {
         total_tokens: i64,
     ) -> Result<(), AppError> {
         let db = self.db.lock().expect("db lock");
-        Ok(crate::extractor::insert_usage_log(
+        crate::extractor::insert_usage_log(
             &db,
             operation,
             model,
             prompt_tokens,
             completion_tokens,
             total_tokens,
-        )?)
+        )?;
+        self.invalidate_llm_usage_cache();
+        Ok(())
     }
 
     pub fn record_recognition_event(

@@ -23,6 +23,24 @@ let dragDropRegistered = false;
 // only the first event triggers import; the rest are dropped immediately.
 let dropImportInProgress = false;
 
+// Debounce timer for coalescing rapid refresh triggers
+// (watcher-import, recognition-complete, and email-sync can fire within
+// hundreds of ms of each other, causing redundant 10+ IPC call bursts)
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleRefresh(
+  triggerImport: () => void,
+  triggerDashboard: () => void,
+  refreshBadge: () => void,
+) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    triggerImport();
+    refreshBadge();
+    triggerDashboard();
+  }, 300);
+}
+
 export function useAppInitializer() {
   const navigate = useNavigate();
 
@@ -35,7 +53,7 @@ export function useAppInitializer() {
   const clearDragImportPaths = useAppStore((s) => s.clearDragImportPaths);
   const setError = useAppStore((s) => s.setError);
   const setImportBadgeCount = useAppStore((s) => s.setImportBadgeCount);
-  const refreshInvoices = useAppStore((s) => s.refreshInvoices);
+  const refreshUnviewedCount = useAppStore((s) => s.refreshUnviewedCount);
   const triggerImportRefresh = useRefreshStore(
     (s) => s.triggerImportRefresh,
   );
@@ -147,19 +165,19 @@ export function useAppInitializer() {
   useEffect(() => {
     let cleanup: (() => void) | null = null;
     listen<WatcherImportEvent>("watcher-import", () => {
-      triggerImportRefresh(); refreshInvoices(); triggerDashboardRefresh();
+      scheduleRefresh(triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount);
     }).then((fn) => { cleanup = fn; }).catch(() => {});
     return () => { cleanup?.(); };
-  }, [triggerImportRefresh, refreshInvoices, triggerDashboardRefresh]);
+  }, [triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount]);
 
   // Background recognition completion listener
   useEffect(() => {
     let cleanup: (() => void) | null = null;
     listen("recognition-complete", () => {
-      refreshInvoices(); triggerImportRefresh(); triggerDashboardRefresh();
+      scheduleRefresh(triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount);
     }).then((fn) => { cleanup = fn; }).catch(() => {});
     return () => { cleanup?.(); };
-  }, [refreshInvoices, triggerImportRefresh, triggerDashboardRefresh]);
+  }, [triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount]);
 
   // Recognition queue polling
   useEffect(() => {
@@ -189,9 +207,7 @@ export function useAppInitializer() {
         );
         if (!hasAutoSync) return;
         await syncAllEmailSources();
-        triggerImportRefresh();
-        refreshInvoices();
-        triggerDashboardRefresh();
+        scheduleRefresh(triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount);
       } catch {
         // ignore sync errors
       } finally {
@@ -202,7 +218,7 @@ export function useAppInitializer() {
     };
     timer = setTimeout(tick, 5000);
     return () => { stopped = true; if (timer) clearTimeout(timer); };
-  }, [triggerImportRefresh, refreshInvoices, triggerDashboardRefresh]);
+  }, [triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount]);
 
   // Frontend heartbeat
   useEffect(() => {
@@ -210,7 +226,7 @@ export function useAppInitializer() {
     const interval = setInterval(() => {
       seq++;
       frontendHeartbeat(seq).catch(() => {});
-    }, 1000);
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 }

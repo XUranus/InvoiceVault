@@ -22,6 +22,8 @@ export function AdvancedPage() {
   // --- External Dependencies ---
   const [dependencyStatuses, setDependencyStatuses] = React.useState<ExternalDependencyStatus[]>([]);
   const [checkingDependencies, setCheckingDependencies] = React.useState(false);
+  const [depsExpanded, setDepsExpanded] = React.useState(false);
+  const depsCheckedRef = React.useRef(false);
 
   // --- Badge Config ---
   const [badgeConfig, setBadgeConfigState] = React.useState<BadgeConfig>({ groups: [] });
@@ -61,6 +63,7 @@ export function AdvancedPage() {
     try {
       const result = await checkExternalDependencies();
       setDependencyStatuses(result);
+      depsCheckedRef.current = true;
     } catch {
       setDependencyStatuses([]);
     } finally {
@@ -68,9 +71,12 @@ export function AdvancedPage() {
     }
   }, []);
 
+  // Check on first expand only
   React.useEffect(() => {
-    refreshExternalDependencies();
-  }, [refreshExternalDependencies]);
+    if (depsExpanded && !depsCheckedRef.current) {
+      refreshExternalDependencies();
+    }
+  }, [depsExpanded, refreshExternalDependencies]);
 
   // --- Data Management handlers ---
   const handleExportLogs = async () => {
@@ -367,48 +373,59 @@ export function AdvancedPage() {
       {/* External Dependencies */}
       <div className="section">
         <div className="section-header">
-          <h3>外部依赖</h3>
-          <button
-            className="btn-small"
-            type="button"
-            onClick={refreshExternalDependencies}
-            disabled={checkingDependencies}
+          <h3
+            style={{ cursor: "pointer", userSelect: "none" }}
+            onClick={() => setDepsExpanded((v) => !v)}
           >
-            {checkingDependencies ? "检测中..." : "重新检测"}
-          </button>
-        </div>
-        <p className="section-desc">
-          PDF 渲染和图片标准化依赖本机命令。Windows 下需要确保 Poppler 和 ImageMagick 已安装并加入 PATH。
-        </p>
-        <div className="dependency-list">
-          {dependencyStatuses.map((dependency) => (
-            <div className="dependency-card" key={dependency.command}>
-              <div className="dependency-main">
-                <span
-                  className={`dependency-dot ${dependency.available ? "dependency-dot-ok" : "dependency-dot-error"}`}
-                />
-                <div>
-                  <strong>{dependency.name}</strong>
-                  <span className="dependency-command mono">{dependency.command}</span>
-                </div>
-              </div>
-              <div className="dependency-detail">
-                <span className={`mini-tag ${dependency.available ? "tag-recognized" : "tag-flagged"}`}>
-                  {dependency.available ? "可用" : "未找到"}
-                </span>
-                <span className="dependency-version">
-                  {dependency.version ?? dependency.error ?? "未返回版本信息"}
-                </span>
-              </div>
-              {!dependency.available ? (
-                <ExternalDependencyHelp command={dependency.command} />
-              ) : null}
-            </div>
-          ))}
-          {!checkingDependencies && dependencyStatuses.length === 0 ? (
-            <p className="muted">暂未获取依赖状态。</p>
+            外部依赖 {depsExpanded ? "▾" : "▸"}
+          </h3>
+          {depsExpanded ? (
+            <button
+              className="btn-small"
+              type="button"
+              onClick={refreshExternalDependencies}
+              disabled={checkingDependencies}
+            >
+              {checkingDependencies ? "检测中..." : "重新检测"}
+            </button>
           ) : null}
         </div>
+        {depsExpanded ? (
+          <>
+            <p className="section-desc">
+              PDF 渲染依赖本机 Poppler 命令。Windows 下需要确保 Poppler 已安装并加入 PATH。
+            </p>
+            <div className="dependency-list">
+              {dependencyStatuses.map((dependency) => (
+                <div className="dependency-card" key={dependency.command}>
+                  <div className="dependency-main">
+                    <span
+                      className={`dependency-dot ${dependency.available ? "dependency-dot-ok" : "dependency-dot-error"}`}
+                    />
+                    <div>
+                      <strong>{dependency.name}</strong>
+                      <span className="dependency-command mono">{dependency.command}</span>
+                    </div>
+                  </div>
+                  <div className="dependency-detail">
+                    <span className={`mini-tag ${dependency.available ? "tag-recognized" : "tag-flagged"}`}>
+                      {dependency.available ? "可用" : "未找到"}
+                    </span>
+                    <span className="dependency-version">
+                      {dependency.version ?? dependency.error ?? "未返回版本信息"}
+                    </span>
+                  </div>
+                  {!dependency.available ? (
+                    <ExternalDependencyHelp command={dependency.command} />
+                  ) : null}
+                </div>
+              ))}
+              {!checkingDependencies && dependencyStatuses.length === 0 ? (
+                <p className="muted">暂未获取依赖状态。</p>
+              ) : null}
+            </div>
+          </>
+        ) : null}
       </div>
 
       {/* Data Management */}
@@ -603,34 +620,6 @@ function ExternalDependencyHelp({ command }: { command: string }) {
         <strong>Windows 安装 Poppler</strong>
         <span>下载 Poppler for Windows，解压后把包含 pdftoppm.exe 的 bin 目录加入 PATH。</span>
         <code>pdftoppm -h</code>
-      </div>
-    );
-  }
-
-  if (command === "magick") {
-    if (isLinux) {
-      return (
-        <div className="dependency-help">
-          <strong>Linux 安装 ImageMagick</strong>
-          <span>ImageMagick 用于图片处理和格式转换。</span>
-          <code>sudo apt install imagemagick</code>
-        </div>
-      );
-    }
-    if (isMac) {
-      return (
-        <div className="dependency-help">
-          <strong>macOS 安装 ImageMagick</strong>
-          <span>使用 Homebrew 安装 ImageMagick。</span>
-          <code>brew install imagemagick</code>
-        </div>
-      );
-    }
-    return (
-      <div className="dependency-help">
-        <strong>Windows 安装 ImageMagick</strong>
-        <span>安装官方 Windows 版 ImageMagick，安装时勾选添加到 PATH，安装后重启应用。</span>
-        <code>magick -version</code>
       </div>
     );
   }
