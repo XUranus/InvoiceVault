@@ -65,6 +65,17 @@ export async function pickInvoiceFiles(): Promise<string[]> {
   return invoke<string[]>("pick_invoice_files");
 }
 
+export async function pollDroppedFiles(): Promise<string[]> {
+  return invoke<string[]>("poll_dropped_files");
+}
+
+export async function importDroppedFile(
+  name: string,
+  data: number[],
+): Promise<ImportJob[]> {
+  return invoke<ImportJob[]>("import_dropped_file", { name, data });
+}
+
 export async function listImportJobs(
   page?: number,
   pageSize?: number,

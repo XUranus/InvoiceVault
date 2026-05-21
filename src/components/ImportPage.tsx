@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { ImportJob, ImportJobListResult } from "../types";
 import {
   getInvoiceIdByRawFile,
+  importDroppedFile,
   importFiles,
   listImportJobs,
   pickInvoiceFiles,
@@ -18,6 +19,7 @@ import { useNavigateToInvoice } from "../hooks/useNavigateToInvoice";
 
 export function ImportPage() {
   const isDraggingFiles = useAppStore((s) => s.isDraggingFiles);
+  const setIsDraggingFiles = useAppStore((s) => s.setIsDraggingFiles);
   const dragImportPaths = useAppStore((s) => s.dragImportPaths);
   const llm = useLlmStore((s) => s.llm);
   const auditEnabled = useLlmStore((s) => s.auditEnabled);
@@ -28,6 +30,8 @@ export function ImportPage() {
   const error = useAppStore((s) => s.error);
   const setError = useAppStore((s) => s.setError);
   const [isImporting, setIsImporting] = React.useState(false);
+  const isPickingRef = React.useRef(false);
+  const dropAreaRef = React.useRef<HTMLButtonElement>(null);
   const [recognizingJobId, setRecognizingJobId] = React.useState<number | null>(null);
   const [expandedJobId, setExpandedJobId] = React.useState<number | null>(null);
   const [result, setResult] = React.useState<ImportJobListResult | null>(null);
@@ -70,6 +74,83 @@ export function ImportPage() {
     return () => window.clearInterval(timer);
   }, [fetchJobs, page, result?.jobs]);
 
+  // DOM drag events for visual hover feedback + file drop handling.
+  // File paths are unavailable in WebView2, so we send file bytes to Rust.
+  const handleDomDrop = React.useCallback(async (fileList: FileList) => {
+    const files = Array.from(fileList).filter((f) => {
+      const ext = f.name.split(".").pop()?.toLowerCase();
+      return ext && ["pdf", "png", "jpg", "jpeg"].includes(ext);
+    });
+    if (files.length === 0) return;
+    console.log("[drag-drop] DOM drop, files:", files.map((f) => f.name));
+    setIsImporting(true);
+    setOptimisticJobs(files.map((f) => createOptimisticJob(f.name, 0)));
+    try {
+      const allJobs = [];
+      for (const file of files) {
+        const buf = await file.arrayBuffer();
+        const data = Array.from(new Uint8Array(buf));
+        console.log("[drag-drop] importing DOM file:", file.name, "size:", data.length);
+        const jobs = await importDroppedFile(file.name, data);
+        allJobs.push(...jobs);
+      }
+      const failedJobs = allJobs.filter((j) => j.status === "failed");
+      if (failedJobs.length > 0) {
+        const detail = failedJobs
+          .map((j) => j.error_message || `${j.source_path} 导入失败`)
+          .join("\n");
+        setError(`导入失败：${detail}`);
+      }
+      await fetchJobs(1);
+      setTimeout(() => fetchJobs(1), 1500);
+    } catch (err) {
+      console.error("[drag-drop] DOM drop import failed:", err);
+      setError(String(err));
+    } finally {
+      setIsImporting(false);
+      setOptimisticJobs([]);
+    }
+  }, [fetchJobs, setError]);
+
+  React.useEffect(() => {
+    const el = dropAreaRef.current;
+    if (!el) return;
+    const onDragEnter = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) {
+        console.log("[drag-drop] DOM dragenter on drop area");
+        setIsDraggingFiles(true);
+      }
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!el.contains(e.relatedTarget as Node | null)) {
+        console.log("[drag-drop] DOM dragleave on drop area");
+        setIsDraggingFiles(false);
+      }
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) {
+        e.preventDefault();
+      }
+    };
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      setIsDraggingFiles(false);
+      if (e.dataTransfer?.files.length) {
+        handleDomDrop(e.dataTransfer.files);
+      }
+    };
+    el.addEventListener("dragenter", onDragEnter);
+    el.addEventListener("dragleave", onDragLeave);
+    el.addEventListener("dragover", onDragOver);
+    el.addEventListener("drop", onDrop);
+    return () => {
+      el.removeEventListener("dragenter", onDragEnter);
+      el.removeEventListener("dragleave", onDragLeave);
+      el.removeEventListener("dragover", onDragOver);
+      el.removeEventListener("drop", onDrop);
+    };
+  }, [setIsDraggingFiles, handleDomDrop]);
+
   const doImport = React.useCallback(
     async (paths: string[]) => {
       setIsImporting(true);
@@ -98,13 +179,16 @@ export function ImportPage() {
   );
 
   const handlePickFiles = async () => {
-    if (isImporting) return;
+    if (isImporting || isPickingRef.current) return;
+    isPickingRef.current = true;
     try {
       const paths = await pickInvoiceFiles();
       if (paths.length === 0) return;
       await doImport(paths);
     } catch (err) {
       setError(String(err));
+    } finally {
+      isPickingRef.current = false;
     }
   };
 
@@ -207,6 +291,7 @@ export function ImportPage() {
 
       <div className="import-zone">
         <button
+          ref={dropAreaRef}
           type="button"
           className={`drop-area ${isDraggingFiles ? "drop-area-active" : ""} ${isImporting ? "drop-area-disabled" : ""}`}
           aria-disabled={isImporting}

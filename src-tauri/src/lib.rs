@@ -328,6 +328,31 @@ async fn import_files(
 }
 
 #[tauri::command]
+fn poll_dropped_files(app: AppHandle) -> Vec<String> {
+    let state = app.state::<AppState>();
+    state.take_dropped_files()
+}
+
+#[tauri::command]
+async fn import_dropped_file(
+    app: AppHandle,
+    name: String,
+    data: Vec<u8>,
+) -> Result<Vec<ImportJobSummary>, String> {
+    let tmp = std::env::temp_dir().join(format!("iv_drop_{}", name));
+    std::fs::write(&tmp, &data).map_err(|e| format!("write temp: {e}"))?;
+    let path = tmp.to_string_lossy().into_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .import_files(vec![path.clone()], &app)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 async fn pick_invoice_files(app: AppHandle) -> Result<Vec<String>, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
@@ -1840,31 +1865,33 @@ pub fn run() {
                         apply_windows_dpi_zoom(&window, *scale_factor);
                     }
                 }
-                WindowEvent::DragDrop(DragDropEvent::Enter { .. })
-                | WindowEvent::DragDrop(DragDropEvent::Over { .. }) => {
+                WindowEvent::DragDrop(DragDropEvent::Enter { position, .. })
+                | WindowEvent::DragDrop(DragDropEvent::Over { position, .. }) => {
+                    tracing::debug!(?position, "[drag-drop] native DragDrop enter/over");
                     let _ = window_app
                         .emit("native-drag-state", NativeDragStateEvent { dragging: true });
                 }
                 WindowEvent::DragDrop(DragDropEvent::Leave) => {
+                    tracing::debug!("[drag-drop] native DragDrop leave");
                     let _ = window_app.emit(
                         "native-drag-state",
                         NativeDragStateEvent { dragging: false },
                     );
                 }
-                WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
-                    let _ = window_app.emit(
-                        "native-drag-state",
-                        NativeDragStateEvent { dragging: false },
-                    );
+                WindowEvent::DragDrop(DragDropEvent::Drop { paths, position }) => {
+                    tracing::info!(count = paths.len(), ?paths, ?position, "[drag-drop] native DragDrop drop");
                     if paths.is_empty() {
+                        tracing::warn!("[drag-drop] native drop received empty paths");
                         return;
                     }
 
-                    let paths = paths
+                    let paths: Vec<String> = paths
                         .iter()
                         .map(|path| path.to_string_lossy().into_owned())
-                        .collect::<Vec<_>>();
-                    let _ = window_app.emit("native-file-drop", NativeFileDropEvent { paths });
+                        .collect();
+                    tracing::info!(?paths, "[drag-drop] storing dropped files for frontend poll");
+                    let state = window_app.state::<AppState>();
+                    state.push_dropped_files(paths);
                 }
                 _ => {}
             });
@@ -1884,6 +1911,8 @@ pub fn run() {
             frontend_heartbeat,
             import_files,
             pick_invoice_files,
+            poll_dropped_files,
+            import_dropped_file,
             list_import_jobs,
             save_invoice_extraction,
             list_invoices,

@@ -257,6 +257,8 @@ pub struct AppState {
     importing_paths: Arc<Mutex<HashSet<String>>>,
     dashboard_cache: moka::sync::Cache<String, crate::extractor::DashboardStats>,
     llm_usage_cache: moka::sync::Cache<String, crate::extractor::LlmUsageStats>,
+    /// File paths from native drag-drop, consumed by frontend polling
+    pending_dropped_files: Arc<Mutex<Vec<String>>>,
 }
 
 fn cache_key(date_from: &Option<String>, date_to: &Option<String>) -> String {
@@ -348,6 +350,7 @@ impl AppState {
             llm_config,
             llm_audit_enabled,
             importing_paths: Arc::new(Mutex::new(HashSet::new())),
+            pending_dropped_files: Arc::new(Mutex::new(Vec::new())),
             dashboard_cache: moka::sync::Cache::builder()
                 .max_capacity(8)
                 .time_to_live(std::time::Duration::from_secs(60))
@@ -438,6 +441,16 @@ impl AppState {
 
     pub fn db(&self) -> &Arc<Mutex<Connection>> {
         &self.db
+    }
+
+    pub fn push_dropped_files(&self, paths: Vec<String>) {
+        let mut guard = self.pending_dropped_files.lock().expect("pending_dropped_files mutex poisoned");
+        guard.extend(paths);
+    }
+
+    pub fn take_dropped_files(&self) -> Vec<String> {
+        let mut guard = self.pending_dropped_files.lock().expect("pending_dropped_files mutex poisoned");
+        std::mem::take(&mut *guard)
     }
 
     pub fn import_files(

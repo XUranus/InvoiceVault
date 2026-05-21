@@ -1,10 +1,8 @@
 import { useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { listen } from "@tauri-apps/api/event";
-import type { WatcherImportEvent } from "../types";
 import {
   importFiles,
+  pollDroppedFiles,
   getRecognitionQueueStatus,
   syncAllEmailSources,
   listEmailSources,
@@ -14,13 +12,8 @@ import { useAppStore } from "../stores/appStore";
 import { useLlmStore } from "../stores/llmStore";
 import { useRefreshStore } from "../stores/refreshStore";
 
-// Module-level guard: prevents duplicate drag-drop handler registration
-// caused by React StrictMode double-mount (mount → unmount → mount)
-let dragDropRegistered = false;
-
-// Mutex guard: Tauri's onDragDropEvent fires multiple "drop" events
-// for a single physical file drop on Linux/GTK. A boolean lock ensures
-// only the first event triggers import; the rest are dropped immediately.
+// Mutex guard: prevents duplicate import when multiple drop events fire
+// for a single physical file drop (DOM + native handler overlap).
 let dropImportInProgress = false;
 
 // Debounce timer for coalescing rapid refresh triggers
@@ -45,7 +38,6 @@ export function useAppInitializer() {
   const navigate = useNavigate();
 
   const theme = useAppStore((s) => s.theme);
-  const setTheme = useAppStore((s) => s.setTheme);
   const initialize = useAppStore((s) => s.initialize);
   const loadConfigFromBackend = useLlmStore((s) => s.loadConfigFromBackend);
   const setIsDraggingFiles = useAppStore((s) => s.setIsDraggingFiles);
@@ -66,20 +58,6 @@ export function useAppInitializer() {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
-  // Listen for theme changes from Agent/backend
-  useEffect(() => {
-    let cleanup: (() => void) | null = null;
-    listen<{ theme: string }>("theme-change", (event) => {
-      const t = event.payload.theme;
-      if (t === "light" || t === "dark") {
-        setTheme(t);
-      }
-    })
-      .then((fn) => { cleanup = fn; })
-      .catch(() => {});
-    return () => { cleanup?.(); };
-  }, [setTheme]);
-
   // Initialize data on mount
   useEffect(() => {
     initialize();
@@ -94,17 +72,29 @@ export function useAppInitializer() {
 
   const handleDroppedFiles = useCallback(
     (paths: string[]) => {
-      if (paths.length === 0) return;
-      if (dropImportInProgress) return;
+      console.log("[drag-drop] handleDroppedFiles called, paths:", paths, "inProgress:", dropImportInProgress);
+      if (paths.length === 0) {
+        console.warn("[drag-drop] dropped with empty paths, ignoring");
+        return;
+      }
+      if (dropImportInProgress) {
+        console.warn("[drag-drop] import already in progress, skipping duplicate");
+        return;
+      }
       dropImportInProgress = true;
       setIsDraggingFiles(false);
       setDragImportPaths(paths);
       navigate("/import");
+      console.log("[drag-drop] invoking importFiles IPC with paths:", paths);
       importFiles(paths)
-        .then(() => {
+        .then((jobs) => {
+          console.log("[drag-drop] importFiles succeeded, jobs:", jobs);
           triggerImportRefresh();
         })
-        .catch((err) => setError(String(err)))
+        .catch((err) => {
+          console.error("[drag-drop] importFiles failed:", err);
+          setError(String(err));
+        })
         .finally(() => {
           clearDragImportPaths();
           dropImportInProgress = false;
@@ -120,64 +110,22 @@ export function useAppInitializer() {
     ],
   );
 
-  // Global drag-drop handler
+  // Poll backend for native drag-drop file paths (bypasses broken Tauri event system)
   useEffect(() => {
-    if (dragDropRegistered) return;
-    dragDropRegistered = true;
-    getCurrentWebview()
-      .onDragDropEvent((event) => {
-        const evtType = (event.payload as { type: string }).type;
-        if (evtType === "enter" || evtType === "over") {
-          setIsDraggingFiles(true); return;
+    let stopped = false;
+    const poll = async () => {
+      if (stopped || dropImportInProgress) return;
+      try {
+        const paths = await pollDroppedFiles();
+        if (paths.length > 0) {
+          console.log("[drag-drop] polled dropped files:", paths);
+          handleDroppedFiles(paths);
         }
-        if (evtType === "leave") {
-          setIsDraggingFiles(false); return;
-        }
-        setIsDraggingFiles(false);
-        const paths: string[] = (event.payload as { paths: string[] }).paths ?? [];
-        handleDroppedFiles(paths);
-      })
-      .catch(() => {});
-  }, [setIsDraggingFiles, handleDroppedFiles]);
-
-  // Native window drag-drop fallback
-  useEffect(() => {
-    let cleanupDragState: (() => void) | null = null;
-    let cleanupDrop: (() => void) | null = null;
-    let cleanupImportError: (() => void) | null = null;
-    listen<{ dragging: boolean }>("native-drag-state", (event) => {
-      setIsDraggingFiles(event.payload.dragging);
-    }).then((fn) => { cleanupDragState = fn; }).catch(() => {});
-    listen<{ paths: string[] }>("native-file-drop", (event) => {
-      handleDroppedFiles(event.payload.paths);
-    }).then((fn) => { cleanupDrop = fn; }).catch(() => {});
-    listen<string>("native-import-error", (event) => {
-      setError(event.payload);
-    }).then((fn) => { cleanupImportError = fn; }).catch(() => {});
-    return () => {
-      cleanupDragState?.();
-      cleanupDrop?.();
-      cleanupImportError?.();
+      } catch { /* ignore poll errors */ }
     };
-  }, [setIsDraggingFiles, setError, handleDroppedFiles]);
-
-  // Watcher auto-import listener
-  useEffect(() => {
-    let cleanup: (() => void) | null = null;
-    listen<WatcherImportEvent>("watcher-import", () => {
-      scheduleRefresh(triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount);
-    }).then((fn) => { cleanup = fn; }).catch(() => {});
-    return () => { cleanup?.(); };
-  }, [triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount]);
-
-  // Background recognition completion listener
-  useEffect(() => {
-    let cleanup: (() => void) | null = null;
-    listen("recognition-complete", () => {
-      scheduleRefresh(triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount);
-    }).then((fn) => { cleanup = fn; }).catch(() => {});
-    return () => { cleanup?.(); };
-  }, [triggerImportRefresh, triggerDashboardRefresh, refreshUnviewedCount]);
+    const interval = setInterval(poll, 500);
+    return () => { stopped = true; clearInterval(interval); };
+  }, [handleDroppedFiles]);
 
   // Recognition queue polling
   useEffect(() => {
