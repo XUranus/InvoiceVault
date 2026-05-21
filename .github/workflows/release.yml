@@ -216,12 +216,12 @@ jobs:
               librsvg2-dev \
               libwebkit2gtk-4.1-dev \
               libxdo-dev \
-              pkg-config \
-              npm
+              pkg-config
           run: |
             cd /workspace
 
-            # Install Node.js 22 via NodeSource (container npm is usually outdated)
+            # Remove distro Node.js to avoid conflicts with NodeSource package
+            apt-get remove -y libnode-dev libnode72 nodejs || true
             curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
             apt-get install -y nodejs
 
