@@ -153,7 +153,7 @@ export function useAppInitializer() {
       try {
         const sources = await listEmailSources();
         const hasAutoSync = sources.some(
-          (s) => s.enabled && s.auto_sync,
+          (s) => s.enabled,
         );
         if (!hasAutoSync) return;
         await syncAllEmailSources();

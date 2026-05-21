@@ -245,6 +245,7 @@ fn find_onnxruntime_lib(lib_name: &str) -> Option<PathBuf> {
         manifest_dir.join("resources").join(lib_name),
         manifest_dir.join("target").join("debug").join(lib_name),
         manifest_dir.join("target").join("release").join(lib_name),
+        PathBuf::from("/usr/lib").join(lib_name),
     ];
 
     if let Ok(exe) = std::env::current_exe() {
