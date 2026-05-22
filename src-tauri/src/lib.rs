@@ -299,6 +299,11 @@ fn frontend_heartbeat(seq: u64) {
 }
 
 #[tauri::command]
+fn get_app_version() -> &'static str {
+    env!("GIT_VERSION")
+}
+
+#[tauri::command]
 async fn app_health(app: AppHandle) -> Result<AppHealth, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
@@ -1901,6 +1906,7 @@ pub fn run() {
             window_toggle_maximize,
             window_close,
             app_health,
+            get_app_version,
             frontend_heartbeat,
             import_files,
             pick_invoice_files,
@@ -2006,7 +2012,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let version = MenuItem::with_id(
         app,
         TRAY_VERSION_ID,
-        format!("版本 {}", app.package_info().version),
+        format!("版本 {}", env!("GIT_VERSION")),
         false,
         None::<&str>,
     )?;
@@ -2022,7 +2028,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .tooltip(format!(
             "{} {}",
             app.package_info().name,
-            app.package_info().version
+            env!("GIT_VERSION")
         ))
         .menu(&menu)
         .show_menu_on_left_click(false)

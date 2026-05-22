@@ -14,10 +14,10 @@ import {
 import type { ExportLogsResult, CleanupStorageResult } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { useAppStore } from "../../stores/appStore";
-import { APP_CONFIG } from "../../appConfig";
 
 export function AdvancedPage() {
   const health = useAppStore((s) => s.health);
+  const appVersion = useAppStore((s) => s.appVersion);
 
   // --- External Dependencies ---
   const [dependencyStatuses, setDependencyStatuses] = React.useState<ExternalDependencyStatus[]>([]);
@@ -536,7 +536,7 @@ export function AdvancedPage() {
           <h3>系统信息</h3>
           <dl className="info-grid">
             <dt>应用</dt>
-            <dd>InvoiceVault : v{APP_CONFIG.version}</dd>
+            <dd>InvoiceVault : v{appVersion || "—"}</dd>
             <dt>数据目录</dt>
             <dd>
               <button

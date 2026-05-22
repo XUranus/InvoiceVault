@@ -1,4 +1,18 @@
 fn main() {
+    // Embed git version at compile time: tag if available, otherwise short commit hash
+    let git_version = std::process::Command::new("git")
+        .args(["describe", "--tags", "--always"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| std::env::var("CARGO_PKG_VERSION").unwrap_or_default());
+    println!("cargo:rustc-env=GIT_VERSION={git_version}");
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/packed-refs");
+    println!("cargo:rerun-if-changed=.git/refs");
+
     #[cfg(target_os = "windows")]
     {
         println!("cargo:rustc-link-arg-bin=invoicevault=/MANIFEST:EMBED");

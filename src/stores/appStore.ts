@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import type { AppHealth, Invoice } from "../types";
-import { countUnviewedInvoices, getAppHealth, searchInvoices, getUnreadEventCount, getTheme as getThemeApi, setTheme as setThemeApi } from "../api";
+import { countUnviewedInvoices, getAppHealth, getAppVersion, searchInvoices, getUnreadEventCount, getTheme as getThemeApi, setTheme as setThemeApi } from "../api";
 
 type AppStore = {
   health: AppHealth | null;
+  appVersion: string;
   error: string | null;
   theme: "light" | "dark";
   invoices: Invoice[];
@@ -37,6 +38,7 @@ type AppStore = {
 
 export const useAppStore = create<AppStore>((set, get) => ({
   health: null,
+  appVersion: "",
   error: null,
   theme:
     (localStorage.getItem("theme") as "light" | "dark" | null) ?? "light",
@@ -88,6 +90,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ health });
     } catch (err) {
       set({ error: String(err) });
+    }
+    try {
+      const appVersion = await getAppVersion();
+      set({ appVersion });
+    } catch {
+      // ignore
     }
     try {
       const backendTheme = await getThemeApi();

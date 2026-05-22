@@ -57,6 +57,10 @@ export async function getAppHealth(): Promise<AppHealth> {
   return invoke<AppHealth>("app_health");
 }
 
+export async function getAppVersion(): Promise<string> {
+  return invoke<string>("get_app_version");
+}
+
 export async function importFiles(paths: string[]): Promise<ImportJob[]> {
   return invoke<ImportJob[]>("import_files", { request: { paths } });
 }
