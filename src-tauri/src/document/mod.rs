@@ -47,12 +47,11 @@ pub fn render_pdf_pages(
     fs::create_dir_all(&render_dir)?;
 
     let output_prefix = render_dir.join("page");
+    // Use plain PPM output for compatibility with both Poppler and xpdf pdftoppm.
+    // Poppler supports -jpeg/-jpegopt but xpdf does not; PPM is the common denominator.
     let output = crate::process_utils::command_no_window("pdftoppm")
-        .arg("-jpeg")
         .arg("-r")
         .arg("180")
-        .arg("-jpegopt")
-        .arg("quality=85")
         .arg(pdf_path)
         .arg(&output_prefix)
         .output()
@@ -76,7 +75,8 @@ pub fn render_pdf_pages(
         });
     }
 
-    let mut pages = rendered_page_paths(&render_dir)?;
+    // Convert rendered PPM pages to JPEG and collect paths
+    let mut pages = convert_ppm_pages_to_jpeg(&render_dir)?;
     if pages.is_empty() {
         error!("PDF renderer produced no pages");
         return Err(DocumentError::NoRenderedPages);
@@ -223,6 +223,42 @@ fn rendered_page_paths(render_dir: &Path) -> Result<Vec<(usize, PathBuf)>, Docum
             continue;
         };
         pages.push((page_number, path));
+    }
+
+    Ok(pages)
+}
+
+/// Scan for PPM files produced by pdftoppm and convert each to JPEG.
+/// Compatible with both Poppler (zero-padded names) and xpdf (no padding).
+fn convert_ppm_pages_to_jpeg(render_dir: &Path) -> Result<Vec<(usize, PathBuf)>, DocumentError> {
+    let mut ppm_files: Vec<(usize, PathBuf)> = Vec::new();
+
+    for entry in fs::read_dir(render_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let ext = path.extension().and_then(|v| v.to_str());
+        if ext != Some("ppm") {
+            continue;
+        }
+        let Some(page_number) = path
+            .file_stem()
+            .and_then(|v| v.to_str())
+            .and_then(page_number_from_stem)
+        else {
+            continue;
+        };
+        ppm_files.push((page_number, path));
+    }
+
+    ppm_files.sort_by_key(|(n, _)| *n);
+
+    let mut pages = Vec::with_capacity(ppm_files.len());
+    for (page_number, ppm_path) in ppm_files {
+        let jpg_path = ppm_path.with_extension("jpg");
+        resize_and_save(&ppm_path, &jpg_path, 1800, 85)?;
+        // Remove the large PPM source to save disk space
+        let _ = fs::remove_file(&ppm_path);
+        pages.push((page_number, jpg_path));
     }
 
     Ok(pages)
