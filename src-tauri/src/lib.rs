@@ -474,55 +474,30 @@ fn open_invoice_raw_file_in_browser(
 
 fn open_file_url_with_system_handler(path: &Path) -> Result<(), String> {
     let canonical = path.canonicalize().map_err(|err| err.to_string())?;
-    let url = file_url_from_path(&canonical);
 
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut command = command_no_window("rundll32");
-        command.arg("url.dll,FileProtocolHandler").arg(&url);
+        let mut command = command_no_window("explorer");
+        command.arg(&canonical);
         command
     };
 
     #[cfg(target_os = "macos")]
     let mut command = {
         let mut command = command_no_window("open");
-        command.arg(&url);
+        command.arg(&canonical);
         command
     };
 
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut command = {
         let mut command = command_no_window("xdg-open");
-        command.arg(&url);
+        command.arg(&canonical);
         command
     };
 
     command.spawn().map_err(|err| err.to_string())?;
     Ok(())
-}
-
-fn file_url_from_path(path: &Path) -> String {
-    let normalized = path.to_string_lossy().replace('\\', "/");
-    let path_part = if normalized.len() >= 2 && normalized.as_bytes()[1] == b':' {
-        format!("/{normalized}")
-    } else {
-        normalized
-    };
-    format!("file://{}", percent_encode_file_path(&path_part))
-}
-
-fn percent_encode_file_path(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.as_bytes() {
-        let keep = byte.is_ascii_alphanumeric()
-            || matches!(*byte, b'-' | b'.' | b'_' | b'~' | b'/' | b':');
-        if keep {
-            encoded.push(*byte as char);
-        } else {
-            encoded.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    encoded
 }
 
 #[tauri::command]
