@@ -206,28 +206,6 @@ pub fn resize_and_save(
     Ok(())
 }
 
-fn rendered_page_paths(render_dir: &Path) -> Result<Vec<(usize, PathBuf)>, DocumentError> {
-    let mut pages = Vec::new();
-
-    for entry in fs::read_dir(render_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("jpg") {
-            continue;
-        }
-        let Some(page_number) = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .and_then(page_number_from_stem)
-        else {
-            continue;
-        };
-        pages.push((page_number, path));
-    }
-
-    Ok(pages)
-}
-
 /// Scan for PPM files produced by pdftoppm and convert each to JPEG.
 /// Compatible with both Poppler (zero-padded names) and xpdf (no padding).
 fn convert_ppm_pages_to_jpeg(render_dir: &Path) -> Result<Vec<(usize, PathBuf)>, DocumentError> {
