@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useNavigate } from "react-router-dom";
 import {
   importFiles,
@@ -72,27 +73,16 @@ export function useAppInitializer() {
 
   const handleDroppedFiles = useCallback(
     (paths: string[]) => {
-      console.log("[drag-drop] handleDroppedFiles called, paths:", paths, "inProgress:", dropImportInProgress);
-      if (paths.length === 0) {
-        console.warn("[drag-drop] dropped with empty paths, ignoring");
-        return;
-      }
-      if (dropImportInProgress) {
-        console.warn("[drag-drop] import already in progress, skipping duplicate");
-        return;
-      }
+      if (paths.length === 0 || dropImportInProgress) return;
       dropImportInProgress = true;
       setIsDraggingFiles(false);
       setDragImportPaths(paths);
       navigate("/import");
-      console.log("[drag-drop] invoking importFiles IPC with paths:", paths);
       importFiles(paths)
-        .then((jobs) => {
-          console.log("[drag-drop] importFiles succeeded, jobs:", jobs);
+        .then(() => {
           triggerImportRefresh();
         })
         .catch((err) => {
-          console.error("[drag-drop] importFiles failed:", err);
           setError(String(err));
         })
         .finally(() => {
@@ -110,7 +100,9 @@ export function useAppInitializer() {
     ],
   );
 
-  // Poll backend for native drag-drop file paths (bypasses broken Tauri event system)
+  // Poll backend for native drag-drop file paths.
+  // On Linux/macOS the native WindowEvent::DragDrop handler stores file paths
+  // which are consumed here. On Windows this is a no-op (native handler is disabled).
   useEffect(() => {
     let stopped = false;
     const poll = async () => {
@@ -118,7 +110,6 @@ export function useAppInitializer() {
       try {
         const paths = await pollDroppedFiles();
         if (paths.length > 0) {
-          console.log("[drag-drop] polled dropped files:", paths);
           handleDroppedFiles(paths);
         }
       } catch { /* ignore poll errors */ }
@@ -126,6 +117,34 @@ export function useAppInitializer() {
     const interval = setInterval(poll, 500);
     return () => { stopped = true; clearInterval(interval); };
   }, [handleDroppedFiles]);
+
+  // Prevent webview default drag-drop behavior on all platforms.
+  // On Windows, the DOM drop handler in ImportPage.tsx handles the actual import.
+  // On Linux/macOS, the native handler handles it; this just prevents visual glitches.
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, []);
+
+  // Listen for native DragDrop hover state (Linux/macOS).
+  // On these platforms, DOM dragenter/dragleave don't fire — the native handler
+  // emits "native-drag-state" instead. This updates the visual hover feedback.
+  useEffect(() => {
+    const unlisten = listen<{ dragging: boolean }>("native-drag-state", (event) => {
+      setIsDraggingFiles(event.payload.dragging);
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [setIsDraggingFiles]);
 
   // Recognition queue polling
   useEffect(() => {

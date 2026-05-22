@@ -257,7 +257,6 @@ pub struct AppState {
     importing_paths: Arc<Mutex<HashSet<String>>>,
     dashboard_cache: moka::sync::Cache<String, crate::extractor::DashboardStats>,
     llm_usage_cache: moka::sync::Cache<String, crate::extractor::LlmUsageStats>,
-    /// File paths from native drag-drop, consumed by frontend polling
     pending_dropped_files: Arc<Mutex<Vec<String>>>,
 }
 

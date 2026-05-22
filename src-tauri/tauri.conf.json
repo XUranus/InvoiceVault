@@ -12,13 +12,14 @@
   "app": {
     "windows": [
       {
+        "create": false,
         "label": "main",
         "title": "InvoiceVault",
         "width": 1260,
         "height": 860,
         "minWidth": 1060,
         "minHeight": 760,
-        "dragDropEnabled": false,
+        "dragDropEnabled": true,
         "transparent": false,
         "decorations": false
       }

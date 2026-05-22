@@ -71,10 +71,6 @@ struct NativeDragStateEvent {
     dragging: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct NativeFileDropEvent {
-    paths: Vec<String>,
-}
 use watcher::{AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus};
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -1810,6 +1806,26 @@ pub fn run() {
                 }
             }
 
+            // Create main window from config with platform-specific drag-drop:
+            // - Windows: disable native handler (required for HTML5/DOM drag-drop on WebView2)
+            // - Linux/macOS: keep native handler enabled (WebKitGTK displays images without it)
+            let window_config = &app.config().app.windows[0];
+            #[cfg(target_os = "windows")]
+            {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)
+                    .expect("failed to create window from config")
+                    .disable_drag_drop_handler()
+                    .build()
+                    .expect("failed to create main window");
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)
+                    .expect("failed to create window from config")
+                    .build()
+                    .expect("failed to create main window");
+            }
+
             // Restore and persist window size
             let window = app
                 .get_webview_window(MAIN_WINDOW_LABEL)
@@ -1865,12 +1881,14 @@ pub fn run() {
                         apply_windows_dpi_zoom(&window, *scale_factor);
                     }
                 }
+                #[cfg(not(target_os = "windows"))]
                 WindowEvent::DragDrop(DragDropEvent::Enter { position, .. })
                 | WindowEvent::DragDrop(DragDropEvent::Over { position, .. }) => {
                     tracing::debug!(?position, "[drag-drop] native DragDrop enter/over");
                     let _ = window_app
                         .emit("native-drag-state", NativeDragStateEvent { dragging: true });
                 }
+                #[cfg(not(target_os = "windows"))]
                 WindowEvent::DragDrop(DragDropEvent::Leave) => {
                     tracing::debug!("[drag-drop] native DragDrop leave");
                     let _ = window_app.emit(
@@ -1878,13 +1896,13 @@ pub fn run() {
                         NativeDragStateEvent { dragging: false },
                     );
                 }
+                #[cfg(not(target_os = "windows"))]
                 WindowEvent::DragDrop(DragDropEvent::Drop { paths, position }) => {
                     tracing::info!(count = paths.len(), ?paths, ?position, "[drag-drop] native DragDrop drop");
                     if paths.is_empty() {
                         tracing::warn!("[drag-drop] native drop received empty paths");
                         return;
                     }
-
                     let paths: Vec<String> = paths
                         .iter()
                         .map(|path| path.to_string_lossy().into_owned())
