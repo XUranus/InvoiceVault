@@ -532,6 +532,7 @@ fn execute_tool(
                 remarks: args.get("remarks").map(|v| v.as_str().map(String::from)),
                 confidence: None,
                 status: args.get("status").map(|v| v.as_str().map(String::from)),
+                extra_fields: None,
             };
             // update_invoice takes &mut Connection, but we only have &Connection
             // Open a second connection for writes

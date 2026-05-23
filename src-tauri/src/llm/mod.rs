@@ -871,19 +871,32 @@ pub fn body_to_value(body: &str) -> Value {
 }
 
 fn invoice_recognition_prompt() -> &'static str {
-    r#"你是发票识别引擎。请只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。
+    r#"你是发票/票据识别引擎。请只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。
 
 如果图片完全不是发票或票据（如风景照、人物照等），输出 {"is_invoice": false, "confidence": 0, "needs_review": true, "warnings": ["not an invoice"]}。
 注意：即使图片带有"测试""样例""模拟""fake"等水印或标注，只要票据格式正确、字段可读，就应视为有效发票进行识别，不要因为水印而判定为非发票。
 
 如果图片是发票、票据或测试票据，按下面字段输出。无法识别的字段用 null，金额用数字，日期必须使用 YYYY-MM-DD。
-支持并尽量准确区分这些类型：
+
+## 支持的类型
 - 增值税电子普通发票、增值税电子专用发票、全电发票、增值税普通发票、增值税专用发票
 - 通行费发票、出租车发票、火车票/铁路电子客票、机票行程单
 - 定额发票、卷式发票、机动车销售统一发票、二手车销售统一发票
 - 海关进口增值税专用缴款书、财政电子票据、非税收入票据、普通收据
+- 微信转账记录、支付宝转账记录、银行转账回单
+
+## 各类型提取指引
+- **火车票/铁路电子客票**：seller=承运方(如中国铁路)，buyer=乘客。必填 extra_fields: train_number, departure, arrival, seat_class, passenger_name, departure_time
+- **机票行程单**：seller=航空公司，buyer=乘客。必填 extra_fields: flight_number, departure, arrival, seat_class, passenger_name, departure_time, boarding_gate, baggage
+- **通行费发票**：seller=收费方，buyer=付款方。必填 extra_fields: toll_entry, toll_exit, license_plate
+- **出租车/网约车**：seller=司机/平台，buyer=乘客。必填 extra_fields: departure, arrival, license_plate
+- **微信/支付宝转账**：seller=收款方，buyer=付款方。必填 extra_fields: payment_platform, transaction_id, counterparty, transaction_type(收入/支出)。amount_without_tax 和 tax_amount 填 null，total_amount 填转账金额。invoice_number 填交易单号
+- **增值税发票**：标准购销方。保持现有字段映射
+- **机动车销售发票**：seller=销售方，buyer=购车方。extra_fields: vin, engine_number, vehicle_model
 
 特殊票据没有标准购销方时，尽量把承运方/收款方放入 seller，把乘客/付款方放入 buyer。特殊字段放入 extra_fields，不要塞进 remarks。
+
+## 输出 JSON Schema
 {
   "is_invoice": true,
   "invoice_type": "string|null",
@@ -918,6 +931,9 @@ fn invoice_recognition_prompt() -> &'static str {
     "arrival": "string|null",
     "departure_time": "string|null",
     "arrival_time": "string|null",
+    "seat_class": "string|null",
+    "boarding_gate": "string|null",
+    "baggage": "string|null",
     "toll_entry": "string|null",
     "toll_exit": "string|null",
     "license_plate": "string|null",
@@ -927,7 +943,11 @@ fn invoice_recognition_prompt() -> &'static str {
     "engine_number": "string|null",
     "tax_payment_certificate_number": "string|null",
     "receipt_code": "string|null",
-    "receipt_number": "string|null"
+    "receipt_number": "string|null",
+    "payment_platform": "string|null",
+    "transaction_id": "string|null",
+    "counterparty": "string|null",
+    "transaction_type": "string|null"
   },
   "confidence": 0.0,
   "needs_review": true,

@@ -604,6 +604,8 @@ pub struct UpdateInvoiceRequest {
     pub remarks: Option<Option<String>>,
     pub confidence: Option<Option<f64>>,
     pub status: Option<Option<String>>,
+    #[serde(default)]
+    pub extra_fields: Option<Option<Map<String, Value>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -654,6 +656,12 @@ pub fn update_invoice(
     add_field!(remarks, request.remarks);
     add_field!(confidence, request.confidence);
     add_field!(status, request.status);
+
+    if let Some(v) = request.extra_fields {
+        set_clauses.push(format!("extra_fields = ?{}", values.len() + 1));
+        let json_str = v.map(|m| serde_json::to_string(&m).unwrap_or_default());
+        values.push(Box::new(json_str));
+    }
 
     if set_clauses.is_empty() {
         drop(tx);

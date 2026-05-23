@@ -287,9 +287,7 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               <Field label="价税合计" value={detail.total_amount} />
               <Field label="币种" value={detail.currency} />
               <Field label="备注" value={detail.remarks} fullWidth />
-              {parseExtraFields(detail.extra_fields).map(([label, value]) => (
-                <Field key={label} label={label} value={value} />
-              ))}
+              {renderTypedExtraFields(detail.invoice_type, detail.extra_fields)}
             </div>
           )}
 
@@ -426,6 +424,9 @@ function formatExtraFieldLabel(key: string): string {
     arrival: "到达地",
     departure_time: "出发时间",
     arrival_time: "到达时间",
+    seat_class: "座位等级",
+    boarding_gate: "登机口",
+    baggage: "行李额",
     toll_entry: "通行费入口",
     toll_exit: "通行费出口",
     license_plate: "车牌号",
@@ -436,8 +437,66 @@ function formatExtraFieldLabel(key: string): string {
     tax_payment_certificate_number: "缴款书号码",
     receipt_code: "票据代码",
     receipt_number: "票据号码",
+    payment_platform: "支付平台",
+    transaction_id: "交易单号",
+    counterparty: "收付方",
+    transaction_type: "交易类型",
   };
   return labels[key] ?? key;
+}
+
+const EXTRA_FIELD_GROUPS: Record<string, string[]> = {
+  train: ["train_number", "departure", "arrival", "departure_time", "arrival_time", "seat_class", "passenger_name"],
+  flight: ["flight_number", "departure", "arrival", "departure_time", "arrival_time", "seat_class", "boarding_gate", "baggage", "passenger_name"],
+  toll: ["toll_entry", "toll_exit", "license_plate"],
+  taxi: ["departure", "arrival", "license_plate"],
+  transfer: ["payment_platform", "transaction_id", "counterparty", "transaction_type"],
+};
+
+function getExtraFieldGroupKey(invoiceType: string | null): string | null {
+  if (!invoiceType) return null;
+  const t = invoiceType.toLowerCase();
+  if (t.includes("火车") || t.includes("铁路")) return "train";
+  if (t.includes("机票") || t.includes("行程单") || t.includes("航班")) return "flight";
+  if (t.includes("通行费") || t.includes("高速")) return "toll";
+  if (t.includes("出租") || t.includes("网约") || t.includes("打车")) return "taxi";
+  if (t.includes("转账") || t.includes("微信") || t.includes("支付宝")) return "transfer";
+  return null;
+}
+
+function renderTypedExtraFields(invoiceType: string | null, extraFieldsJson: string | null) {
+  const allFields = parseExtraFields(extraFieldsJson);
+  if (allFields.length === 0) return null;
+
+  const groupKey = getExtraFieldGroupKey(invoiceType);
+  const priorityKeys = groupKey ? EXTRA_FIELD_GROUPS[groupKey] ?? [] : [];
+  const priorityLabels = new Set(priorityKeys.map(formatExtraFieldLabel));
+
+  const priorityFields = priorityKeys
+    .map((key) => {
+      const label = formatExtraFieldLabel(key);
+      const entry = allFields.find(([l]) => l === label);
+      return entry;
+    })
+    .filter((e): e is [string, string] => !!e);
+
+  const remainingFields = allFields.filter(([label]) => !priorityLabels.has(label));
+
+  return (
+    <>
+      {priorityFields.map(([label, value]) => (
+        <Field key={label} label={label} value={value} />
+      ))}
+      {remainingFields.length > 0 && (
+        <div className="field-full" style={{ marginTop: "4px" }}>
+          <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>其他字段：</span>
+          {remainingFields.map(([label, value]) => (
+            <Field key={label} label={label} value={value} />
+          ))}
+        </div>
+      )}
+    </>
+  );
 }
 
 function formatExtraFieldValue(value: unknown): string {

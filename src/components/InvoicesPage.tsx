@@ -46,6 +46,8 @@ const BATCH_CATEGORY_OPTIONS = [
   { value: "水电", label: "水电" },
   { value: "物流", label: "物流" },
   { value: "广告", label: "广告" },
+  { value: "转账", label: "转账" },
+  { value: "报销", label: "报销" },
   { value: "其他", label: "其他" },
 ];
 

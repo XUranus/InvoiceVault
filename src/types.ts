@@ -186,6 +186,7 @@ export type UpdateInvoiceRequest = {
   remarks?: string | null;
   confidence?: number | null;
   status?: string | null;
+  extra_fields?: Record<string, unknown> | null;
 };
 
 export type UpdateInvoiceResult = {
