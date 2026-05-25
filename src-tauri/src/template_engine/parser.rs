@@ -5,8 +5,7 @@ use std::io::Read;
 /// Parse an XLSX file into a TemplateAst. Reads ALL sheets.
 pub fn parse_xlsx(path: &str) -> Result<TemplateAst, TemplateError> {
     let file = std::fs::File::open(path).map_err(|e| TemplateError::Zip(e.to_string()))?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| TemplateError::Zip(e.to_string()))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| TemplateError::Zip(e.to_string()))?;
 
     // 1. Read shared strings
     let shared_strings = {
@@ -271,7 +270,8 @@ pub fn parse_shared_strings(xml: &str) -> Vec<String> {
         let segment = item.split("</si>").next().unwrap_or("");
         let mut text = String::new();
         for part in segment.split("<t").skip(1) {
-            if let Some(after) = part.split('>').nth(1) {
+            if let Some(tag_end) = part.find('>') {
+                let after = &part[tag_end + 1..];
                 if let Some(value) = after.split("</t>").next() {
                     text.push_str(&xml_unescape(value));
                 }
@@ -339,10 +339,7 @@ fn xml_unescape(s: &str) -> String {
         .replace("&apos;", "'")
 }
 
-fn read_entry(
-    archive: &mut zip::ZipArchive<std::fs::File>,
-    name: &str,
-) -> Option<String> {
+fn read_entry(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<String> {
     let mut f = archive.by_name(name).ok()?;
     let mut s = String::new();
     f.read_to_string(&mut s).ok()?;

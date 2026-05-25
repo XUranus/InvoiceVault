@@ -46,29 +46,29 @@ pub fn bind(
             .iter()
             .find(|r| r.kind == RegionKind::DataAppend);
 
-        let (column_map, header_row_num, data_start, data_end) = if let (Some(hr), Some(dr)) =
-            (header_region, data_region)
-        {
-            (hr.column_map.clone(), hr.start_row, dr.start_row, dr.end_row)
-        } else {
-            // No data region on this sheet — preserve all rows as static
-            let rows = build_static_rows(&sheet.rows, &sheet.full_xml);
-            ir_sheets.push(SheetIR {
-                sheet_index: sheet_idx,
-                rows,
-                merge_cells: sheet.merge_cells.clone(),
-                xml_before_sheet_data: sheet.xml_before_sheet_data.clone(),
-                xml_after_sheet_data: sheet.xml_after_sheet_data.clone(),
-            });
-            continue;
-        };
+        let (column_map, header_row_num, data_start, data_end) =
+            if let (Some(hr), Some(dr)) = (header_region, data_region) {
+                (
+                    hr.column_map.clone(),
+                    hr.start_row,
+                    dr.start_row,
+                    dr.end_row,
+                )
+            } else {
+                // No data region on this sheet — preserve all rows as static
+                let rows = build_static_rows(&sheet.rows, &sheet.full_xml);
+                ir_sheets.push(SheetIR {
+                    sheet_index: sheet_idx,
+                    rows,
+                    merge_cells: sheet.merge_cells.clone(),
+                    xml_before_sheet_data: sheet.xml_before_sheet_data.clone(),
+                    xml_after_sheet_data: sheet.xml_after_sheet_data.clone(),
+                });
+                continue;
+            };
 
         // Find the template data row (first row in data region)
-        let template_row = sheet
-            .rows
-            .iter()
-            .find(|r| r.row_num == data_start)
-            .cloned();
+        let template_row = sheet.rows.iter().find(|r| r.row_num == data_start).cloned();
 
         let data_count = source.row_count();
         let row_offset = if data_count > 0 {

@@ -2634,10 +2634,6 @@ textarea:focus {
   position: relative;
 }
 
-.dup-compare-cell:first-of-type(n) .dup-compare-col-header + & {
-  border-right: 1px solid var(--color-border);
-}
-
 .dup-compare-grid > .dup-compare-cell:nth-child(4n+1),
 .dup-compare-grid > .dup-compare-cell:nth-child(4n+2) {
   border-right: 1px solid var(--color-border);

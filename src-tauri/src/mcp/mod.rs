@@ -592,7 +592,7 @@ fn execute_tool(
         }
         "get_badge_config" => {
             let badge_config: crate::extractor::BadgeConfig =
-                crate::AppState::load_config_raw(app_data_dir, "badge_config.json")
+                crate::app_core::load_config_raw(app_data_dir, "badge_config.json")
                     .unwrap_or_default();
             success_text(serde_json::to_string_pretty(&badge_config).unwrap_or_default())
         }
@@ -641,7 +641,7 @@ fn execute_tool(
         }
         "get_price_config" => {
             let price_config: crate::app_core::PriceConfig =
-                crate::AppState::load_config_raw(app_data_dir, "price_config.json")
+                crate::app_core::load_config_raw(app_data_dir, "price_config.json")
                     .unwrap_or_default();
             success_text(serde_json::to_string_pretty(&price_config).unwrap_or_default())
         }

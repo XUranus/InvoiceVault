@@ -5,6 +5,14 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+mod dashboard;
+mod usage;
+
+pub use dashboard::{
+    get_dashboard_stats, BreakdownItem, DashboardStats, MonthlyTrendPoint, TopSellerItem,
+};
+pub use usage::{get_llm_usage, insert_usage_log, LlmUsageStats};
+
 #[derive(Debug, Deserialize)]
 pub struct SaveInvoiceExtractionRequest {
     pub raw_file_id: i64,
@@ -907,8 +915,6 @@ struct InvoiceExtraction {
     extra_fields: Map<String, Value>,
     #[serde(default)]
     confidence: Option<f64>,
-    #[serde(default)]
-    needs_review: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1387,193 +1393,6 @@ where
     }
 }
 
-// ---- Dashboard ----
-
-#[derive(Debug, Clone, Serialize)]
-pub struct DashboardStats {
-    pub total_invoices: i64,
-    pub total_amount: f64,
-    pub currency: String,
-    pub average_confidence: f64,
-    pub this_month_count: i64,
-    pub this_month_amount: f64,
-    pub pending_count: i64,
-    pub duplicate_count: i64,
-    pub monthly_trend: Vec<MonthlyTrendPoint>,
-    pub by_type: Vec<BreakdownItem>,
-    pub by_status: Vec<BreakdownItem>,
-    pub top_sellers: Vec<TopSellerItem>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct MonthlyTrendPoint {
-    pub month: String,
-    pub count: i64,
-    pub amount: f64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BreakdownItem {
-    pub label: String,
-    pub count: i64,
-    pub amount: f64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TopSellerItem {
-    pub seller_name: String,
-    pub count: i64,
-    pub amount: f64,
-}
-
-fn sum_amount() -> &'static str {
-    "COALESCE(SUM(CAST(total_amount AS REAL)), 0.0)"
-}
-
-pub fn get_dashboard_stats(
-    conn: &Connection,
-    date_from: Option<&str>,
-    date_to: Option<&str>,
-) -> Result<DashboardStats, ExtractorError> {
-    let where_clause: String = {
-        let mut clauses: Vec<String> = Vec::new();
-        if let Some(from) = date_from {
-            clauses.push(format!("issue_date >= '{}'", from));
-        }
-        if let Some(to) = date_to {
-            clauses.push(format!("issue_date <= '{}'", to));
-        }
-        if clauses.is_empty() {
-            String::new()
-        } else {
-            format!(" AND {}", clauses.join(" AND "))
-        }
-    };
-
-    let this_month = chrono::Local::now().format("%Y-%m-01").to_string();
-
-    // Consolidated: total, amount, avg confidence, this_month, pending, duplicates
-    // merged from 6 separate queries into 1 using conditional aggregation
-    let (total_invoices, total_amount, average_confidence, this_month_count, this_month_amount, pending_count, duplicate_count): (i64, f64, f64, i64, f64, i64, i64) = conn.query_row(
-        &format!(
-            "SELECT COUNT(*), {sum}, COALESCE(AVG(confidence), 0.0),
-                    COALESCE(SUM(CASE WHEN issue_date >= ?1 THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN issue_date >= ?1 THEN CAST(total_amount AS REAL) ELSE 0 END), 0.0),
-                    COALESCE(SUM(CASE WHEN status = 'pending_confirmation' THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN duplicate_status IN ('possible_duplicate', 'probable_duplicate') THEN 1 ELSE 0 END), 0)
-             FROM invoices WHERE 1=1{where}",
-            sum = sum_amount(),
-            where = where_clause
-        ),
-        [&this_month],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
-    )?;
-
-    let currency = conn
-        .query_row(
-            "SELECT currency FROM invoices GROUP BY currency ORDER BY COUNT(*) DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or_else(|_| "CNY".to_string());
-
-    let mut trend_stmt = conn.prepare(&format!(
-        "SELECT strftime('%Y-%m', issue_date) as month, COUNT(*), {}
-            FROM invoices
-            WHERE issue_date IS NOT NULL{}
-            GROUP BY month
-            ORDER BY month DESC
-            LIMIT 12",
-        sum_amount(),
-        where_clause
-    ))?;
-    let trend_rows: Vec<(String, i64, f64)> = trend_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut monthly_trend: Vec<MonthlyTrendPoint> = trend_rows
-        .into_iter()
-        .map(|(month, count, amount)| MonthlyTrendPoint {
-            month,
-            count,
-            amount,
-        })
-        .collect();
-    monthly_trend.reverse();
-
-    let mut type_stmt = conn.prepare(&format!(
-        "SELECT COALESCE(invoice_type, '未知') as label, COUNT(*), {}
-            FROM invoices
-            WHERE 1=1{}
-            GROUP BY invoice_type
-            ORDER BY COUNT(*) DESC",
-        sum_amount(),
-        where_clause
-    ))?;
-    let by_type: Vec<BreakdownItem> = type_stmt
-        .query_map([], |row| {
-            Ok(BreakdownItem {
-                label: row.get(0)?,
-                count: row.get(1)?,
-                amount: row.get(2)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut status_stmt = conn.prepare(&format!(
-        "SELECT status, COUNT(*), {}
-            FROM invoices
-            WHERE 1=1{}
-            GROUP BY status
-            ORDER BY COUNT(*) DESC",
-        sum_amount(),
-        where_clause
-    ))?;
-    let by_status: Vec<BreakdownItem> = status_stmt
-        .query_map([], |row| {
-            Ok(BreakdownItem {
-                label: row.get(0)?,
-                count: row.get(1)?,
-                amount: row.get(2)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut seller_stmt = conn.prepare(&format!(
-        "SELECT COALESCE(seller_name, '未知') as name, COUNT(*), {}
-            FROM invoices
-            WHERE 1=1{}
-            GROUP BY seller_name
-            ORDER BY COUNT(*) DESC
-            LIMIT 5",
-        sum_amount(),
-        where_clause
-    ))?;
-    let top_sellers: Vec<TopSellerItem> = seller_stmt
-        .query_map([], |row| {
-            Ok(TopSellerItem {
-                seller_name: row.get(0)?,
-                count: row.get(1)?,
-                amount: row.get(2)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(DashboardStats {
-        total_invoices,
-        total_amount,
-        currency,
-        average_confidence,
-        this_month_count,
-        this_month_amount,
-        pending_count,
-        duplicate_count,
-        monthly_trend,
-        by_type,
-        by_status,
-        top_sellers,
-    })
-}
-
 pub fn invoice_to_embedding_text(invoice: &InvoiceDetail) -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -2042,101 +1861,6 @@ pub fn get_tag_options(conn: &Connection) -> Result<Vec<TagOption>, ExtractorErr
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(options)
-}
-
-pub fn insert_usage_log(
-    conn: &Connection,
-    operation: &str,
-    model: &str,
-    prompt_tokens: i64,
-    completion_tokens: i64,
-    total_tokens: i64,
-) -> Result<(), ExtractorError> {
-    conn.execute(
-        "INSERT INTO usage_log (operation, model, prompt_tokens, completion_tokens, total_tokens)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![
-            operation,
-            model,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens
-        ],
-    )?;
-    Ok(())
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct LlmUsageStats {
-    pub total_calls: i64,
-    pub llm_calls: i64,
-    pub embedding_calls: i64,
-    pub total_prompt_tokens: i64,
-    pub total_completion_tokens: i64,
-    pub total_tokens: i64,
-    pub this_month_calls: i64,
-    pub this_month_tokens: i64,
-}
-
-pub fn get_llm_usage(
-    conn: &Connection,
-    date_from: Option<&str>,
-    date_to: Option<&str>,
-) -> Result<LlmUsageStats, ExtractorError> {
-    // Consolidated: total_calls, llm_calls, embedding_calls, tokens
-    // merged from 6 separate queries into 1 using conditional aggregation
-    let mut clauses: Vec<String> = Vec::new();
-    let mut params: Vec<String> = Vec::new();
-
-    if let Some(from) = date_from {
-        clauses.push(format!("created_at >= ?{}", params.len() + 1));
-        params.push(from.to_owned());
-    }
-    if let Some(to) = date_to {
-        clauses.push(format!("created_at <= ?{}", params.len() + 1));
-        params.push(format!("{to} 23:59:59"));
-    }
-
-    let where_clause = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", clauses.join(" AND "))
-    };
-
-    let (total_calls, llm_calls, embedding_calls, total_prompt_tokens, total_completion_tokens, total_tokens): (i64, i64, i64, i64, i64, i64) = conn.query_row(
-        &format!(
-            "SELECT
-                COALESCE(COUNT(*), 0),
-                COALESCE(SUM(CASE WHEN operation = 'llm_recognition' THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(CASE WHEN operation = 'embedding' THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(prompt_tokens), 0),
-                COALESCE(SUM(completion_tokens), 0),
-                COALESCE(SUM(total_tokens), 0)
-             FROM usage_log{where_clause}"
-        ),
-        rusqlite::params_from_iter(params.iter()),
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
-    )?;
-
-    // Consolidated: this_month_calls + this_month_tokens merged into 1 query
-    let this_month_start = chrono::Local::now().format("%Y-%m-01").to_string();
-    let (this_month_calls, this_month_tokens): (i64, i64) = conn.query_row(
-        "SELECT COALESCE(COUNT(*), 0), COALESCE(SUM(total_tokens), 0)
-         FROM usage_log WHERE created_at >= ?1",
-        [&this_month_start],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-
-    Ok(LlmUsageStats {
-        total_calls,
-        llm_calls,
-        embedding_calls,
-        total_prompt_tokens,
-        total_completion_tokens,
-        total_tokens,
-        this_month_calls,
-        this_month_tokens,
-    })
 }
 
 #[cfg(test)]

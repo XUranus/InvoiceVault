@@ -13,6 +13,17 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+mod archive;
+mod config;
+mod fs_utils;
+mod paths;
+
+pub use archive::{add_dir_to_zip, add_dir_to_zip_with_skip, stream_file_to_zip};
+use config::write_config;
+pub use config::{load_config_raw, sanitize_badge_config, PriceConfig};
+use fs_utils::{remove_empty_dirs, sanitize_filename, walk_dir};
+use paths::{create_app_paths, display_path, open_path_with_system, AppPaths};
+
 use crate::{
     agent::{
         self, AgentArtifact, AgentAttachment, AgentError, AgentMessageRow, AgentResponse,
@@ -37,17 +48,17 @@ use crate::{
     },
     event::{self, EventError, EventListResult},
     exporter::{
-        export_column_catalog, export_invoices, export_pdf_report, preview_export,
-        resolve_export_column_keys_from_labels, ExportError, ExportInvoicesRequest,
-        ExportPreviewRequest, ExportResult, PdfReportRequest, PdfReportResult,
+        export_column_catalog, export_invoices, export_pdf_report, preview_export, ExportError,
+        ExportInvoicesRequest, ExportPreviewRequest, ExportResult, PdfReportRequest,
+        PdfReportResult,
     },
     extractor::invoice_to_embedding_text,
     extractor::{
         batch_delete_invoices, batch_update_invoices, count_unviewed_invoices, get_dashboard_stats,
         get_invoice_detail, list_invoices, mark_invoice_viewed, merge_invoices,
         save_invoice_extraction, search_invoices, set_invoice_badge, update_invoice,
-        update_invoice_items, BadgeConfig, BadgeGroupConfig, BatchUpdateRequest, DashboardStats,
-        ExtractorError, InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
+        update_invoice_items, BadgeConfig, BatchUpdateRequest, DashboardStats, ExtractorError,
+        InvoiceBadgeSelection, InvoiceDetail, InvoiceItemRow, InvoiceSearchParams,
         InvoiceSearchResult, InvoiceSummary, MergeInvoicesResult, SaveInvoiceExtractionRequest,
         UpdateInvoiceItemsRequest, UpdateInvoiceRequest, UpdateInvoiceResult,
     },
@@ -57,7 +68,6 @@ use crate::{
         ImportJobListResult, ImportJobSummary,
     },
     llm::{LlmAuditConfig, LlmProviderConfig},
-    process_utils::command_no_window,
     storage::{run_migrations, StorageError},
     watcher::{
         AddWatchDirRequest, UpdateWatchDirRequest, WatchDirStatus, WatcherError, WatcherManager,
@@ -98,17 +108,6 @@ pub enum AppError {
     Event(#[from] EventError),
     #[error("{0}")]
     InvalidOperation(String),
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct AppPaths {
-    pub app_data_dir: PathBuf,
-    pub database_path: PathBuf,
-    pub raw_dir: PathBuf,
-    pub thumbnails_dir: PathBuf,
-    pub logs_dir: PathBuf,
-    pub llm_audit_dir: PathBuf,
-    pub agent_uploads_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -189,58 +188,6 @@ pub fn import_failure_message(error: &str) -> String {
     }
 }
 
-pub fn sanitize_badge_config(config: BadgeConfig) -> BadgeConfig {
-    let mut groups = Vec::new();
-    for group in config.groups {
-        let name = group.name.trim();
-        if name.is_empty() {
-            continue;
-        }
-
-        let mut options = Vec::new();
-        for option in group.options {
-            let value = option.trim();
-            if value.is_empty() || options.iter().any(|existing| existing == value) {
-                continue;
-            }
-            options.push(value.to_owned());
-        }
-
-        if groups
-            .iter()
-            .any(|existing: &BadgeGroupConfig| existing.name == name)
-        {
-            continue;
-        }
-
-        groups.push(BadgeGroupConfig {
-            name: name.to_owned(),
-            options,
-        });
-    }
-
-    BadgeConfig { groups }
-}
-
-#[derive(Debug, Clone, Serialize, serde::Deserialize)]
-pub struct PriceConfig {
-    pub llm_input_price_per_1k: f64,
-    pub llm_output_price_per_1k: f64,
-    pub embedding_input_price_per_1k: f64,
-    pub embedding_output_price_per_1k: f64,
-}
-
-impl Default for PriceConfig {
-    fn default() -> Self {
-        Self {
-            llm_input_price_per_1k: 0.0008,
-            llm_output_price_per_1k: 0.002,
-            embedding_input_price_per_1k: 0.0007,
-            embedding_output_price_per_1k: 0.0007,
-        }
-    }
-}
-
 pub struct AppState {
     app_handle: AppHandle,
     paths: AppPaths,
@@ -290,29 +237,27 @@ impl AppState {
 
         // Load persisted configs
         let embedding_enabled: bool =
-            Self::load_config_raw::<serde_json::Value>(&app_data_dir, "embedding_enabled.json")
+            load_config_raw::<serde_json::Value>(&app_data_dir, "embedding_enabled.json")
                 .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
                 .unwrap_or(true);
 
         let llm_config: Arc<Mutex<Option<LlmProviderConfig>>> = {
-            let saved =
-                Self::load_config_raw::<LlmProviderConfig>(&app_data_dir, "llm_config.json");
+            let saved = load_config_raw::<LlmProviderConfig>(&app_data_dir, "llm_config.json");
             Arc::new(Mutex::new(saved))
         };
 
         let llm_audit_enabled: Arc<Mutex<bool>> = {
-            let saved =
-                Self::load_config_raw::<serde_json::Value>(&app_data_dir, "audit_config.json")
-                    .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
-                    .unwrap_or(true);
+            let saved = load_config_raw::<serde_json::Value>(&app_data_dir, "audit_config.json")
+                .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
+                .unwrap_or(true);
             Arc::new(Mutex::new(saved))
         };
 
-        let badge_config = Self::load_config_raw::<BadgeConfig>(&app_data_dir, "badge_config.json")
-            .unwrap_or_default();
+        let badge_config =
+            load_config_raw::<BadgeConfig>(&app_data_dir, "badge_config.json").unwrap_or_default();
 
-        let price_config = Self::load_config_raw::<PriceConfig>(&app_data_dir, "price_config.json")
-            .unwrap_or_default();
+        let price_config =
+            load_config_raw::<PriceConfig>(&app_data_dir, "price_config.json").unwrap_or_default();
 
         info!("[init] creating WatcherManager");
         let watcher_manager = WatcherManager::new(
@@ -443,12 +388,18 @@ impl AppState {
     }
 
     pub fn push_dropped_files(&self, paths: Vec<String>) {
-        let mut guard = self.pending_dropped_files.lock().expect("pending_dropped_files mutex poisoned");
+        let mut guard = self
+            .pending_dropped_files
+            .lock()
+            .expect("pending_dropped_files mutex poisoned");
         guard.extend(paths);
     }
 
     pub fn take_dropped_files(&self) -> Vec<String> {
-        let mut guard = self.pending_dropped_files.lock().expect("pending_dropped_files mutex poisoned");
+        let mut guard = self
+            .pending_dropped_files
+            .lock()
+            .expect("pending_dropped_files mutex poisoned");
         std::mem::take(&mut *guard)
     }
 
@@ -1139,11 +1090,7 @@ impl AppState {
         source_invoice_ids: Vec<i64>,
     ) -> Result<MergeInvoicesResult, AppError> {
         let mut db = self.db.lock().expect("database mutex poisoned");
-        let result = merge_invoices(
-            &mut db,
-            target_invoice_id,
-            source_invoice_ids,
-        )?;
+        let result = merge_invoices(&mut db, target_invoice_id, source_invoice_ids)?;
         self.invalidate_dashboard_cache();
         Ok(result)
     }
@@ -1287,13 +1234,9 @@ impl AppState {
             let mut flag = self.embedding_enabled.lock().expect("lock");
             *flag = enabled;
         }
-        // Persist to file
-        let path = self.paths.app_data_dir.join("embedding_enabled.json");
         let json = serde_json::json!({ "enabled": enabled });
-        if let Ok(s) = serde_json::to_string_pretty(&json) {
-            if let Err(e) = std::fs::write(&path, s) {
-                warn!("Failed to persist embedding enabled config: {e}");
-            }
+        if let Err(e) = write_config(&self.paths.app_data_dir, "embedding_enabled.json", &json) {
+            warn!("Failed to persist embedding enabled config: {e}");
         }
 
         // Keep this setter cheap for the settings UI. The ONNX engine can take
@@ -1410,11 +1353,8 @@ impl AppState {
             let mut cfg = self.badge_config.lock().expect("lock");
             *cfg = sanitized.clone();
         }
-        let path = self.paths.app_data_dir.join("badge_config.json");
-        if let Ok(json) = serde_json::to_string_pretty(&sanitized) {
-            if let Err(e) = std::fs::write(&path, json) {
-                error!("Failed to persist badge config: {e}");
-            }
+        if let Err(e) = write_config(&self.paths.app_data_dir, "badge_config.json", &sanitized) {
+            error!("Failed to persist badge config: {e}");
         }
         let db = self.db.lock().expect("db lock");
         if let Err(e) = event::create_event(
@@ -1441,11 +1381,8 @@ impl AppState {
             let mut cfg = self.price_config.lock().expect("lock");
             *cfg = config.clone();
         }
-        let path = self.paths.app_data_dir.join("price_config.json");
-        if let Ok(json) = serde_json::to_string_pretty(&config) {
-            if let Err(e) = std::fs::write(&path, json) {
-                error!("Failed to persist price config: {e}");
-            }
+        if let Err(e) = write_config(&self.paths.app_data_dir, "price_config.json", &config) {
+            error!("Failed to persist price config: {e}");
         }
         Ok(())
     }
@@ -1486,11 +1423,8 @@ impl AppState {
     pub fn set_llm_config(&self, config: LlmProviderConfig) -> Result<(), AppError> {
         let mut cfg = self.llm_config.lock().expect("lock");
         *cfg = Some(config.clone());
-        let path = self.paths.app_data_dir.join("llm_config.json");
-        if let Ok(json) = serde_json::to_string_pretty(&config) {
-            if let Err(e) = std::fs::write(&path, json) {
-                error!("Failed to persist LLM config: {e}");
-            }
+        if let Err(e) = write_config(&self.paths.app_data_dir, "llm_config.json", &config) {
+            error!("Failed to persist LLM config: {e}");
         }
         info!("LLM config updated");
         Ok(())
@@ -1508,26 +1442,15 @@ impl AppState {
 
     pub fn set_llm_audit_enabled(&self, enabled: bool) {
         *self.llm_audit_enabled.lock().expect("lock") = enabled;
-        let path = self.paths.app_data_dir.join("audit_config.json");
-        if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({"enabled": enabled})) {
-            if let Err(e) = std::fs::write(&path, json) {
-                error!("Failed to persist audit config: {e}");
-            }
+        let json = serde_json::json!({"enabled": enabled});
+        if let Err(e) = write_config(&self.paths.app_data_dir, "audit_config.json", &json) {
+            error!("Failed to persist audit config: {e}");
         }
         info!("LLM audit enabled: {enabled}");
     }
 
     pub fn get_llm_audit_enabled(&self) -> bool {
         *self.llm_audit_enabled.lock().expect("lock")
-    }
-
-    pub fn load_config_raw<T: serde::de::DeserializeOwned>(
-        app_data_dir: &Path,
-        filename: &str,
-    ) -> Option<T> {
-        let path = app_data_dir.join(filename);
-        let json = std::fs::read_to_string(&path).ok()?;
-        serde_json::from_str(&json).ok()
     }
 
     pub fn test_chroma_connection(&self) -> Result<bool, AppError> {
@@ -1777,7 +1700,11 @@ impl AppState {
         Ok(agent::get_session_messages(&db, session_id)?)
     }
 
-    pub fn update_agent_session_title(&self, session_id: i64, title: &str) -> Result<AgentSession, AppError> {
+    pub fn update_agent_session_title(
+        &self,
+        session_id: i64,
+        title: &str,
+    ) -> Result<AgentSession, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(agent::set_session_title(&db, session_id, title)?)
     }
@@ -1902,12 +1829,12 @@ impl AppState {
         let base = &self.paths.app_data_dir;
         // Skip large/regenerable directories to keep backup small
         let skip_dirs = [
-            "storage",       // raw file archives (large binary files)
-            "WebKitCache",   // webview cache (regenerable)
-            "models",        // ONNX embedding models (downloadable)
-            "localStorage",  // webview local storage
-            "CacheStorage",  // webview cache storage
-            "sample",        // sample/test files
+            "storage",      // raw file archives (large binary files)
+            "WebKitCache",  // webview cache (regenerable)
+            "models",       // ONNX embedding models (downloadable)
+            "localStorage", // webview local storage
+            "CacheStorage", // webview cache storage
+            "sample",       // sample/test files
         ];
         add_dir_to_zip_with_skip(&mut zip_writer, base, base, options, &skip_dirs)?;
 
@@ -3000,8 +2927,7 @@ fn make_tool_executor(
         }
         "get_badge_config" => {
             let badge_config: BadgeConfig =
-                crate::AppState::load_config_raw(&app_data_dir, "badge_config.json")
-                    .unwrap_or_default();
+                load_config_raw(&app_data_dir, "badge_config.json").unwrap_or_default();
             match serde_json::to_string(&badge_config) {
                 Ok(content) => ToolExecResult::Success { content },
                 Err(e) => ToolExecResult::Error {
@@ -3032,12 +2958,10 @@ fn make_tool_executor(
                 }
             };
             let sanitized = sanitize_badge_config(config);
-            if let Ok(json) = serde_json::to_string_pretty(&sanitized) {
-                if let Err(e) = std::fs::write(app_data_dir.join("badge_config.json"), json) {
-                    return ToolExecResult::Error {
-                        message: format!("写入配置失败: {e}"),
-                    };
-                }
+            if let Err(e) = write_config(&app_data_dir, "badge_config.json", &sanitized) {
+                return ToolExecResult::Error {
+                    message: format!("写入配置失败: {e}"),
+                };
             }
             {
                 let mut cfg = badge_config.lock().expect("badge_config lock");
@@ -3112,8 +3036,7 @@ fn make_tool_executor(
         }
         "get_price_config" => {
             let price_config: PriceConfig =
-                crate::AppState::load_config_raw(&app_data_dir, "price_config.json")
-                    .unwrap_or_default();
+                load_config_raw(&app_data_dir, "price_config.json").unwrap_or_default();
             match serde_json::to_string(&price_config) {
                 Ok(content) => ToolExecResult::Success { content },
                 Err(e) => ToolExecResult::Error {
@@ -3143,12 +3066,10 @@ fn make_tool_executor(
                     }
                 }
             };
-            if let Ok(json) = serde_json::to_string_pretty(&config) {
-                if let Err(e) = std::fs::write(app_data_dir.join("price_config.json"), json) {
-                    return ToolExecResult::Error {
-                        message: format!("写入配置失败: {e}"),
-                    };
-                }
+            if let Err(e) = write_config(&app_data_dir, "price_config.json", &config) {
+                return ToolExecResult::Error {
+                    message: format!("写入配置失败: {e}"),
+                };
             }
             {
                 let mut cfg = price_config.lock().expect("price_config lock");
@@ -3162,10 +3083,7 @@ fn make_tool_executor(
             }
         }
         "get_theme" => {
-            let theme_path = app_data_dir.join("theme.json");
-            let theme = std::fs::read_to_string(&theme_path)
-                .ok()
-                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            let theme = load_config_raw::<serde_json::Value>(&app_data_dir, "theme.json")
                 .and_then(|v| v.get("theme").and_then(|v| v.as_str()).map(String::from))
                 .unwrap_or_else(|| "light".to_owned());
             let content = serde_json::json!({ "theme": theme }).to_string();
@@ -3182,12 +3100,11 @@ fn make_tool_executor(
                     message: "theme 必须是 'light' 或 'dark'".to_owned(),
                 };
             }
-            if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({ "theme": theme })) {
-                if let Err(e) = std::fs::write(app_data_dir.join("theme.json"), json) {
-                    return ToolExecResult::Error {
-                        message: format!("写入主题配置失败: {e}"),
-                    };
-                }
+            let theme_config = serde_json::json!({ "theme": theme });
+            if let Err(e) = write_config(&app_data_dir, "theme.json", &theme_config) {
+                return ToolExecResult::Error {
+                    message: format!("写入主题配置失败: {e}"),
+                };
             }
             if let Err(e) = app_handle.emit("theme-change", serde_json::json!({ "theme": theme })) {
                 warn!("Failed to emit theme-change event: {e}");
@@ -3477,11 +3394,7 @@ fn export_template_column_map_from_attachment(
     };
 
     // Find best header row (same logic as export_columns_from_template)
-    let mut best_labels: Vec<String> = sheet
-        .columns
-        .iter()
-        .map(|c| c.label.clone())
-        .collect();
+    let mut best_labels: Vec<String> = sheet.columns.iter().map(|c| c.label.clone()).collect();
     let mut best_count = count_label_matches(&best_labels);
 
     for row in &sheet.sample_rows {
@@ -3647,7 +3560,9 @@ fn read_xlsx_shared_strings<R: std::io::Read + std::io::Seek>(
             for r_part in segment.split("<r>").skip(1) {
                 let r_block = r_part.split("</r>").next().unwrap_or("");
                 if let Some(after) = r_block.split("<t").nth(1) {
-                    if let Some(value) = after.split('>').nth(1).and_then(|v| v.split("</t>").next()) {
+                    if let Some(value) =
+                        after.split('>').nth(1).and_then(|v| v.split("</t>").next())
+                    {
                         text.push_str(&xml_unescape(value));
                     }
                 }
@@ -3779,172 +3694,6 @@ fn xml_unescape(value: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
         .replace("&amp;", "&")
-}
-
-fn sanitize_filename(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            _ => ch,
-        })
-        .collect()
-}
-
-fn create_app_paths(app_data_dir: &Path) -> Result<AppPaths, AppError> {
-    let raw_dir = app_data_dir.join("raw");
-    let thumbnails_dir = app_data_dir.join("thumbnails");
-    let logs_dir = app_data_dir.join("logs");
-    let llm_audit_dir = app_data_dir.join("llm_audit");
-    let agent_uploads_dir = app_data_dir.join("agent_uploads");
-    fs::create_dir_all(&raw_dir)?;
-    fs::create_dir_all(&thumbnails_dir)?;
-    fs::create_dir_all(&logs_dir)?;
-    fs::create_dir_all(&llm_audit_dir)?;
-    fs::create_dir_all(&agent_uploads_dir)?;
-
-    Ok(AppPaths {
-        app_data_dir: app_data_dir.to_path_buf(),
-        database_path: app_data_dir.join("invoicevault.sqlite3"),
-        raw_dir,
-        thumbnails_dir,
-        logs_dir,
-        llm_audit_dir,
-        agent_uploads_dir,
-    })
-}
-
-fn display_path(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
-}
-
-fn open_path_with_system(path: &Path) -> Result<(), AppError> {
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = command_no_window("explorer");
-        command.arg(path);
-        command
-    };
-
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = command_no_window("open");
-        command.arg(path);
-        command
-    };
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let mut command = {
-        let mut command = command_no_window("xdg-open");
-        command.arg(path);
-        command
-    };
-
-    command.spawn()?;
-    Ok(())
-}
-
-fn zip_err(e: zip::result::ZipError) -> AppError {
-    AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
-}
-
-fn io_err(e: std::io::Error) -> AppError {
-    AppError::Io(e)
-}
-
-pub fn stream_file_to_zip(
-    zip_writer: &mut zip::ZipWriter<std::fs::File>,
-    zip_path: &str,
-    file_path: &Path,
-    options: zip::write::SimpleFileOptions,
-) -> Result<(), AppError> {
-    zip_writer.start_file(zip_path, options).map_err(zip_err)?;
-    let mut reader = std::io::BufReader::new(std::fs::File::open(file_path)?);
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        zip_writer.write_all(&buf[..n]).map_err(io_err)?;
-    }
-    Ok(())
-}
-
-pub fn add_dir_to_zip(
-    zip_writer: &mut zip::ZipWriter<std::fs::File>,
-    base: &Path,
-    dir: &Path,
-    options: zip::write::SimpleFileOptions,
-) -> Result<(), AppError> {
-    add_dir_to_zip_inner(zip_writer, base, dir, options, &[])
-}
-
-pub fn add_dir_to_zip_with_skip(
-    zip_writer: &mut zip::ZipWriter<std::fs::File>,
-    base: &Path,
-    dir: &Path,
-    options: zip::write::SimpleFileOptions,
-    skip_dirs: &[&str],
-) -> Result<(), AppError> {
-    add_dir_to_zip_inner(zip_writer, base, dir, options, skip_dirs)
-}
-
-fn add_dir_to_zip_inner(
-    zip_writer: &mut zip::ZipWriter<std::fs::File>,
-    base: &Path,
-    dir: &Path,
-    options: zip::write::SimpleFileOptions,
-    skip_dirs: &[&str],
-) -> Result<(), AppError> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() {
-            let relative = path.strip_prefix(base).unwrap_or(&path);
-            let name = relative.to_string_lossy().replace('\\', "/");
-            stream_file_to_zip(zip_writer, &name, &path, options)?;
-        } else if path.is_dir() {
-            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if skip_dirs.contains(&dir_name) {
-                continue;
-            }
-            add_dir_to_zip_inner(zip_writer, base, &path, options, skip_dirs)?;
-        }
-    }
-    Ok(())
-}
-
-fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() {
-            files.push(path);
-        } else if path.is_dir() {
-            walk_dir(&path, files)?;
-        }
-    }
-    Ok(())
-}
-
-fn remove_empty_dirs(dir: &Path) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                remove_empty_dirs(&path);
-                // Best-effort: only succeeds if dir is truly empty
-                let _ = std::fs::remove_dir(&path);
-            }
-        }
-    }
 }
 
 impl From<rusqlite::Error> for AppError {

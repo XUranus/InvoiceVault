@@ -157,9 +157,11 @@ fn window_close(window: WebviewWindow) -> Result<(), String> {
 async fn check_external_dependencies() -> Vec<ExternalDependencyStatus> {
     info!("[dep] check_external_dependencies: start");
     let result = tauri::async_runtime::spawn_blocking(|| {
-        vec![
-            check_external_dependency("Poppler PDF renderer", "pdftoppm", &["-h"]),
-        ]
+        vec![check_external_dependency(
+            "Poppler PDF renderer",
+            "pdftoppm",
+            &["-h"],
+        )]
     })
     .await
     .unwrap_or_default();
@@ -431,10 +433,7 @@ async fn get_tag_options(app: AppHandle) -> Result<Vec<TagOption>, String> {
 }
 
 #[tauri::command]
-async fn get_invoice_detail(
-    app: AppHandle,
-    invoice_id: i64,
-) -> Result<InvoiceDetail, String> {
+async fn get_invoice_detail(app: AppHandle, invoice_id: i64) -> Result<InvoiceDetail, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         state
@@ -1891,12 +1890,14 @@ pub fn run() {
                         let _ = std::fs::write(&save_path, json);
                     }
                 }
+                #[cfg(target_os = "windows")]
                 WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                    #[cfg(target_os = "windows")]
                     if let Some(window) = window_app.get_webview_window(MAIN_WINDOW_LABEL) {
                         apply_windows_dpi_zoom(&window, *scale_factor);
                     }
                 }
+                #[cfg(not(target_os = "windows"))]
+                WindowEvent::ScaleFactorChanged { .. } => {}
                 #[cfg(not(target_os = "windows"))]
                 WindowEvent::DragDrop(DragDropEvent::Enter { position, .. })
                 | WindowEvent::DragDrop(DragDropEvent::Over { position, .. }) => {
@@ -1914,7 +1915,12 @@ pub fn run() {
                 }
                 #[cfg(not(target_os = "windows"))]
                 WindowEvent::DragDrop(DragDropEvent::Drop { paths, position }) => {
-                    tracing::info!(count = paths.len(), ?paths, ?position, "[drag-drop] native DragDrop drop");
+                    tracing::info!(
+                        count = paths.len(),
+                        ?paths,
+                        ?position,
+                        "[drag-drop] native DragDrop drop"
+                    );
                     if paths.is_empty() {
                         tracing::warn!("[drag-drop] native drop received empty paths");
                         return;
@@ -1923,7 +1929,10 @@ pub fn run() {
                         .iter()
                         .map(|path| path.to_string_lossy().into_owned())
                         .collect();
-                    tracing::info!(?paths, "[drag-drop] storing dropped files for frontend poll");
+                    tracing::info!(
+                        ?paths,
+                        "[drag-drop] storing dropped files for frontend poll"
+                    );
                     let state = window_app.state::<AppState>();
                     state.push_dropped_files(paths);
                 }

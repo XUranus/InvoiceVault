@@ -1088,7 +1088,11 @@ fn update_session_title(conn: &Connection, session_id: i64) -> Result<(), AgentE
     Ok(())
 }
 
-pub fn set_session_title(conn: &Connection, session_id: i64, title: &str) -> Result<AgentSession, AgentError> {
+pub fn set_session_title(
+    conn: &Connection,
+    session_id: i64,
+    title: &str,
+) -> Result<AgentSession, AgentError> {
     conn.execute(
         "UPDATE agent_sessions SET title = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
         rusqlite::params![title, session_id],

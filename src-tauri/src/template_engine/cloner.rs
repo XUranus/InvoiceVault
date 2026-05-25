@@ -92,7 +92,9 @@ pub fn shift_formula_row(formula: &str, offset: i32) -> String {
 
     while i < len {
         // Look for a cell reference pattern: optional $, letters, optional $, digits
-        if chars[i].is_ascii_uppercase() || (chars[i] == '$' && i + 1 < len && chars[i + 1].is_ascii_uppercase()) {
+        if chars[i].is_ascii_uppercase()
+            || (chars[i] == '$' && i + 1 < len && chars[i + 1].is_ascii_uppercase())
+        {
             let start = i;
             let mut col_part = String::new();
 
@@ -149,14 +151,15 @@ pub fn shift_formula_row(formula: &str, offset: i32) -> String {
                 continue;
             }
 
-            // Apply row offset
             if let Ok(row_num) = row_digits.parse::<i32>() {
-                let new_row = (row_num + offset).max(1);
                 result.push_str(&col_part);
                 if has_dollar_before_row {
                     result.push('$');
+                    result.push_str(&row_digits);
+                } else {
+                    let new_row = (row_num + offset).max(1);
+                    result.push_str(&new_row.to_string());
                 }
-                result.push_str(&new_row.to_string());
             } else {
                 for j in start..i {
                     result.push(chars[j]);
@@ -194,6 +197,7 @@ mod tests {
     #[test]
     fn test_shift_formula_absolute() {
         assert_eq!(shift_formula_row("$A$1", 5), "$A$1");
+        assert_eq!(shift_formula_row("A$1", 5), "A$1");
         // $A1 — absolute column, relative row
         assert_eq!(shift_formula_row("$A1", 5), "$A6");
     }

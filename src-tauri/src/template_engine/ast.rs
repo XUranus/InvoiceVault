@@ -32,7 +32,7 @@ pub struct RowAst {
 /// A parsed merge cell entry.
 #[derive(Debug, Clone)]
 pub struct MergeCell {
-    pub ref_str: String,   // e.g. "A1:C1"
+    pub ref_str: String, // e.g. "A1:C1"
     pub start_row: u32,
     pub end_row: u32,
     pub start_col: usize,
@@ -43,7 +43,7 @@ pub struct MergeCell {
 #[derive(Debug, Clone)]
 pub struct SheetAst {
     pub name: String,
-    pub sheet_path: String,     // e.g. "xl/worksheets/sheet1.xml"
+    pub sheet_path: String, // e.g. "xl/worksheets/sheet1.xml"
     pub rows: Vec<RowAst>,
     pub merge_cells: Vec<MergeCell>,
     /// Raw XML before <sheetData>

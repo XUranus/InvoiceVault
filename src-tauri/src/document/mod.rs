@@ -193,7 +193,11 @@ pub fn resize_and_save(
     let (w, h) = img.dimensions();
     let needs_resize = w > max_dimension || h > max_dimension;
     let img = if needs_resize {
-        img.resize(max_dimension, max_dimension, image::imageops::FilterType::Lanczos3)
+        img.resize(
+            max_dimension,
+            max_dimension,
+            image::imageops::FilterType::Lanczos3,
+        )
     } else {
         img
     };
@@ -280,8 +284,7 @@ mod tests {
                 assert!(prepared.thumbnail_path.exists());
                 assert_eq!(prepared.mime_type, "image/jpeg");
             }
-            Err(DocumentError::Io(ref e))
-                if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(DocumentError::Io(ref e)) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(err) => panic!("prepare image failed: {err}"),
         }
     }

@@ -561,20 +561,18 @@ mod tests {
     #[test]
     fn sample_receipts_can_be_imported() {
         let repo_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let pdf_path = temp_dir.path().join("sample.pdf");
+        std::fs::write(&pdf_path, b"%PDF-1.4\n% sample\n").expect("write pdf sample");
         let sample_paths = vec![
             repo_dir
-                .join("receipts")
-                .join("微信图片_20260430161538.jpg")
+                .join("sample")
+                .join("fake-invoice-1.png")
                 .to_string_lossy()
                 .into_owned(),
-            repo_dir
-                .join("receipts")
-                .join("拼多多商家电子发票.pdf")
-                .to_string_lossy()
-                .into_owned(),
+            pdf_path.to_string_lossy().into_owned(),
         ];
 
-        let temp_dir = tempfile::tempdir().expect("tempdir");
         let mut conn = Connection::open_in_memory().expect("open sqlite");
         run_migrations(&mut conn).expect("migrate");
 
@@ -586,8 +584,8 @@ mod tests {
         )
         .expect("import sample receipts");
 
-        assert_eq!(jobs.len(), 2);
-        assert!(jobs.iter().all(|job| job.status == "imported"));
+        assert_eq!(jobs.len(), 2, "{jobs:?}");
+        assert!(jobs.iter().all(|job| job.status == "imported"), "{jobs:?}");
         assert!(jobs.iter().all(|job| job.storage_path.is_some()));
     }
 

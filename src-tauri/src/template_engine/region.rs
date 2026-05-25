@@ -109,10 +109,7 @@ fn find_data_end(rows: &[super::ast::RowAst], header_row: u32) -> u32 {
 }
 
 /// Extract text values from a row's cells (resolving shared strings).
-fn row_text_values(
-    row: &super::ast::RowAst,
-    shared_strings: &[String],
-) -> Vec<String> {
+fn row_text_values(row: &super::ast::RowAst, shared_strings: &[String]) -> Vec<String> {
     row.cells
         .iter()
         .map(|cell| resolve_cell_text(cell, shared_strings))
@@ -120,10 +117,7 @@ fn row_text_values(
 }
 
 /// Resolve the display text of a cell.
-fn resolve_cell_text(
-    cell: &super::ast::CellAst,
-    shared_strings: &[String],
-) -> String {
+fn resolve_cell_text(cell: &super::ast::CellAst, shared_strings: &[String]) -> String {
     match cell.cell_type.as_deref() {
         Some("s") => cell
             .raw_value

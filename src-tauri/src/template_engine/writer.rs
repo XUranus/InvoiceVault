@@ -10,8 +10,7 @@ pub fn write_xlsx(path: &str, ir: &mut SpreadsheetIR) -> Result<(), TemplateErro
 
     // Read all entries from the existing ZIP
     let file = std::fs::File::open(path).map_err(|e| TemplateError::Zip(e.to_string()))?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| TemplateError::Zip(e.to_string()))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| TemplateError::Zip(e.to_string()))?;
 
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
     for i in 0..archive.len() {
@@ -114,11 +113,7 @@ fn render_sheet_xml(sheet: &SheetIR, strings: &SharedStringPool) -> String {
         ));
         for mc in &sheet.merge_cells {
             // Rebuild ref_str from start/end
-            let start_ref = format!(
-                "{}{}",
-                col_index_to_letter(mc.start_col),
-                mc.start_row
-            );
+            let start_ref = format!("{}{}", col_index_to_letter(mc.start_col), mc.start_row);
             let end_ref = format!("{}{}", col_index_to_letter(mc.end_col), mc.end_row);
             xml.push_str(&format!(r#"<mergeCell ref="{start_ref}:{end_ref}"/>"#));
         }
