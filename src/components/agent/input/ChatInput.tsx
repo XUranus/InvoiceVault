@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Send, Paperclip } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { pickAnyFiles } from "../../../api";
 import { useAgentStore } from "../hooks/useAgentStore";
 import { AttachmentBar } from "./AttachmentBar";
 
@@ -49,27 +49,12 @@ export function ChatInput() {
   };
 
   const handleAttachFile = async () => {
-    if (isAttaching) return; // Prevent multiple dialogs
+    if (isAttaching) return;
 
     setIsAttaching(true);
     try {
-      const selected = await open({
-        multiple: true,
-        directory: false,
-        filters: [
-          {
-            name: "所有文件",
-            extensions: ["*"],
-          },
-        ],
-      });
-
-      if (!selected) return;
-
-      const paths = Array.isArray(selected) ? selected : [selected];
+      const paths = await pickAnyFiles();
       if (paths.length === 0) return;
-
-      // Attach each file
       for (const path of paths) {
         await attachFile(path);
       }
