@@ -6,71 +6,84 @@ interface JsonHighlightProps {
 }
 
 export function JsonHighlight({ data, maxHeight = 400 }: JsonHighlightProps) {
+  const keyRef = React.useRef(0);
+
   const formatJson = (obj: unknown, indent: number = 0): React.ReactNode[] => {
     const spaces = "  ".repeat(indent);
     const nodes: React.ReactNode[] = [];
+    const k = () => `j${keyRef.current++}`;
 
     if (obj === null) {
       nodes.push(
-        <span key={`null-${indent}`} style={{ color: "var(--color-text-muted)" }}>
+        <span key={k()} style={{ color: "var(--color-text-muted)" }}>
           null
         </span>
       );
     } else if (obj === undefined) {
       nodes.push(
-        <span key={`undefined-${indent}`} style={{ color: "var(--color-text-muted)" }}>
+        <span key={k()} style={{ color: "var(--color-text-muted)" }}>
           undefined
         </span>
       );
     } else if (typeof obj === "boolean") {
       nodes.push(
-        <span key={`bool-${indent}`} style={{ color: "var(--color-primary-text)" }}>
+        <span key={k()} style={{ color: "var(--color-primary-text)" }}>
           {obj.toString()}
         </span>
       );
     } else if (typeof obj === "number") {
       nodes.push(
-        <span key={`num-${indent}`} style={{ color: "var(--color-success)" }}>
+        <span key={k()} style={{ color: "var(--color-success)" }}>
           {obj}
         </span>
       );
     } else if (typeof obj === "string") {
       nodes.push(
-        <span key={`str-${indent}`} style={{ color: "var(--color-warn-text)" }}>
+        <span key={k()} style={{ color: "var(--color-warn-text)" }}>
           &quot;{obj}&quot;
         </span>
       );
     } else if (Array.isArray(obj)) {
       if (obj.length === 0) {
         nodes.push(
-          <span key={`arr-empty-${indent}`} style={{ color: "var(--color-text-muted)" }}>
+          <span key={k()} style={{ color: "var(--color-text-muted)" }}>
             []
           </span>
         );
       } else {
         nodes.push(
-          <span key={`arr-open-${indent}`} style={{ color: "var(--color-text-muted)" }}>
+          <span key={k()} style={{ color: "var(--color-text-muted)" }}>
             [
           </span>
         );
-        nodes.push(<br key={`br-open-${indent}`} />);
-        obj.forEach((item, index) => {
+        nodes.push(<br key={k()} />);
+        obj.forEach((item) => {
           nodes.push(
-            <span key={`arr-item-indent-${indent}-${index}`}>&nbsp;&nbsp;{spaces}</span>
+            <span key={k()}>&nbsp;&nbsp;{spaces}</span>
           );
           nodes.push(...formatJson(item, indent + 1));
-          if (index < obj.length - 1) {
-            nodes.push(
-              <span key={`arr-comma-${indent}-${index}`} style={{ color: "var(--color-text-muted)" }}>
-                ,
-              </span>
-            );
-          }
-          nodes.push(<br key={`br-${indent}-${index}`} />);
+          nodes.push(
+            <span key={k()} style={{ color: "var(--color-text-muted)" }}>
+              ,
+            </span>
+          );
+          nodes.push(<br key={k()} />);
         });
-        nodes.push(<span key={`arr-close-indent-${indent}`}>{spaces}</span>);
+        // Remove trailing comma+br from last item
+        if (nodes.length >= 2) {
+          const last = nodes[nodes.length - 1];
+          const secondLast = nodes[nodes.length - 2];
+          if (
+            React.isValidElement(last) && last.type === "br" &&
+            React.isValidElement(secondLast) && typeof secondLast.props.children === "string" && secondLast.props.children.includes(",")
+          ) {
+            nodes.length -= 2;
+            nodes.push(<br key={k()} />);
+          }
+        }
+        nodes.push(<span key={k()}>{spaces}</span>);
         nodes.push(
-          <span key={`arr-close-${indent}`} style={{ color: "var(--color-text-muted)" }}>
+          <span key={k()} style={{ color: "var(--color-text-muted)" }}>
             ]
           </span>
         );
@@ -79,44 +92,54 @@ export function JsonHighlight({ data, maxHeight = 400 }: JsonHighlightProps) {
       const entries = Object.entries(obj as Record<string, unknown>);
       if (entries.length === 0) {
         nodes.push(
-          <span key={`obj-empty-${indent}`} style={{ color: "var(--color-text-muted)" }}>
+          <span key={k()} style={{ color: "var(--color-text-muted)" }}>
             {'{}'}
           </span>
         );
       } else {
         nodes.push(
-          <span key={`obj-open-${indent}`} style={{ color: "var(--color-text-muted)" }}>
+          <span key={k()} style={{ color: "var(--color-text-muted)" }}>
             {'{'}
           </span>
         );
-        nodes.push(<br key={`br-obj-open-${indent}`} />);
-        entries.forEach(([key, value], index) => {
+        nodes.push(<br key={k()} />);
+        entries.forEach(([key, value]) => {
           nodes.push(
-            <span key={`obj-key-indent-${indent}-${index}`}>&nbsp;&nbsp;{spaces}</span>
+            <span key={k()}>&nbsp;&nbsp;{spaces}</span>
           );
           nodes.push(
-            <span key={`obj-key-${indent}-${index}`} style={{ color: "var(--color-primary-text)" }}>
+            <span key={k()} style={{ color: "var(--color-primary-text)" }}>
               &quot;{key}&quot;
             </span>
           );
           nodes.push(
-            <span key={`obj-colon-${indent}-${index}`} style={{ color: "var(--color-text-muted)" }}>
+            <span key={k()} style={{ color: "var(--color-text-muted)" }}>
               :{" "}
             </span>
           );
           nodes.push(...formatJson(value, indent + 1));
-          if (index < entries.length - 1) {
-            nodes.push(
-              <span key={`obj-comma-${indent}-${index}`} style={{ color: "var(--color-text-muted)" }}>
-                ,
-              </span>
-            );
-          }
-          nodes.push(<br key={`br-obj-${indent}-${index}`} />);
+          nodes.push(
+            <span key={k()} style={{ color: "var(--color-text-muted)" }}>
+              ,
+            </span>
+          );
+          nodes.push(<br key={k()} />);
         });
-        nodes.push(<span key={`obj-close-indent-${indent}`}>{spaces}</span>);
+        // Remove trailing comma+br from last entry
+        if (nodes.length >= 2) {
+          const last = nodes[nodes.length - 1];
+          const secondLast = nodes[nodes.length - 2];
+          if (
+            React.isValidElement(last) && last.type === "br" &&
+            React.isValidElement(secondLast) && typeof secondLast.props.children === "string" && secondLast.props.children.includes(",")
+          ) {
+            nodes.length -= 2;
+            nodes.push(<br key={k()} />);
+          }
+        }
+        nodes.push(<span key={k()}>{spaces}</span>);
         nodes.push(
-          <span key={`obj-close-${indent}`} style={{ color: "var(--color-text-muted)" }}>
+          <span key={k()} style={{ color: "var(--color-text-muted)" }}>
             {'}'}
           </span>
         );
