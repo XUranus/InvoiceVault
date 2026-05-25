@@ -97,7 +97,7 @@ const ALL_COLUMNS: &[ColumnDef] = &[
         key: "issue_date",
         label: "开票日期",
         numeric: false,
-        aliases: &["日期", "时间", "发票日期"],
+        aliases: &["日期", "时间", "发票日期", "开具时间"],
     },
     ColumnDef {
         key: "seller_name",
@@ -133,7 +133,7 @@ const ALL_COLUMNS: &[ColumnDef] = &[
         key: "amount_without_tax",
         label: "不含税金额",
         numeric: true,
-        aliases: &["未税金额", "金额不含税"],
+        aliases: &["未税金额", "金额不含税", "金额"],
     },
     ColumnDef {
         key: "tax_amount",
@@ -145,7 +145,7 @@ const ALL_COLUMNS: &[ColumnDef] = &[
         key: "total_amount",
         label: "价税合计",
         numeric: true,
-        aliases: &["总金额", "金额", "合计", "含税金额"],
+        aliases: &["总金额", "合计", "含税金额"],
     },
     ColumnDef {
         key: "category",
@@ -157,7 +157,7 @@ const ALL_COLUMNS: &[ColumnDef] = &[
         key: "remarks",
         label: "备注",
         numeric: false,
-        aliases: &["说明", "发票内容", "内容"],
+        aliases: &["说明", "发票内容", "内容", "开票内容"],
     },
     ColumnDef {
         key: "source_page_range",

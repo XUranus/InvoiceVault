@@ -3439,19 +3439,51 @@ fn record_export_artifact(
 }
 
 fn export_columns_from_template(attachment: &AgentAttachment) -> Result<Vec<String>, String> {
-    let inspection = inspect_spreadsheet_attachment(attachment, 3)?;
-    let labels = inspection
-        .sheets
-        .first()
-        .map(|sheet| {
-            sheet
-                .columns
-                .iter()
-                .map(|column| column.label.clone())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    Ok(resolve_export_column_keys_from_labels(&labels))
+    // Read up to 15 rows to find the actual header row (skip title/metadata rows)
+    let inspection = inspect_spreadsheet_attachment(attachment, 15)?;
+    let sheet = match inspection.sheets.first() {
+        Some(s) => s,
+        None => return Ok(Vec::new()),
+    };
+
+    // Try all candidate rows (sample_rows includes rows after the detected header,
+    // plus the original header itself) to find the one matching the most export columns.
+    let mut best_labels: Vec<String> = sheet
+        .columns
+        .iter()
+        .map(|c| c.label.clone())
+        .collect();
+    let mut best_count = count_label_matches(&best_labels);
+
+    for row in &sheet.sample_rows {
+        let labels: Vec<String> = row.iter().map(|c| c.trim().to_owned()).collect();
+        let count = count_label_matches(&labels);
+        if count > best_count {
+            best_count = count;
+            best_labels = labels;
+        }
+    }
+
+    if best_count == 0 {
+        // Fallback: try matching ANY cell content across all rows
+        let mut all_cells: Vec<String> = Vec::new();
+        all_cells.extend(best_labels.clone());
+        for row in &sheet.sample_rows {
+            all_cells.extend(row.iter().map(|c| c.trim().to_owned()));
+        }
+        all_cells.retain(|c| !c.is_empty());
+        let keys = resolve_export_column_keys_from_labels(&all_cells);
+        if !keys.is_empty() {
+            return Ok(keys);
+        }
+    }
+
+    Ok(resolve_export_column_keys_from_labels(&best_labels))
+}
+
+fn count_label_matches(labels: &[String]) -> usize {
+    use crate::exporter::resolve_export_column_keys_from_labels;
+    resolve_export_column_keys_from_labels(labels).len()
 }
 
 fn json_i64_vec(args: &serde_json::Value, key: &str) -> Option<Vec<i64>> {
