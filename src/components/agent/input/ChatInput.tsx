@@ -30,7 +30,7 @@ export function ChatInput() {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
       textareaRef.current.style.height =
-        Math.min(textareaRef.current.scrollHeight, 150) + "px";
+        Math.min(textareaRef.current.scrollHeight, 200) + "px";
     }
   }, [message]);
 
@@ -89,10 +89,18 @@ export function ChatInput() {
         <button
           onClick={handleAttachFile}
           disabled={isAttaching}
-          className="p-1 rounded hover:opacity-70 transition-opacity"
+          className="p-2 rounded-lg transition-colors"
           style={{
-            color: isAttaching ? "var(--color-text-muted)" : "var(--color-text-muted)",
+            color: isAttaching ? "var(--color-text-muted)" : "var(--color-text-secondary)",
             opacity: isAttaching ? 0.5 : 1,
+            cursor: isAttaching ? "wait" : "pointer",
+          }}
+          onMouseEnter={(e) => {
+            if (!isAttaching)
+              e.currentTarget.style.backgroundColor = "var(--color-surface-subtle)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = "transparent";
           }}
         >
           <Paperclip className="w-5 h-5" />
@@ -110,7 +118,7 @@ export function ChatInput() {
               : "输入消息..."
           }
           disabled={activeSessionId === null}
-          className="flex-1 resize-none bg-transparent outline-none text-sm min-h-[24px] max-h-[150px]"
+          className="flex-1 resize-none bg-transparent outline-none text-sm min-h-[24px] max-h-[200px]"
           style={{
             color: "var(--color-text)",
             caretColor: "var(--color-primary)",

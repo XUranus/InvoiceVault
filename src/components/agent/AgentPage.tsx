@@ -6,6 +6,7 @@ import { ArtifactPanel } from "./panels/ArtifactPanel";
 import { ConfirmationDialog } from "./panels/ConfirmationDialog";
 import { useAgentStore } from "./hooks/useAgentStore";
 import { useAgentStream } from "./hooks/useAgentStream";
+import { MessageSquare, Sparkles, Paperclip } from "lucide-react";
 
 function AgentPage() {
   const messages = useAgentStore((s) => s.messages);
@@ -60,11 +61,46 @@ function AgentPage() {
           )}
         </div>
 
-        {/* Timeline */}
-        <Timeline messages={messages} />
+        {activeSessionId !== null ? (
+          <>
+            {/* Timeline */}
+            <Timeline messages={messages} />
 
-        {/* Chat input */}
-        <ChatInput />
+            {/* Chat input */}
+            <ChatInput />
+          </>
+        ) : (
+          <div className="agent-chat-empty">
+            <div className="agent-empty-hero">
+              <MessageSquare
+                size={48}
+                style={{ color: "var(--color-primary)", marginBottom: 8 }}
+              />
+              <h2 className="agent-empty-title">AI 智能助手</h2>
+              <p className="agent-empty-subtitle">
+                选择左侧会话或创建新会话，开始与 AI 对话。<br />
+                支持发票数据分析、文档处理、智能问答。
+              </p>
+            </div>
+            <div
+              className="flex gap-6 text-sm"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              <div className="flex items-center gap-2">
+                <Sparkles size={16} style={{ color: "var(--color-primary)" }} />
+                智能分析发票数据
+              </div>
+              <div className="flex items-center gap-2">
+                <Paperclip size={16} style={{ color: "var(--color-primary)" }} />
+                上传附件辅助问答
+              </div>
+              <div className="flex items-center gap-2">
+                <MessageSquare size={16} style={{ color: "var(--color-primary)" }} />
+                多会话并行管理
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Artifact panel */}
