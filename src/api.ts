@@ -73,6 +73,13 @@ export async function pickAnyFiles(): Promise<string[]> {
   return invoke<string[]>("pick_any_files");
 }
 
+export async function pickSaveFile(
+  defaultPath: string,
+  filters: [string, string[]][],
+): Promise<string | null> {
+  return invoke<string | null>("pick_save_file", { defaultPath, filters });
+}
+
 export async function pollDroppedFiles(): Promise<string[]> {
   return invoke<string[]>("poll_dropped_files");
 }

@@ -390,6 +390,26 @@ async fn pick_any_files(app: AppHandle) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+async fn pick_save_file(
+    app: AppHandle,
+    default_path: String,
+    filters: Vec<(String, Vec<String>)>,
+) -> Result<Option<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut dialog = app.dialog().file();
+    dialog = dialog.set_file_name(&default_path);
+    for (name, exts) in &filters {
+        let ext_refs: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
+        dialog = dialog.add_filter(name, &ext_refs);
+    }
+    dialog.save_file(move |path| {
+        let result = path.map(|p| p.to_string());
+        let _ = tx.send(result);
+    });
+    rx.await.map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn list_import_jobs(
     app: AppHandle,
     page: Option<i64>,
@@ -1972,6 +1992,7 @@ pub fn run() {
             import_files,
             pick_invoice_files,
             pick_any_files,
+            pick_save_file,
             poll_dropped_files,
             import_dropped_file,
             list_import_jobs,

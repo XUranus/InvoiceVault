@@ -1,5 +1,4 @@
 import { useCallback, useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { useNavigate } from "react-router-dom";
 import {
   importFiles,
@@ -135,16 +134,6 @@ export function useAppInitializer() {
       document.removeEventListener("drop", onDrop);
     };
   }, []);
-
-  // Listen for native DragDrop hover state (Linux/macOS).
-  // On these platforms, DOM dragenter/dragleave don't fire — the native handler
-  // emits "native-drag-state" instead. This updates the visual hover feedback.
-  useEffect(() => {
-    const unlisten = listen<{ dragging: boolean }>("native-drag-state", (event) => {
-      setIsDraggingFiles(event.payload.dragging);
-    });
-    return () => { unlisten.then((fn) => fn()); };
-  }, [setIsDraggingFiles]);
 
   // Recognition queue polling
   useEffect(() => {

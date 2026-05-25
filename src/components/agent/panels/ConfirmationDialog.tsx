@@ -2,7 +2,7 @@ import React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { motion } from "framer-motion";
 import { AlertTriangle, X } from "lucide-react";
-import { save } from "@tauri-apps/plugin-dialog";
+import { pickSaveFile } from "../../../api";
 import { useAgentStore } from "../hooks/useAgentStore";
 import { ToolIcon } from "../shared/ToolIcon";
 import type { PendingConfirmation } from "../../../types";
@@ -53,10 +53,10 @@ export function ConfirmationDialog() {
       const defaultExt = isTemplate ? "xlsx" : "csv";
       const filterName = isTemplate ? "Excel 文件" : "CSV 文件";
 
-      const filePath = await save({
-        defaultPath: `发票导出.${defaultExt}`,
-        filters: [{ name: filterName, extensions: [defaultExt] }],
-      });
+      const filePath = await pickSaveFile(
+        `发票导出.${defaultExt}`,
+        [[filterName, [defaultExt]]],
+      );
 
       if (!filePath) return; // User cancelled save dialog
       await confirmAction(true, { output_path: filePath });
@@ -118,38 +118,40 @@ export function ConfirmationDialog() {
               </span>
             </Dialog.Title>
 
-            <Dialog.Description className="mb-6">
-              {pendingConfirm && (
-                <div>
-                  <div
-                    className="flex items-center gap-3 p-3 rounded-md mb-3"
-                    style={{
-                      backgroundColor: "var(--color-confirm-bg)",
-                      border: "1px solid var(--color-confirm-border)",
-                    }}
-                  >
-                    <ToolIcon
-                      name={pendingConfirm.tool_name}
-                      className="w-5 h-5"
-                      style={{ color: "var(--color-primary-text)" }}
-                    />
-                    <span
-                      className="text-sm font-medium"
-                      style={{ color: "var(--color-text)" }}
+            <Dialog.Description asChild>
+              <div className="mb-6">
+                {pendingConfirm && (
+                  <div>
+                    <div
+                      className="flex items-center gap-3 p-3 rounded-md mb-3"
+                      style={{
+                        backgroundColor: "var(--color-confirm-bg)",
+                        border: "1px solid var(--color-confirm-border)",
+                      }}
                     >
-                      {displayName}
-                    </span>
+                      <ToolIcon
+                        name={pendingConfirm.tool_name}
+                        className="w-5 h-5"
+                        style={{ color: "var(--color-primary-text)" }}
+                      />
+                      <span
+                        className="text-sm font-medium"
+                        style={{ color: "var(--color-text)" }}
+                      >
+                        {displayName}
+                      </span>
+                    </div>
+                    {pendingConfirm.message && (
+                      <p
+                        className="text-sm"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        {pendingConfirm.message}
+                      </p>
+                    )}
                   </div>
-                  {pendingConfirm.message && (
-                    <p
-                      className="text-sm"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      {pendingConfirm.message}
-                    </p>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
             </Dialog.Description>
 
             <div className="flex justify-end gap-3">

@@ -58,9 +58,9 @@ export function SessionSidebar() {
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.15 }}
             >
-              <button
+              <div
                 onClick={() => switchSession(session.id)}
-                className="w-full flex items-center gap-2 p-2 rounded-md mb-1 text-left transition-colors group"
+                className="w-full flex items-center gap-2 p-2 rounded-md mb-1 text-left transition-colors group cursor-pointer"
                 style={{
                   backgroundColor:
                     activeSessionId === session.id
@@ -88,7 +88,7 @@ export function SessionSidebar() {
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </motion.button>
-              </button>
+              </div>
             </motion.div>
           ))}
         </AnimatePresence>

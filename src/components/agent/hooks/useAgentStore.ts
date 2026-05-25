@@ -15,8 +15,8 @@ import {
   getAgentSession,
   updateAgentSessionTitle,
   generateSessionTitleApi,
-  sendAgentMessageStream,
-  confirmAgentActionStream,
+  sendAgentMessage,
+  confirmAgentAction,
   listAgentTasks,
   listAgentArtifacts,
   attachAgentFile,
@@ -174,7 +174,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     try {
       const config = getLlmConfig();
-      await sendAgentMessageStream("", activeSessionId, content, config, attachmentIds);
+      const response = await sendAgentMessage(activeSessionId, content, config, attachmentIds);
+      // Reload messages and refresh tasks/artifacts
+      if (activeSessionId !== null) {
+        await get().loadMessages(activeSessionId);
+      }
+      get().refreshTasks();
+      get().refreshArtifacts();
+      // Handle pending confirmation
+      if (response.pending_confirmation) {
+        set({
+          pendingConfirm: response.pending_confirmation,
+          streamState: null,
+        });
+      } else {
+        set({
+          streamState: {
+            streamId: "",
+            phase: "done",
+            toolName: null,
+            deltaContent: "",
+            errorMessage: null,
+          },
+        });
+      }
+      // Check if session title is default and generate a new one
+      const currentSession = get().sessions.find((s) => s.id === activeSessionId);
+      if (currentSession && currentSession.title === "新对话") {
+        get().generateSessionTitle(activeSessionId);
+      }
     } catch (err) {
       // Reload messages to show any tool calls that were executed before the error
       if (activeSessionId !== null) {
@@ -209,7 +237,30 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     try {
       const config = getLlmConfig();
-      await confirmAgentActionStream("", activeSessionId, confirmed, extra || null, config);
+      const response = await confirmAgentAction(activeSessionId, confirmed, extra || null, config);
+      // Reload messages and refresh tasks/artifacts
+      if (activeSessionId !== null) {
+        await get().loadMessages(activeSessionId);
+      }
+      get().refreshTasks();
+      get().refreshArtifacts();
+      // Handle pending confirmation
+      if (response.pending_confirmation) {
+        set({
+          pendingConfirm: response.pending_confirmation,
+          streamState: null,
+        });
+      } else {
+        set({
+          streamState: {
+            streamId: "",
+            phase: "done",
+            toolName: null,
+            deltaContent: "",
+            errorMessage: null,
+          },
+        });
+      }
     } catch (err) {
       set({
         streamState: {
