@@ -46,17 +46,18 @@ pub fn bind(
             .iter()
             .find(|r| r.kind == RegionKind::DataAppend);
 
-        let (column_map, header_row_num, data_start, data_end) =
+        let (column_map, header_row_num, data_start, data_end, summary_start) =
             if let (Some(hr), Some(dr)) = (header_region, data_region) {
                 (
                     hr.column_map.clone(),
                     hr.start_row,
                     dr.start_row,
                     dr.end_row,
+                    dr.summary_start_row,
                 )
             } else {
                 // No data region on this sheet — preserve all rows as static
-                let rows = build_static_rows(&sheet.rows, &sheet.full_xml);
+                let rows = build_static_rows(&sheet.rows);
                 ir_sheets.push(SheetIR {
                     sheet_index: sheet_idx,
                     rows,
@@ -67,14 +68,36 @@ pub fn bind(
                 continue;
             };
 
-        // Find the template data row (first row in data region)
-        let template_row = sheet.rows.iter().find(|r| r.row_num == data_start).cloned();
+        // Find the template data row (first row in data region with actual values)
+        let template_row = sheet
+            .rows
+            .iter()
+            .find(|r| r.row_num >= data_start && row_has_values(r))
+            .cloned();
+
+        // Detect sequence columns (columns where the template data row has value "1")
+        let seq_cols = detect_sequence_columns(template_row.as_ref());
+
+        // The clone range: data_start to (summary_start - 1) or data_end
+        let clone_end = summary_start.map(|s| s - 1).unwrap_or(data_end);
 
         let data_count = source.row_count();
         let row_offset = if data_count > 0 {
-            data_count as i32 - 1 // template row is replaced by N rows
+            // Rows from clone_end+1 to data_end will be shifted by (data_count - number_of_cloned_template_rows)
+            let template_data_rows = sheet
+                .rows
+                .iter()
+                .filter(|r| r.row_num >= data_start && r.row_num <= clone_end && row_has_values(r))
+                .count();
+            data_count as i32 - template_data_rows as i32
         } else {
-            -1 // no data, template row is removed
+            // No data: remove template data rows
+            let template_data_rows = sheet
+                .rows
+                .iter()
+                .filter(|r| r.row_num >= data_start && r.row_num <= clone_end && row_has_values(r))
+                .count();
+            -(template_data_rows as i32)
         };
 
         let mut ir_rows = Vec::new();
@@ -91,7 +114,7 @@ pub fn bind(
             ir_rows.push(build_static_row(header_row));
         }
 
-        // 3. Data rows
+        // 3. Data rows (cloned from template)
         if let Some(ref tmpl) = template_row {
             for data_idx in 0..data_count {
                 let target_row_num = data_start + data_idx as u32;
@@ -104,18 +127,47 @@ pub fn bind(
                         (*col_idx, cv)
                     })
                 });
-                let cloned = cloner::clone_row_with_values(tmpl, target_row_num, values);
+                let mut cloned = cloner::clone_row_with_values(tmpl, target_row_num, values);
+
+                // Auto-fill sequence columns
+                for &seq_col in &seq_cols {
+                    if let Some(cell) = cloned.cells.iter_mut().find(|c| c.col == seq_col) {
+                        cell.value = CellValue::Number((data_idx + 1) as f64);
+                    }
+                }
+
                 ir_rows.push(cloned);
             }
         }
 
-        // 4. Static rows after data region (shifted down)
+        // 4. Rows after data clone range: summary rows + footer + other static rows
+        for row in &sheet.rows {
+            if row.row_num <= clone_end {
+                continue; // already handled (data rows or skipped empty rows)
+            }
+            if row.row_num > data_end {
+                break; // beyond the region
+            }
+
+            // Summary rows and empty rows in the gap: shift down
+            if row_has_values(row) || row_has_formulas(row) {
+                let shifted_num = (row.row_num as i32 + row_offset).max(1) as u32;
+                let mut shifted = build_static_row(row);
+                shifted.row_num = shifted_num;
+                for cell in &mut shifted.cells {
+                    cell.row = shifted_num;
+                }
+                ir_rows.push(shifted);
+            }
+            // Empty rows (no values, no formulas) are dropped — they're template placeholders
+        }
+
+        // 5. Rows after the data region (footer etc.)
         for row in &sheet.rows {
             if row.row_num > data_end {
                 let shifted_num = (row.row_num as i32 + row_offset).max(1) as u32;
                 let mut shifted = build_static_row(row);
                 shifted.row_num = shifted_num;
-                // Update cell row numbers
                 for cell in &mut shifted.cells {
                     cell.row = shifted_num;
                 }
@@ -123,7 +175,7 @@ pub fn bind(
             }
         }
 
-        // 5. Shift merge cells
+        // 6. Shift merge cells
         let merge_cells = shift_merges(&sheet.merge_cells, data_start, data_end, row_offset);
 
         ir_sheets.push(SheetIR {
@@ -175,8 +227,40 @@ fn build_static_row(row: &RowAst) -> RowIR {
 }
 
 /// Build static rows for a sheet with no data region.
-fn build_static_rows(rows: &[RowAst], _full_xml: &str) -> Vec<RowIR> {
+fn build_static_rows(rows: &[RowAst]) -> Vec<RowIR> {
     rows.iter().map(build_static_row).collect()
+}
+
+/// Check if a row has at least one cell with an actual value.
+fn row_has_values(row: &RowAst) -> bool {
+    row.cells.iter().any(|c| c.raw_value.is_some())
+}
+
+/// Check if a row has at least one cell with a formula in its raw XML.
+fn row_has_formulas(row: &RowAst) -> bool {
+    row.cells.iter().any(|c| c.raw_xml.contains("<f"))
+}
+
+/// Detect sequence columns: columns where the template data row has a numeric value of 1.
+/// Returns the list of 0-based column indices that should auto-increment.
+fn detect_sequence_columns(template_row: Option<&RowAst>) -> Vec<usize> {
+    let Some(row) = template_row else {
+        return Vec::new();
+    };
+    let mut seq_cols = Vec::new();
+    for cell in &row.cells {
+        // Numeric cells: no type attribute (default) or explicit t="n"
+        let is_numeric = cell.cell_type.is_none()
+            || cell.cell_type.as_deref() == Some("n");
+        if is_numeric {
+            if let Some(ref val) = cell.raw_value {
+                if val.trim() == "1" {
+                    seq_cols.push(cell.col);
+                }
+            }
+        }
+    }
+    seq_cols
 }
 
 /// Shift merge cells that are below the data region.

@@ -162,7 +162,7 @@ fn parse_rows(xml: &str, shared_strings: &[String]) -> Vec<RowAst> {
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(0);
 
-        let raw_xml_header = format!("<row{}", header_part);
+        let raw_xml_header = format!("<row{}>", header_part);
         let cells = parse_cells(row_content, row_num, shared_strings);
 
         rows.push(RowAst {
@@ -179,12 +179,46 @@ fn parse_rows(xml: &str, shared_strings: &[String]) -> Vec<RowAst> {
 fn parse_cells(row_xml: &str, row_num: u32, shared_strings: &[String]) -> Vec<CellAst> {
     let mut cells = Vec::new();
 
-    for segment in row_xml.split("<c").skip(1) {
-        let Some(end_tag) = segment.find('>') else {
-            continue;
+    // Find each <c ...>...</c> or <c .../> cell by locating <c and </c> pairs
+    let mut search_start = 0;
+    while let Some(c_start) = row_xml[search_start..].find("<c") {
+        let abs_start = search_start + c_start;
+        let after_c = &row_xml[abs_start..];
+
+        // Find the end of this cell: </c> or self-closing />
+        let cell_end = if let Some(self_close) = after_c.find("/>") {
+            // Check if </c> comes before the self-closing />
+            if let Some(close_tag) = after_c.find("</c>") {
+                if close_tag < self_close {
+                    abs_start + close_tag + "</c>".len()
+                } else {
+                    abs_start + self_close + "/>".len()
+                }
+            } else {
+                abs_start + self_close + "/>".len()
+            }
+        } else if let Some(close_tag) = after_c.find("</c>") {
+            abs_start + close_tag + "</c>".len()
+        } else {
+            break; // malformed
         };
-        let attrs = &segment[..end_tag];
-        let inner = &segment[end_tag + 1..];
+
+        let cell_xml = &row_xml[abs_start..cell_end];
+        search_start = cell_end;
+
+        // Parse the cell
+        let inner_start = cell_xml.find('>').unwrap_or(0);
+        let is_self_closing = cell_xml.ends_with("/>");
+        let attrs = if is_self_closing {
+            &cell_xml[2..cell_xml.len() - 2] // strip <c ... />
+        } else {
+            &cell_xml[2..inner_start] // strip <c ...>
+        };
+        let inner = if is_self_closing {
+            ""
+        } else {
+            &cell_xml[inner_start + 1..cell_xml.len() - "</c>".len()]
+        };
 
         let ref_str = extract_attr(attrs, "r").unwrap_or_default();
         let (col, _) = parse_cell_ref(&ref_str);
@@ -205,7 +239,7 @@ fn parse_cells(row_xml: &str, row_num: u32, shared_strings: &[String]) -> Vec<Ce
             _ => raw_value.clone(),
         };
 
-        let raw_xml = format!("<c{}</c>", segment);
+        let raw_xml = cell_xml.to_owned();
 
         cells.push(CellAst {
             col,

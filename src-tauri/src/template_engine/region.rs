@@ -22,6 +22,10 @@ pub struct Region {
     pub column_map: Vec<(usize, String)>,
     /// Confidence score (0.0 - 1.0) for this region detection.
     pub confidence: f64,
+    /// 1-based row number where summary rows begin (if detected).
+    /// Rows from summary_start_row to end_row are summary/total rows
+    /// that should be preserved as static content, not cloned per data row.
+    pub summary_start_row: Option<u32>,
 }
 
 /// Recognize data regions in the parsed template.
@@ -40,7 +44,23 @@ pub fn recognize_regions(
             find_best_header(&sheet.rows, &ast.shared_strings, label_matcher)
         {
             let data_start = header_row + 1;
-            let data_end = find_data_end(&sheet.rows, header_row);
+            let last_content_row = find_last_content_row(&sheet.rows, data_start);
+            let summary_start =
+                find_summary_start(&sheet.rows, &ast.shared_strings, data_start);
+            // Data ends at the row before the summary, or at the last content row
+            let data_end = summary_start
+                .map(|s| s - 1)
+                .unwrap_or(last_content_row)
+                .max(data_start);
+
+            // If summary rows exist, the data region extends to include them,
+            // but summary_start_row tells the binder where cloning should stop.
+            let region_end = if summary_start.is_some() {
+                // Extend to the last row with content (including summary + footer)
+                last_content_row.max(data_end)
+            } else {
+                last_content_row.max(data_end)
+            };
 
             // Header region
             regions.push(Region {
@@ -50,17 +70,19 @@ pub fn recognize_regions(
                 end_row: header_row,
                 column_map: column_map.clone(),
                 confidence,
+                summary_start_row: None,
             });
 
             // DataAppend region (may be empty if no rows below header)
-            if data_start <= data_end {
+            if data_start <= region_end {
                 regions.push(Region {
                     sheet_index: sheet_idx,
                     kind: RegionKind::DataAppend,
                     start_row: data_start,
-                    end_row: data_end,
+                    end_row: region_end,
                     column_map,
                     confidence,
+                    summary_start_row: summary_start,
                 });
             }
         }
@@ -97,15 +119,66 @@ fn find_best_header(
     }
 }
 
-/// Find the end of the data region: the last row with any content after the header.
+/// Find the end of the data region: the last row with actual values after the header.
+/// Skips empty rows (cells with styles but no values).
 fn find_data_end(rows: &[super::ast::RowAst], header_row: u32) -> u32 {
     let mut last_content_row = header_row;
     for row in rows {
-        if row.row_num > header_row && !row.cells.is_empty() {
+        if row.row_num > header_row && row_has_values(row) {
             last_content_row = row.row_num;
         }
     }
     last_content_row
+}
+
+/// Find the last row with actual values at or after `from_row`.
+fn find_last_content_row(rows: &[super::ast::RowAst], from_row: u32) -> u32 {
+    let mut last = from_row;
+    for row in rows {
+        if row.row_num >= from_row && row_has_values(row) {
+            last = row.row_num;
+        }
+    }
+    last
+}
+
+/// Check if a row has at least one cell with an actual value (not just style-only cells).
+fn row_has_values(row: &super::ast::RowAst) -> bool {
+    row.cells.iter().any(|c| c.raw_value.is_some())
+}
+
+/// Summary markers — Chinese labels for subtotal/total rows.
+const SUMMARY_MARKERS: &[&str] = &[
+    "小 计",
+    "小计",
+    "合 计",
+    "合计",
+    "总计",
+    "总 计",
+    "汇总",
+    "小  计",
+    "合  计",
+];
+
+/// Find the first summary row (containing markers like "小计", "合计") at or after `from_row`.
+fn find_summary_start(
+    rows: &[super::ast::RowAst],
+    shared_strings: &[String],
+    from_row: u32,
+) -> Option<u32> {
+    for row in rows {
+        if row.row_num < from_row {
+            continue;
+        }
+        for cell in &row.cells {
+            let text = resolve_cell_text(cell, shared_strings);
+            let trimmed = text.trim();
+            if SUMMARY_MARKERS.iter().any(|m| *m == trimmed) {
+                return Some(row.row_num);
+            }
+        }
+    }
+    None
 }
 
 /// Extract text values from a row's cells (resolving shared strings).

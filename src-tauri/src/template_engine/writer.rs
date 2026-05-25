@@ -26,18 +26,18 @@ pub fn write_xlsx(path: &str, ir: &mut SpreadsheetIR) -> Result<(), TemplateErro
     }
     drop(archive);
 
-    // Prepare replacement content for sheets and shared strings
+    // Render sheet XMLs (may add new strings to the pool)
+    let mut sheet_xmls: Vec<String> = Vec::with_capacity(sheet_count);
+    for sheet in &ir.sheets {
+        sheet_xmls.push(render_sheet_xml(sheet, &mut ir.shared_strings));
+    }
+
+    // Prepare replacement content for shared strings (after rendering, to capture new strings)
     let ss_xml = if ir.shared_strings.is_extended() {
         Some(ir.shared_strings.to_xml())
     } else {
         None
     };
-
-    // Render sheet XMLs
-    let mut sheet_xmls: Vec<String> = Vec::with_capacity(sheet_count);
-    for sheet in &ir.sheets {
-        sheet_xmls.push(render_sheet_xml(sheet, &ir.shared_strings));
-    }
 
     // Write new ZIP
     let out_file = std::fs::File::create(path).map_err(|e| TemplateError::Write(e.to_string()))?;
@@ -95,7 +95,7 @@ fn find_sheet_index(name: &str, _sheet_count: usize) -> Option<usize> {
 }
 
 /// Render a SheetIR back to sheet XML.
-fn render_sheet_xml(sheet: &SheetIR, strings: &SharedStringPool) -> String {
+fn render_sheet_xml(sheet: &SheetIR, strings: &mut SharedStringPool) -> String {
     let mut xml = sheet.xml_before_sheet_data.clone();
     xml.push_str("<sheetData>");
 
@@ -125,11 +125,17 @@ fn render_sheet_xml(sheet: &SheetIR, strings: &SharedStringPool) -> String {
 }
 
 /// Render a single RowIR to <row>...</row> XML.
-fn render_row_xml(row: &RowIR, strings: &SharedStringPool) -> String {
-    // For static rows, use the preserved raw XML
+fn render_row_xml(row: &RowIR, strings: &mut SharedStringPool) -> String {
+    // For static rows, use the preserved raw XML only if row number hasn't shifted.
+    // Shifted rows must be rebuilt from cells because raw_row_xml contains the
+    // original template cell references which don't match the new row number.
     if !row.is_data {
         if let Some(ref raw) = row.raw_row_xml {
-            return raw.clone();
+            let original_num = extract_row_number(raw);
+            if original_num == row.row_num {
+                return raw.clone();
+            }
+            // Row was shifted — fall through to rebuild from cells
         }
     }
 
@@ -137,6 +143,13 @@ fn render_row_xml(row: &RowIR, strings: &SharedStringPool) -> String {
         // Use the template row's header (preserves spans, height, etc.)
         // Replace the row number
         replace_row_number(header, row.row_num)
+    } else if let Some(ref raw) = row.raw_row_xml {
+        // Shifted static row: extract original row header from raw XML and update row number
+        if let Some(tag_end) = raw.find('>') {
+            replace_row_number(&raw[..tag_end + 1], row.row_num)
+        } else {
+            format!(r#"<row r="{}">"#, row.row_num)
+        }
     } else {
         format!(r#"<row r="{}">"#, row.row_num)
     };
@@ -150,7 +163,7 @@ fn render_row_xml(row: &RowIR, strings: &SharedStringPool) -> String {
 }
 
 /// Render a CellIR to <c>...</c> XML.
-fn render_cell_xml(cell: &CellIR, row_num: u32, strings: &SharedStringPool) -> String {
+fn render_cell_xml(cell: &CellIR, row_num: u32, strings: &mut SharedStringPool) -> String {
     match &cell.value {
         CellValue::Preserve(ast_cell) => {
             // For static rows, emit raw XML but update row number if needed
@@ -164,7 +177,7 @@ fn render_cell_xml(cell: &CellIR, row_num: u32, strings: &SharedStringPool) -> S
         }
         CellValue::String(s) => {
             let ref_str = format!("{}{}", col_index_to_letter(cell.col), row_num);
-            let ss_idx = strings.index_of(s).unwrap_or(0);
+            let ss_idx = strings.get_or_insert(s);
             let style_attr = cell
                 .style_index
                 .map(|s| format!(r#" s="{s}""#))
@@ -180,6 +193,19 @@ fn render_cell_xml(cell: &CellIR, row_num: u32, strings: &SharedStringPool) -> S
             format!(r#"<c r="{ref_str}"{style_attr}><v>{n}</v></c>"#)
         }
     }
+}
+
+/// Extract the row number from a <row r="N" ...> tag.
+fn extract_row_number(raw: &str) -> u32 {
+    if let Some(r_pos) = raw.find(" r=\"") {
+        let value_start = r_pos + " r=\"".len();
+        if let Some(value_end) = raw[value_start..].find('"') {
+            return raw[value_start..value_start + value_end]
+                .parse()
+                .unwrap_or(0);
+        }
+    }
+    0
 }
 
 /// Replace the row number in a <row r="N" ...> tag.

@@ -17,6 +17,7 @@ mod archive;
 mod config;
 mod fs_utils;
 mod paths;
+mod template_adapter;
 
 pub use archive::{add_dir_to_zip, add_dir_to_zip_with_skip, stream_file_to_zip};
 use config::write_config;
@@ -2503,8 +2504,9 @@ fn make_tool_executor(
             };
             drop(conn);
 
-            let column_map = match export_template_column_map_from_attachment(&attachment) {
-                Ok(map) if !map.is_empty() => map,
+            // Resolve column map via engine's region detection
+            let matched_keys = match template_adapter::matched_keys_from_attachment(&attachment) {
+                Ok(keys) if !keys.is_empty() => keys,
                 Ok(_) => {
                     return ToolExecResult::Error {
                         message: "模板表头未匹配到可导出的发票字段".to_owned(),
@@ -2512,6 +2514,7 @@ fn make_tool_executor(
                 }
                 Err(e) => return ToolExecResult::Error { message: e },
             };
+            let column_map = template_adapter::resolve_column_defs(&matched_keys);
 
             let is_confirmed = args
                 .get("_confirmed")
@@ -2521,7 +2524,7 @@ fn make_tool_executor(
                 let column_desc: Vec<&str> = column_map.iter().map(|(_, c)| c.label).collect();
                 let column_desc = column_desc.join(", ");
                 let conn = db.lock().expect("db lock");
-                let rows = crate::exporter::load_invoices_for_export(
+                let rows = template_adapter::load_invoices(
                     &conn,
                     json_i64_vec(args, "invoice_ids").as_deref(),
                     json_string(args, "date_from").as_deref(),
@@ -2546,7 +2549,7 @@ fn make_tool_executor(
             };
             let template_path = &attachment.storage_path;
             let conn = db.lock().expect("db lock");
-            let rows = crate::exporter::load_invoices_for_export(
+            let rows = template_adapter::load_invoices(
                 &conn,
                 json_i64_vec(args, "invoice_ids").as_deref(),
                 json_string(args, "date_from").as_deref(),
@@ -2573,7 +2576,7 @@ fn make_tool_executor(
                     None
                 }
             };
-            let source = InvoiceDataSource {
+            let source = template_adapter::InvoiceDataSource {
                 rows: &rows,
                 column_map: &column_map,
             };
@@ -2581,7 +2584,7 @@ fn make_tool_executor(
                 template_path,
                 output_path,
                 &source,
-                &invoice_label_matcher,
+                &template_adapter::label_matcher,
             ) {
                 Ok(te_result) => {
                     let result = ExportResult {
@@ -3375,92 +3378,6 @@ fn record_export_artifact(
         Some(result.byte_size as i64),
         metadata.as_deref(),
     )
-}
-
-fn count_label_matches(labels: &[String]) -> usize {
-    use crate::exporter::resolve_export_column_keys_from_labels;
-    resolve_export_column_keys_from_labels(labels).len()
-}
-
-fn export_template_column_map_from_attachment(
-    attachment: &AgentAttachment,
-) -> Result<Vec<(usize, &'static crate::exporter::ColumnDef)>, String> {
-    use crate::exporter::resolve_template_column_map;
-
-    let inspection = inspect_spreadsheet_attachment(attachment, 15)?;
-    let sheet = match inspection.sheets.first() {
-        Some(s) => s,
-        None => return Ok(Vec::new()),
-    };
-
-    // Find best header row (same logic as export_columns_from_template)
-    let mut best_labels: Vec<String> = sheet.columns.iter().map(|c| c.label.clone()).collect();
-    let mut best_count = count_label_matches(&best_labels);
-
-    for row in &sheet.sample_rows {
-        let labels: Vec<String> = row.iter().map(|c| c.trim().to_owned()).collect();
-        let count = count_label_matches(&labels);
-        if count > best_count {
-            best_count = count;
-            best_labels = labels;
-        }
-    }
-
-    let mut map = resolve_template_column_map(&best_labels);
-
-    if map.is_empty() {
-        // Fallback: try matching ANY cell content across all rows
-        let mut all_cells: Vec<String> = best_labels.clone();
-        for row in &sheet.sample_rows {
-            all_cells.extend(row.iter().map(|c| c.trim().to_owned()));
-        }
-        all_cells.retain(|c| !c.is_empty());
-        map = resolve_template_column_map(&all_cells);
-    }
-
-    Ok(map)
-}
-
-/// Label matcher adapter for the template engine.
-/// Wraps `resolve_template_column_map` to match the `label_matcher` signature.
-fn invoice_label_matcher(labels: &[String]) -> Vec<(usize, String)> {
-    crate::exporter::resolve_template_column_map(labels)
-        .into_iter()
-        .map(|(idx, col_def)| (idx, col_def.key.to_owned()))
-        .collect()
-}
-
-/// Adapter that implements template_engine::binder::DataSource for invoice export.
-struct InvoiceDataSource<'a> {
-    rows: &'a [crate::exporter::InvoiceRow],
-    column_map: &'a [(usize, &'static crate::exporter::ColumnDef)],
-}
-
-impl crate::template_engine::binder::DataSource for InvoiceDataSource<'_> {
-    fn row_count(&self) -> usize {
-        self.rows.len()
-    }
-
-    fn cell_value(
-        &self,
-        row_index: usize,
-        col_key: &str,
-    ) -> Option<crate::template_engine::binder::DataValue> {
-        let row = self.rows.get(row_index)?;
-        if let Some((_, col_def)) = self.column_map.iter().find(|(_, cd)| cd.key == col_key) {
-            if col_def.numeric {
-                return row
-                    .number_by_key(col_key)
-                    .map(crate::template_engine::binder::DataValue::Number);
-            }
-        }
-        let val = row.field_by_key(col_key);
-        if val.is_empty() {
-            None
-        } else {
-            Some(crate::template_engine::binder::DataValue::String(val))
-        }
-    }
 }
 
 fn json_i64_vec(args: &serde_json::Value, key: &str) -> Option<Vec<i64>> {
