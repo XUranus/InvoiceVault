@@ -14,7 +14,7 @@ const DataSourcePage = React.lazy(
 const InvoicesPage = React.lazy(
   () => import("./components/InvoicesPage"),
 );
-const AgentPage = React.lazy(() => import("./components/AgentPage"));
+const AgentPage = React.lazy(() => import("./components/agent/AgentPage"));
 const EventsPage = React.lazy(() => import("./components/EventsPage"));
 const SettingsPage = React.lazy(
   () => import("./components/SettingsPage"),

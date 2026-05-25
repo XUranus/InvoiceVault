@@ -16,6 +16,7 @@ mod process_utils;
 mod raw_store;
 pub mod scnet_ocr;
 pub mod storage;
+pub mod template_engine;
 mod watcher;
 
 use agent::{
@@ -1231,6 +1232,17 @@ fn delete_agent_session(state: State<'_, AppState>, session_id: i64) -> Result<(
 }
 
 #[tauri::command]
+fn update_agent_session_title(
+    state: State<'_, AppState>,
+    session_id: i64,
+    title: String,
+) -> Result<AgentSession, String> {
+    state
+        .update_agent_session_title(session_id, &title)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn send_agent_message(
     state: State<'_, AppState>,
     session_id: i64,
@@ -1412,6 +1424,30 @@ async fn confirm_agent_action_stream(
             Err(message)
         }
     }
+}
+
+#[tauri::command]
+async fn generate_session_title(
+    state: State<'_, AppState>,
+    session_id: i64,
+    config: LlmProviderConfig,
+) -> Result<String, String> {
+    let first_msg = {
+        let db = state.db().lock().expect("db lock");
+        agent::get_first_user_message(&db, session_id)
+    };
+    let first_msg = match first_msg {
+        Some(msg) => msg,
+        None => return Ok("新对话".to_owned()),
+    };
+    let title = llm::generate_title(&config, &first_msg)
+        .await
+        .map_err(|e| e.to_string())?;
+    {
+        let db = state.db().lock().expect("db lock");
+        agent::set_session_title(&db, session_id, &title).map_err(|e| e.to_string())?;
+    }
+    Ok(title)
 }
 
 #[tauri::command]
@@ -1966,6 +2002,7 @@ pub fn run() {
             list_agent_sessions,
             get_agent_session,
             delete_agent_session,
+            update_agent_session_title,
             send_agent_message,
             send_agent_message_stream,
             attach_agent_file,
@@ -1977,6 +2014,7 @@ pub fn run() {
             delete_agent_artifact,
             confirm_agent_action,
             confirm_agent_action_stream,
+            generate_session_title,
             list_events,
             get_unread_event_count,
             get_unread_failed_import_event_count,

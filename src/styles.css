@@ -1,3 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-solid: var(--color-surface-solid);
+  --color-surface-elevated: var(--color-surface-elevated);
+  --color-surface-subtle: var(--color-surface-subtle);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-separator: var(--color-separator);
+  --color-text: var(--color-text);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-bg: var(--color-primary-bg);
+  --color-primary-text: var(--color-primary-text);
+  --color-on-primary: var(--color-on-primary);
+  --color-success: var(--color-success);
+  --color-success-bg: var(--color-success-bg);
+  --color-error: var(--color-error);
+  --color-error-bg: var(--color-error-bg);
+  --color-error-text: var(--color-error-text);
+  --color-on-error: var(--color-on-error);
+  --color-warn: var(--color-warn);
+  --color-warn-bg: var(--color-warn-bg);
+  --color-warn-text: var(--color-warn-text);
+  --color-sidebar: var(--color-sidebar);
+  --color-sidebar-hover: var(--color-sidebar-hover);
+  --color-sidebar-active: var(--color-sidebar-active);
+  --color-sidebar-active-hover: var(--color-sidebar-active-hover);
+  --color-sidebar-text: var(--color-sidebar-text);
+  --color-sidebar-text-hover: var(--color-sidebar-text-hover);
+  --color-sidebar-text-active: var(--color-sidebar-text-active);
+  --color-sidebar-border: var(--color-sidebar-border);
+  --color-badge-neutral-bg: var(--color-badge-neutral-bg);
+  --color-badge-neutral-text: var(--color-badge-neutral-text);
+  --color-badge-blue-bg: var(--color-badge-blue-bg);
+  --color-badge-blue-text: var(--color-badge-blue-text);
+  --color-badge-green-bg: var(--color-badge-green-bg);
+  --color-badge-green-text: var(--color-badge-green-text);
+  --color-badge-orange-bg: var(--color-badge-orange-bg);
+  --color-badge-orange-text: var(--color-badge-orange-text);
+  --color-badge-red-bg: var(--color-badge-red-bg);
+  --color-badge-red-text: var(--color-badge-red-text);
+  --color-tag-blue-bg: var(--color-tag-blue-bg);
+  --color-tag-blue-text: var(--color-tag-blue-text);
+  --color-drop-border: var(--color-drop-border);
+  --color-agent-sessions-bg: var(--color-agent-sessions-bg);
+  --color-confirm-bg: var(--color-confirm-bg);
+  --color-confirm-border: var(--color-confirm-border);
+  --color-chat-assistant-border: var(--color-chat-assistant-border);
+  --color-alert-error-bg: var(--color-alert-error-bg);
+  --color-alert-error: var(--color-alert-error);
+  --color-alert-error-border: var(--color-alert-error-border);
+  --color-alert-warn-bg: var(--color-alert-warn-bg);
+  --color-alert-warn: var(--color-alert-warn);
+  --color-alert-warn-border: var(--color-alert-warn-border);
+  --color-job-card-hover-border: var(--color-job-card-hover-border);
+  --color-input-bg: var(--color-input-bg);
+  --color-input-bg-subtle: var(--color-input-bg-subtle);
+  --color-hover-bg: var(--color-hover-bg);
+  --color-selected-bg: var(--color-selected-bg);
+  --color-chart-grid: var(--color-chart-grid);
+  --color-chart-axis: var(--color-chart-axis);
+  --color-chart-tooltip-bg: var(--color-chart-tooltip-bg);
+  --color-chart-tooltip-border: var(--color-chart-tooltip-border);
+  --color-chart-tooltip-text: var(--color-chart-tooltip-text);
+  --color-row-hover: var(--color-row-hover);
+  --color-row-selected: var(--color-row-selected);
+  --color-card-border: var(--color-card-border);
+}
+
 :root {
   color-scheme: light;
 

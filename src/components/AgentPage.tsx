@@ -1053,6 +1053,7 @@ function createTempMessage(
     role,
     content,
     tool_call_json: null,
+    tool_call_id: null,
     created_at: new Date().toISOString(),
     attachments,
   };

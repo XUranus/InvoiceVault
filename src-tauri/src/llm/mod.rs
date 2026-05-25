@@ -261,6 +261,53 @@ pub async fn test_llm_connection(
     })
 }
 
+pub async fn generate_title(
+    config: &LlmProviderConfig,
+    first_user_message: &str,
+) -> Result<String, LlmError> {
+    let base_url = config.base_url.trim().trim_end_matches('/');
+    let api_key = config.api_key.trim();
+    let model = config.model.trim();
+    let timeout = Duration::from_secs(30);
+    let client = reqwest::Client::builder().timeout(timeout).build()?;
+    let prompt = format!(
+        "请根据以下对话内容生成一个简短的标题（不超过20个字）：\n\n用户：{}\n\n只输出标题，不要其他内容。",
+        first_user_message
+    );
+    let request = ChatCompletionRequest {
+        model,
+        messages: vec![ChatMessage {
+            role: "user",
+            content: &prompt,
+        }],
+        temperature: 0.3,
+        max_tokens: 64,
+    };
+    let endpoint = format!("{base_url}/chat/completions");
+    let response = client
+        .post(&endpoint)
+        .headers(headers(api_key)?)
+        .json(&request)
+        .send()
+        .await?;
+    let body = response.text().await?;
+    let response_body: ChatCompletionResponse = serde_json::from_str(&body)?;
+    let content = response_body
+        .choices
+        .first()
+        .and_then(|choice| choice.message.content.as_deref())
+        .map(str::trim)
+        .unwrap_or("新对话");
+    let mut title = content
+        .trim_matches(|c| c == '"' || c == '\'')
+        .replace('\n', " ");
+    if title.len() > 30 {
+        title.truncate(30);
+        title.push_str("...");
+    }
+    Ok(title)
+}
+
 const MAX_RETRIES: u32 = 3;
 
 pub async fn recognize_invoice_image(

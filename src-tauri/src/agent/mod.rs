@@ -1088,6 +1088,39 @@ fn update_session_title(conn: &Connection, session_id: i64) -> Result<(), AgentE
     Ok(())
 }
 
+pub fn set_session_title(conn: &Connection, session_id: i64, title: &str) -> Result<AgentSession, AgentError> {
+    conn.execute(
+        "UPDATE agent_sessions SET title = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        rusqlite::params![title, session_id],
+    )?;
+    get_session(conn, session_id)
+}
+
+pub fn get_first_user_message(conn: &Connection, session_id: i64) -> Option<String> {
+    conn.query_row(
+        "SELECT content FROM agent_messages WHERE session_id = ?1 AND role = 'user' ORDER BY id ASC LIMIT 1",
+        [session_id],
+        |row| row.get(0),
+    )
+    .ok()
+}
+
+pub fn get_session(conn: &Connection, session_id: i64) -> Result<AgentSession, AgentError> {
+    conn.query_row(
+        "SELECT id, title, created_at, updated_at FROM agent_sessions WHERE id = ?1",
+        [session_id],
+        |row| {
+            Ok(AgentSession {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                created_at: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        },
+    )
+    .map_err(|e| AgentError::Database(e))
+}
+
 // ---------------------------------------------------------------------------
 // LLM chat with tools
 // ---------------------------------------------------------------------------
@@ -1868,7 +1901,7 @@ async fn run_agent_loop_from_inner(
     stream_sink: Option<AgentStreamSink>,
 ) -> Result<AgentResponse, AgentError> {
     let mut new_messages: Vec<AgentMessageRow> = Vec::new();
-    const MAX_ITERATIONS: usize = 5;
+    const MAX_ITERATIONS: usize = 10;
 
     for _iteration in 0..MAX_ITERATIONS {
         let response = match &stream_sink {
@@ -1918,7 +1951,11 @@ async fn run_agent_loop_from_inner(
 
             let mut tool_result_msgs: Vec<LlmMessage> = Vec::new();
             for tc in &tool_calls {
-                let args: serde_json::Value = serde_json::from_str(&tc.function.arguments)?;
+                let mut args: serde_json::Value = serde_json::from_str(&tc.function.arguments)?;
+                // Strip _confirmed so the LLM cannot bypass confirmation dialogs
+                if let Some(obj) = args.as_object_mut() {
+                    obj.remove("_confirmed");
+                }
                 if let Some(sink) = &stream_sink {
                     sink(AgentStreamEvent::ToolCall {
                         tool_name: tc.function.name.clone(),

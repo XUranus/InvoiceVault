@@ -395,6 +395,13 @@ export async function deleteAgentSession(
   return invoke<void>("delete_agent_session", { sessionId });
 }
 
+export async function updateAgentSessionTitle(
+  sessionId: number,
+  title: string,
+): Promise<AgentSession> {
+  return invoke<AgentSession>("update_agent_session_title", { sessionId, title });
+}
+
 export async function sendAgentMessage(
   sessionId: number,
   content: string,
@@ -471,6 +478,12 @@ export async function deleteAgentArtifact(
   return invoke<void>("delete_agent_artifact", { sessionId, artifactId });
 }
 
+export async function removeAgentAttachment(
+  attachmentId: number,
+): Promise<void> {
+  return invoke<void>("remove_agent_attachment", { attachmentId });
+}
+
 export async function confirmAgentAction(
   sessionId: number,
   confirmed: boolean,
@@ -495,6 +508,13 @@ export async function confirmAgentActionStream(
     request: { session_id: sessionId, confirmed, extra_params: extraParams },
     config,
   });
+}
+
+export async function generateSessionTitleApi(
+  sessionId: number,
+  config: { base_url: string; api_key: string; model: string; timeout_seconds: number },
+): Promise<string> {
+  return invoke<string>("generate_session_title", { sessionId, config });
 }
 
 // Event APIs

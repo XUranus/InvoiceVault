@@ -495,6 +495,7 @@ export type AgentMessage = {
   role: string;
   content: string;
   tool_call_json: string | null;
+  tool_call_id: string | null;
   created_at: string;
   attachments: AgentAttachment[];
 };

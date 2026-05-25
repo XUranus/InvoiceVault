@@ -1777,6 +1777,11 @@ impl AppState {
         Ok(agent::get_session_messages(&db, session_id)?)
     }
 
+    pub fn update_agent_session_title(&self, session_id: i64, title: &str) -> Result<AgentSession, AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(agent::set_session_title(&db, session_id, title)?)
+    }
+
     pub fn export_logs(&self, output_path: &str) -> Result<ExportLogsResult, AppError> {
         info!("Exporting logs to {}", output_path);
         let output_path = Path::new(output_path);
@@ -2571,8 +2576,8 @@ fn make_tool_executor(
             };
             drop(conn);
 
-            let columns = match export_columns_from_template(&attachment) {
-                Ok(columns) if !columns.is_empty() => columns,
+            let column_map = match export_template_column_map_from_attachment(&attachment) {
+                Ok(map) if !map.is_empty() => map,
                 Ok(_) => {
                     return ToolExecResult::Error {
                         message: "模板表头未匹配到可导出的发票字段".to_owned(),
@@ -2586,23 +2591,22 @@ fn make_tool_executor(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if !is_confirmed {
-                let format = args
-                    .get("format")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("xlsx");
-                let preview_request = ExportPreviewRequest {
-                    columns: Some(columns.clone()),
-                    ..export_preview_request_from_args(args)
-                };
+                let column_desc: Vec<&str> = column_map.iter().map(|(_, c)| c.label).collect();
+                let column_desc = column_desc.join(", ");
                 let conn = db.lock().expect("db lock");
-                let preview = preview_export(&conn, preview_request).ok();
-                let row_count = preview.as_ref().map(|p| p.row_count).unwrap_or(0);
-                let column_desc = columns.join(", ");
+                let rows = crate::exporter::load_invoices_for_export(
+                    &conn,
+                    json_i64_vec(args, "invoice_ids").as_deref(),
+                    json_string(args, "date_from").as_deref(),
+                    json_string(args, "date_to").as_deref(),
+                )
+                .unwrap_or_default();
+                let row_count = rows.len();
                 return ToolExecResult::ConfirmationRequired {
                     tool_name: "export_invoices_with_template".to_owned(),
                     arguments: args.clone(),
                     message: format!(
-                        "将按模板 {} 的表头导出 {row_count} 张发票为 {format} 格式，字段: {column_desc}。请选择保存位置。",
+                        "将按模板 {} 的表头保留原格式导出 {row_count} 张发票，字段: {column_desc}。请选择保存位置。",
                         attachment.original_name
                     ),
                 };
@@ -2613,20 +2617,22 @@ fn make_tool_executor(
                     message: "缺少 output_path 参数".to_owned(),
                 };
             };
-            let format = args
-                .get("format")
-                .and_then(|v| v.as_str())
-                .unwrap_or("xlsx")
-                .to_owned();
-            let request = ExportInvoicesRequest {
-                format,
-                output_path: output_path.to_owned(),
-                invoice_ids: json_i64_vec(args, "invoice_ids"),
-                columns: Some(columns),
-                date_from: json_string(args, "date_from"),
-                date_to: json_string(args, "date_to"),
-            };
+            let template_path = &attachment.storage_path;
             let conn = db.lock().expect("db lock");
+            let rows = crate::exporter::load_invoices_for_export(
+                &conn,
+                json_i64_vec(args, "invoice_ids").as_deref(),
+                json_string(args, "date_from").as_deref(),
+                json_string(args, "date_to").as_deref(),
+            );
+            let rows = match rows {
+                Ok(rows) => rows,
+                Err(e) => {
+                    return ToolExecResult::Error {
+                        message: e.to_string(),
+                    }
+                }
+            };
             let input_json = serde_json::to_string(args).unwrap_or_default();
             let task = match agent::create_task(
                 &conn,
@@ -2640,8 +2646,24 @@ fn make_tool_executor(
                     None
                 }
             };
-            match export_invoices(&conn, request) {
-                Ok(result) => {
+            let source = InvoiceDataSource {
+                rows: &rows,
+                column_map: &column_map,
+            };
+            match crate::template_engine::TemplateEngine::export(
+                template_path,
+                output_path,
+                &source,
+                &invoice_label_matcher,
+            ) {
+                Ok(te_result) => {
+                    let result = ExportResult {
+                        file_path: te_result.file_path,
+                        row_count: te_result.row_count,
+                        format: "xlsx".to_owned(),
+                        byte_size: te_result.byte_size,
+                        columns: column_map.iter().map(|(_, c)| c.label.to_owned()).collect(),
+                    };
                     let artifact = record_export_artifact(
                         &conn,
                         session_id,
@@ -3438,16 +3460,23 @@ fn record_export_artifact(
     )
 }
 
-fn export_columns_from_template(attachment: &AgentAttachment) -> Result<Vec<String>, String> {
-    // Read up to 15 rows to find the actual header row (skip title/metadata rows)
+fn count_label_matches(labels: &[String]) -> usize {
+    use crate::exporter::resolve_export_column_keys_from_labels;
+    resolve_export_column_keys_from_labels(labels).len()
+}
+
+fn export_template_column_map_from_attachment(
+    attachment: &AgentAttachment,
+) -> Result<Vec<(usize, &'static crate::exporter::ColumnDef)>, String> {
+    use crate::exporter::resolve_template_column_map;
+
     let inspection = inspect_spreadsheet_attachment(attachment, 15)?;
     let sheet = match inspection.sheets.first() {
         Some(s) => s,
         None => return Ok(Vec::new()),
     };
 
-    // Try all candidate rows (sample_rows includes rows after the detected header,
-    // plus the original header itself) to find the one matching the most export columns.
+    // Find best header row (same logic as export_columns_from_template)
     let mut best_labels: Vec<String> = sheet
         .columns
         .iter()
@@ -3464,26 +3493,61 @@ fn export_columns_from_template(attachment: &AgentAttachment) -> Result<Vec<Stri
         }
     }
 
-    if best_count == 0 {
+    let mut map = resolve_template_column_map(&best_labels);
+
+    if map.is_empty() {
         // Fallback: try matching ANY cell content across all rows
-        let mut all_cells: Vec<String> = Vec::new();
-        all_cells.extend(best_labels.clone());
+        let mut all_cells: Vec<String> = best_labels.clone();
         for row in &sheet.sample_rows {
             all_cells.extend(row.iter().map(|c| c.trim().to_owned()));
         }
         all_cells.retain(|c| !c.is_empty());
-        let keys = resolve_export_column_keys_from_labels(&all_cells);
-        if !keys.is_empty() {
-            return Ok(keys);
-        }
+        map = resolve_template_column_map(&all_cells);
     }
 
-    Ok(resolve_export_column_keys_from_labels(&best_labels))
+    Ok(map)
 }
 
-fn count_label_matches(labels: &[String]) -> usize {
-    use crate::exporter::resolve_export_column_keys_from_labels;
-    resolve_export_column_keys_from_labels(labels).len()
+/// Label matcher adapter for the template engine.
+/// Wraps `resolve_template_column_map` to match the `label_matcher` signature.
+fn invoice_label_matcher(labels: &[String]) -> Vec<(usize, String)> {
+    crate::exporter::resolve_template_column_map(labels)
+        .into_iter()
+        .map(|(idx, col_def)| (idx, col_def.key.to_owned()))
+        .collect()
+}
+
+/// Adapter that implements template_engine::binder::DataSource for invoice export.
+struct InvoiceDataSource<'a> {
+    rows: &'a [crate::exporter::InvoiceRow],
+    column_map: &'a [(usize, &'static crate::exporter::ColumnDef)],
+}
+
+impl crate::template_engine::binder::DataSource for InvoiceDataSource<'_> {
+    fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn cell_value(
+        &self,
+        row_index: usize,
+        col_key: &str,
+    ) -> Option<crate::template_engine::binder::DataValue> {
+        let row = self.rows.get(row_index)?;
+        if let Some((_, col_def)) = self.column_map.iter().find(|(_, cd)| cd.key == col_key) {
+            if col_def.numeric {
+                return row
+                    .number_by_key(col_key)
+                    .map(crate::template_engine::binder::DataValue::Number);
+            }
+        }
+        let val = row.field_by_key(col_key);
+        if val.is_empty() {
+            None
+        } else {
+            Some(crate::template_engine::binder::DataValue::String(val))
+        }
+    }
 }
 
 fn json_i64_vec(args: &serde_json::Value, key: &str) -> Option<Vec<i64>> {
@@ -3578,9 +3642,20 @@ fn read_xlsx_shared_strings<R: std::io::Read + std::io::Seek>(
     for item in xml.split("<si").skip(1) {
         let segment = item.split("</si>").next().unwrap_or("");
         let mut text = String::new();
-        for part in segment.split("<t").skip(1) {
-            if let Some(after) = part.split('>').nth(1) {
-                if let Some(value) = after.split("</t>").next() {
+        if segment.contains("<r>") || segment.contains("<r ") {
+            // Rich text: extract <t> only from within each <r>…</r> block
+            for r_part in segment.split("<r>").skip(1) {
+                let r_block = r_part.split("</r>").next().unwrap_or("");
+                if let Some(after) = r_block.split("<t").nth(1) {
+                    if let Some(value) = after.split('>').nth(1).and_then(|v| v.split("</t>").next()) {
+                        text.push_str(&xml_unescape(value));
+                    }
+                }
+            }
+        } else {
+            // Simple text: extract from the single <t> element
+            if let Some(after) = segment.split("<t").nth(1) {
+                if let Some(value) = after.split('>').nth(1).and_then(|v| v.split("</t>").next()) {
                     text.push_str(&xml_unescape(value));
                 }
             }
@@ -3642,9 +3717,10 @@ fn parse_xlsx_sheet_rows(
 }
 
 fn sheet_from_rows(name: &str, rows: Vec<Vec<String>>, max_rows: usize) -> SpreadsheetSheet {
+    // Find the first row with 3+ non-empty cells (skip title/subtitle rows)
     let header_index = rows
         .iter()
-        .position(|row| row.iter().any(|cell| !cell.trim().is_empty()))
+        .position(|row| row.iter().filter(|cell| !cell.trim().is_empty()).count() >= 3)
         .unwrap_or(0);
     let header = rows.get(header_index).cloned().unwrap_or_default();
     let columns = header

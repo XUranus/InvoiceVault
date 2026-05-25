@@ -58,11 +58,11 @@ pub enum ExportError {
 }
 
 #[derive(Debug, Clone)]
-struct ColumnDef {
-    key: &'static str,
-    label: &'static str,
-    numeric: bool,
-    aliases: &'static [&'static str],
+pub(crate) struct ColumnDef {
+    pub(crate) key: &'static str,
+    pub(crate) label: &'static str,
+    pub(crate) numeric: bool,
+    pub(crate) aliases: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,7 +74,7 @@ pub struct ExportColumnInfo {
     pub exportable: bool,
 }
 
-const ALL_COLUMNS: &[ColumnDef] = &[
+pub(crate) const ALL_COLUMNS: &[ColumnDef] = &[
     ColumnDef {
         key: "invoice_type",
         label: "发票类型",
@@ -228,6 +228,30 @@ pub fn resolve_export_column_keys_from_labels(labels: &[String]) -> Vec<String> 
     keys
 }
 
+/// Resolve template labels to (0-based column index, &ColumnDef) pairs.
+/// Returns only columns that matched a known export field.
+pub(crate) fn resolve_template_column_map(labels: &[String]) -> Vec<(usize, &'static ColumnDef)> {
+    let mut result = Vec::new();
+    let mut seen_keys: Vec<&'static str> = Vec::new();
+    for (i, label) in labels.iter().enumerate() {
+        let normalized = label.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        if let Some(column) = ALL_COLUMNS.iter().find(|column| {
+            column.key.eq_ignore_ascii_case(normalized)
+                || column.label == normalized
+                || column.aliases.iter().any(|alias| *alias == normalized)
+        }) {
+            if !seen_keys.contains(&column.key) {
+                seen_keys.push(column.key);
+                result.push((i, column));
+            }
+        }
+    }
+    result
+}
+
 fn resolve_columns(requested: Option<&[String]>) -> Vec<ColumnDef> {
     if let Some(cols) = requested {
         let mut selected: Vec<ColumnDef> = Vec::new();
@@ -246,30 +270,30 @@ fn resolve_columns(requested: Option<&[String]>) -> Vec<ColumnDef> {
     }
 }
 
-struct InvoiceRow {
-    invoice_type: Option<String>,
-    invoice_code: Option<String>,
-    invoice_number: Option<String>,
-    issue_date: Option<String>,
-    seller_name: Option<String>,
-    seller_tax_id: Option<String>,
-    buyer_name: Option<String>,
-    buyer_tax_id: Option<String>,
-    currency: String,
-    amount_without_tax: Option<String>,
-    tax_amount: Option<String>,
-    total_amount: Option<String>,
-    category: Option<String>,
-    remarks: Option<String>,
-    source_page_range: Option<String>,
-    confidence: Option<f64>,
-    status: String,
-    duplicate_status: String,
-    created_at: String,
+pub(crate) struct InvoiceRow {
+    pub(crate) invoice_type: Option<String>,
+    pub(crate) invoice_code: Option<String>,
+    pub(crate) invoice_number: Option<String>,
+    pub(crate) issue_date: Option<String>,
+    pub(crate) seller_name: Option<String>,
+    pub(crate) seller_tax_id: Option<String>,
+    pub(crate) buyer_name: Option<String>,
+    pub(crate) buyer_tax_id: Option<String>,
+    pub(crate) currency: String,
+    pub(crate) amount_without_tax: Option<String>,
+    pub(crate) tax_amount: Option<String>,
+    pub(crate) total_amount: Option<String>,
+    pub(crate) category: Option<String>,
+    pub(crate) remarks: Option<String>,
+    pub(crate) source_page_range: Option<String>,
+    pub(crate) confidence: Option<f64>,
+    pub(crate) status: String,
+    pub(crate) duplicate_status: String,
+    pub(crate) created_at: String,
 }
 
 impl InvoiceRow {
-    fn field_by_key(&self, key: &str) -> String {
+    pub(crate) fn field_by_key(&self, key: &str) -> String {
         match key {
             "invoice_type" => self.invoice_type.clone().unwrap_or_default(),
             "invoice_code" => self.invoice_code.clone().unwrap_or_default(),
@@ -297,7 +321,7 @@ impl InvoiceRow {
         }
     }
 
-    fn number_by_key(&self, key: &str) -> Option<f64> {
+    pub(crate) fn number_by_key(&self, key: &str) -> Option<f64> {
         match key {
             "amount_without_tax" => self.amount_without_tax.as_deref()?.parse().ok(),
             "tax_amount" => self.tax_amount.as_deref()?.parse().ok(),
@@ -366,7 +390,7 @@ pub fn preview_export(
     })
 }
 
-fn load_invoices_for_export(
+pub(crate) fn load_invoices_for_export(
     conn: &Connection,
     invoice_ids: Option<&[i64]>,
     date_from: Option<&str>,
