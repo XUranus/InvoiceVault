@@ -309,7 +309,7 @@ impl EmailManager {
         let max_email_age_days = request.max_email_age_days.unwrap_or(30);
         let poll_interval = request.poll_interval_seconds.unwrap_or(300);
 
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         db.execute(
             "INSERT INTO email_sources (name, protocol, imap_host, imap_port, username, password, auth_method, use_ssl, folder, name_keywords, max_email_age_days, poll_interval_seconds)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
@@ -331,7 +331,7 @@ impl EmailManager {
         id: i64,
         request: UpdateEmailSourceRequest,
     ) -> Result<EmailSource, EmailError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut sets: Vec<String> = Vec::new();
         let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -391,7 +391,7 @@ impl EmailManager {
     }
 
     pub fn remove_email_source(&self, id: i64) -> Result<(), EmailError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let affected = db.execute("DELETE FROM email_sources WHERE id = ?1", [id])?;
         if affected == 0 {
             return Err(EmailError::NotFound(id));
@@ -401,7 +401,7 @@ impl EmailManager {
     }
 
     pub fn list_email_sources(&self) -> Result<Vec<EmailSource>, EmailError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = db.prepare(
             "SELECT id, name, protocol, imap_host, imap_port, username, password, auth_method, use_ssl, folder,
                     name_keywords, max_email_age_days, enabled, last_uid, poll_interval_seconds,
@@ -440,7 +440,7 @@ impl EmailManager {
     }
 
     pub fn toggle_email_source(&self, id: i64, enabled: bool) -> Result<EmailSource, EmailError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         db.execute(
             "UPDATE email_sources SET enabled = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
             params![id, enabled as i32],
@@ -450,7 +450,7 @@ impl EmailManager {
     }
 
     fn get_email_source(&self, id: i64) -> Result<EmailSource, EmailError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let source = db.query_row(
             "SELECT id, name, protocol, imap_host, imap_port, username, password, auth_method, use_ssl, folder,
                     name_keywords, max_email_age_days, enabled, last_uid, poll_interval_seconds,
@@ -568,7 +568,7 @@ impl EmailManager {
 
         // Mark as syncing
         {
-            let db = self.db.lock().expect("db lock");
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
             db.execute(
                 "UPDATE email_sources SET status = 'syncing', error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
                 [id],
@@ -583,7 +583,7 @@ impl EmailManager {
 
         match &result {
             Ok(sync_result) => {
-                let db = self.db.lock().expect("db lock");
+                let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
                 let now = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
                 db.execute(
                     "UPDATE email_sources SET status = 'idle', last_sync_at = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
@@ -595,7 +595,7 @@ impl EmailManager {
                 );
             }
             Err(e) => {
-                let db = self.db.lock().expect("db lock");
+                let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
                 db.execute(
                     "UPDATE email_sources SET status = 'error', error_message = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
                     params![id, e.to_string()],
@@ -774,7 +774,7 @@ impl EmailManager {
                 if let Some(config) = self.llm_config.lock().ok().and_then(|c| c.clone()) {
                     let db = Arc::clone(&self.db);
                     let thumbnails_dir = self.thumbnails_dir.clone();
-                    let audit = (*self.llm_audit_enabled.lock().expect("lock")).then(|| {
+                    let audit = (*self.llm_audit_enabled.lock().unwrap_or_else(|e| e.into_inner())).then(|| {
                         crate::llm::LlmAuditConfig {
                             dir: std::path::PathBuf::from("audit"), // placeholder
                         }
@@ -812,7 +812,7 @@ impl EmailManager {
 
         // Update last_uid
         {
-            let db = self.db.lock().expect("db lock");
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
             db.execute(
                 "UPDATE email_sources SET last_uid = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
                 params![source.id, max_uid as i64],
@@ -976,7 +976,7 @@ impl EmailManager {
                 if let Some(config) = self.llm_config.lock().ok().and_then(|c| c.clone()) {
                     let db = Arc::clone(&self.db);
                     let thumbnails_dir = self.thumbnails_dir.clone();
-                    let audit = (*self.llm_audit_enabled.lock().expect("lock")).then(|| {
+                    let audit = (*self.llm_audit_enabled.lock().unwrap_or_else(|e| e.into_inner())).then(|| {
                         crate::llm::LlmAuditConfig {
                             dir: std::path::PathBuf::from("audit"),
                         }
@@ -1015,7 +1015,7 @@ impl EmailManager {
         let updated_uidls: Vec<&str> = new_processed.iter().map(|s| s.as_str()).collect();
         let uidls_str = updated_uidls.join(",");
         {
-            let db = self.db.lock().expect("db lock");
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
             db.execute(
                 "UPDATE email_sources SET processed_uidls = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
                 params![source.id, uidls_str],

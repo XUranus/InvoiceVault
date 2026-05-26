@@ -327,12 +327,12 @@ impl AppState {
     }
 
     pub fn load_embedding_engine_if_available(&self) -> Result<bool, AppError> {
-        if !*self.embedding_enabled.lock().expect("lock") {
+        if !*self.embedding_enabled.lock().unwrap_or_else(|e| e.into_inner()) {
             return Ok(false);
         }
 
         {
-            let engine_guard = self.local_embedding.lock().expect("lock");
+            let engine_guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
             if engine_guard.is_some() {
                 return Ok(true);
             }
@@ -350,7 +350,7 @@ impl AppState {
         }
 
         let engine = LocalEmbeddingEngine::load(&model_dir)?;
-        let mut engine_guard = self.local_embedding.lock().expect("lock");
+        let mut engine_guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
         if engine_guard.is_some() {
             return Ok(true);
         }
@@ -360,7 +360,7 @@ impl AppState {
     }
 
     pub fn health(&self) -> Result<AppHealth, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let migration_version = db.query_row(
             "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
             [],
@@ -449,7 +449,7 @@ impl AppState {
         paths: Vec<String>,
         app: &AppHandle,
     ) -> Result<Vec<ImportJobSummary>, AppError> {
-        let mut db = self.db.lock().expect("database mutex poisoned");
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let source_paths: Vec<String> = paths.iter().map(|p| p.clone()).collect();
         info!(count = paths.len(), files = ?paths, "Importing files");
         let jobs = import_files(&mut db, &self.paths.raw_dir, paths, "manual")?;
@@ -487,7 +487,7 @@ impl AppState {
         }
 
         // Auto-trigger recognition for successfully imported files
-        let config = self.llm_config.lock().expect("lock").clone();
+        let config = self.llm_config.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if let Some(cfg) = config {
             if !cfg.api_key.is_empty() {
                 for job in &jobs {
@@ -519,8 +519,8 @@ impl AppState {
     ) {
         let db = Arc::clone(&self.db);
         let thumbnails_dir = self.paths.thumbnails_dir.clone();
-        let chroma_enabled = self.chroma_config.lock().expect("lock").enabled;
-        let embedding_on = *self.embedding_enabled.lock().expect("lock");
+        let chroma_enabled = self.chroma_config.lock().unwrap_or_else(|e| e.into_inner()).enabled;
+        let embedding_on = *self.embedding_enabled.lock().unwrap_or_else(|e| e.into_inner());
         let embedding_engine = Arc::clone(&self.local_embedding);
 
         tauri::async_runtime::spawn(async move {
@@ -601,47 +601,55 @@ impl AppState {
                     )
                     .await
                     .map_err(|e| e.to_string())?;
-                    let mut conn = db.lock().map_err(|e| e.to_string())?;
-                    let invoice = crate::extractor::save_invoice_extraction(
-                        &mut conn,
-                        crate::extractor::SaveInvoiceExtractionRequest {
-                            raw_file_id,
-                            source_page_range: source_page_range.clone(),
-                            provider_name: Some(config.base_url.clone()),
-                            model: Some(recognition.model.clone()),
-                            response_json: recognition.response_json,
-                        },
-                    )
-                    .map_err(|e| e.to_string())?;
-                    let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
-                    if let Err(e) = event::record_recognition_event(
-                        &conn,
-                        invoice.id,
-                        &title,
-                        true,
-                        recognition.duration_ms,
-                        &recognition.model,
-                        1,
-                    ) {
-                        warn!("Failed to record recognition event for invoice {}: {e}", invoice.id);
-                    }
-                    if let Err(e) = crate::extractor::insert_usage_log(
-                        &conn,
-                        "llm_recognition",
-                        &recognition.model,
-                        recognition.prompt_tokens,
-                        recognition.completion_tokens,
-                        recognition.total_tokens,
-                    ) {
-                        warn!("Failed to insert LLM usage log: {e}");
-                    }
+                    // Save extraction and record events, then drop the lock
+                    // before embedding inference to avoid holding the lock during ONNX.
+                    let (invoice_id, _seller_name) = {
+                        let mut conn = db.lock().map_err(|e| e.to_string())?;
+                        let invoice = crate::extractor::save_invoice_extraction(
+                            &mut conn,
+                            crate::extractor::SaveInvoiceExtractionRequest {
+                                raw_file_id,
+                                source_page_range: source_page_range.clone(),
+                                provider_name: Some(config.base_url.clone()),
+                                model: Some(recognition.model.clone()),
+                                response_json: recognition.response_json,
+                            },
+                        )
+                        .map_err(|e| e.to_string())?;
+                        let title = invoice.seller_name.clone().unwrap_or_else(|| "未知".into());
+                        if let Err(e) = event::record_recognition_event(
+                            &conn,
+                            invoice.id,
+                            &title,
+                            true,
+                            recognition.duration_ms,
+                            &recognition.model,
+                            1,
+                        ) {
+                            warn!("Failed to record recognition event for invoice {}: {e}", invoice.id);
+                        }
+                        if let Err(e) = crate::extractor::insert_usage_log(
+                            &conn,
+                            "llm_recognition",
+                            &recognition.model,
+                            recognition.prompt_tokens,
+                            recognition.completion_tokens,
+                            recognition.total_tokens,
+                        ) {
+                            warn!("Failed to insert LLM usage log: {e}");
+                        }
+                        (invoice.id, title)
+                    }; // db lock dropped here
 
-                    // Best-effort embedding generation
+                    // Best-effort embedding generation (no db lock held)
                     if chroma_enabled && embedding_on {
                         if let Some(ref mut engine) = *embedding_engine.lock().unwrap_or_else(|e| e.into_inner()) {
-                            let invoice_id = invoice.id;
                             let thumb_dir = thumbnails_dir.clone();
-                            let detail = get_invoice_detail(&conn, &thumb_dir, invoice_id).ok();
+                            // Re-acquire lock briefly to fetch detail for embedding text
+                            let detail = {
+                                let conn = db.lock().unwrap_or_else(|e| e.into_inner());
+                                get_invoice_detail(&conn, &thumb_dir, invoice_id).ok()
+                            };
                             if let Some(detail) = detail {
                                 let text = invoice_to_embedding_text(&detail);
                                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -783,12 +791,12 @@ impl AppState {
         page: i64,
         page_size: i64,
     ) -> Result<ImportJobListResult, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(list_import_jobs(&db, page, page_size)?)
     }
 
     pub fn delete_import_job(&self, job_id: i64) -> Result<(), AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(delete_import_job(&db, job_id)?)
     }
 
@@ -796,7 +804,7 @@ impl AppState {
         &self,
         request: SaveInvoiceExtractionRequest,
     ) -> Result<InvoiceSummary, AppError> {
-        let mut db = self.db.lock().expect("database mutex poisoned");
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let invoice = save_invoice_extraction(&mut db, request)?;
         if let Ok(dedupe_result) = run_dedupe_check(&db, invoice.id) {
             if let Some(best) = dedupe_result.candidates.iter().max_by(|a, b| {
@@ -821,10 +829,10 @@ impl AppState {
         }
 
         // Best-effort embedding generation (local ONNX inference)
-        if self.chroma_config.lock().expect("lock").enabled
-            && *self.embedding_enabled.lock().expect("lock")
+        if self.chroma_config.lock().unwrap_or_else(|e| e.into_inner()).enabled
+            && *self.embedding_enabled.lock().unwrap_or_else(|e| e.into_inner())
         {
-            let mut engine_guard = self.local_embedding.lock().expect("lock");
+            let mut engine_guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(ref mut engine) = *engine_guard {
                 let thumb_dir = self.paths.thumbnails_dir.clone();
                 let invoice_id = invoice.id;
@@ -883,7 +891,7 @@ impl AppState {
     }
 
     pub fn list_invoices(&self) -> Result<Vec<InvoiceSummary>, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(list_invoices(&db)?)
     }
 
@@ -891,17 +899,17 @@ impl AppState {
         &self,
         params: InvoiceSearchParams,
     ) -> Result<InvoiceSearchResult, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(search_invoices(&db, params)?)
     }
 
     pub fn get_tag_options(&self) -> Result<Vec<crate::extractor::TagOption>, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(crate::extractor::get_tag_options(&db)?)
     }
 
     pub fn get_invoice_detail(&self, invoice_id: i64) -> Result<InvoiceDetail, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(get_invoice_detail(
             &db,
             &self.paths.thumbnails_dir,
@@ -910,17 +918,17 @@ impl AppState {
     }
 
     pub fn mark_invoice_viewed(&self, invoice_id: i64) -> Result<bool, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(mark_invoice_viewed(&db, invoice_id)?)
     }
 
     pub fn count_unviewed_invoices(&self) -> Result<i64, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(count_unviewed_invoices(&db)?)
     }
 
     pub fn raw_file_path_for_invoice(&self, invoice_id: i64) -> Result<PathBuf, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let path = db.query_row(
             "SELECT rf.storage_path
              FROM invoices inv
@@ -936,7 +944,7 @@ impl AppState {
         &self,
         request: UpdateInvoiceRequest,
     ) -> Result<UpdateInvoiceResult, AppError> {
-        let mut db = self.db.lock().expect("database mutex poisoned");
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let result = update_invoice(&mut db, request)?;
         if let Ok(dedupe_result) = run_dedupe_check(&db, result.invoice.id) {
             if let Some(best) = dedupe_result.candidates.iter().max_by(|a, b| {
@@ -961,12 +969,12 @@ impl AppState {
         }
 
         // Best-effort embedding regeneration (local ONNX inference)
-        if self.chroma_config.lock().expect("lock").enabled
-            && *self.embedding_enabled.lock().expect("lock")
+        if self.chroma_config.lock().unwrap_or_else(|e| e.into_inner()).enabled
+            && *self.embedding_enabled.lock().unwrap_or_else(|e| e.into_inner())
         {
-            let mut engine_guard = self.local_embedding.lock().expect("lock");
+            let mut engine_guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(ref mut engine) = *engine_guard {
-                let db = self.db.lock().expect("db lock");
+                let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
                 let thumb_dir = self.paths.thumbnails_dir.clone();
                 let invoice_id = result.invoice.id;
                 let detail = get_invoice_detail(&db, &thumb_dir, invoice_id).ok();
@@ -1027,7 +1035,7 @@ impl AppState {
         &self,
         request: UpdateInvoiceItemsRequest,
     ) -> Result<Vec<InvoiceItemRow>, AppError> {
-        let mut db = self.db.lock().expect("database mutex poisoned");
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(update_invoice_items(&mut db, request)?)
     }
 
@@ -1035,21 +1043,21 @@ impl AppState {
         &self,
         request: BatchUpdateRequest,
     ) -> Result<Vec<InvoiceSummary>, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let result = batch_update_invoices(&db, &request)?;
         self.invalidate_dashboard_cache();
         Ok(result)
     }
 
     pub fn batch_delete_invoices(&self, ids: Vec<i64>) -> Result<usize, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let result = batch_delete_invoices(&db, &ids)?;
         self.invalidate_dashboard_cache();
         Ok(result)
     }
 
     pub fn check_invoice_duplicates(&self, invoice_id: i64) -> Result<DedupeCheckResult, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(run_dedupe_check(&db, invoice_id)?)
     }
 
@@ -1057,12 +1065,12 @@ impl AppState {
         &self,
         request: ResolveDuplicateRequest,
     ) -> Result<ResolveDuplicateResult, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(run_dedupe_resolve(&db, request)?)
     }
 
     pub fn regenerate_all_duplicates(&self) -> Result<usize, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let deleted = db.execute("DELETE FROM dedupe_candidates", [])?;
         let reset = db.execute(
             "UPDATE invoices SET duplicate_status = 'unique' WHERE duplicate_status != 'unique'",
@@ -1090,7 +1098,7 @@ impl AppState {
         &self,
         request: ExportInvoicesRequest,
     ) -> Result<ExportResult, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(export_invoices(&db, request)?)
     }
 
@@ -1099,7 +1107,7 @@ impl AppState {
         target_invoice_id: i64,
         source_invoice_ids: Vec<i64>,
     ) -> Result<MergeInvoicesResult, AppError> {
-        let mut db = self.db.lock().expect("database mutex poisoned");
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let result = merge_invoices(&mut db, target_invoice_id, source_invoice_ids)?;
         self.invalidate_dashboard_cache();
         Ok(result)
@@ -1109,7 +1117,7 @@ impl AppState {
         &self,
         request: PdfReportRequest,
     ) -> Result<PdfReportResult, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(export_pdf_report(&db, request)?)
     }
 
@@ -1206,7 +1214,7 @@ impl AppState {
         if let Some(stats) = self.dashboard_cache.get(&key) {
             return Ok(stats);
         }
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let stats = get_dashboard_stats(&db, date_from.as_deref(), date_to.as_deref())?;
         self.dashboard_cache.insert(key, stats.clone());
         Ok(stats)
@@ -1217,9 +1225,9 @@ impl AppState {
     }
 
     pub fn set_chroma_config(&self, config: ChromaConfig) -> Result<(), AppError> {
-        let mut cfg = self.chroma_config.lock().expect("lock");
+        let mut cfg = self.chroma_config.lock().unwrap_or_else(|e| e.into_inner());
         *cfg = config;
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = event::create_event(
             &db,
             "config_change",
@@ -1236,12 +1244,12 @@ impl AppState {
     }
 
     pub fn get_chroma_config(&self) -> ChromaConfig {
-        self.chroma_config.lock().expect("lock").clone()
+        self.chroma_config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn set_embedding_enabled(&self, enabled: bool) -> Result<(), AppError> {
         {
-            let mut flag = self.embedding_enabled.lock().expect("lock");
+            let mut flag = self.embedding_enabled.lock().unwrap_or_else(|e| e.into_inner());
             *flag = enabled;
         }
         let json = serde_json::json!({ "enabled": enabled });
@@ -1252,11 +1260,11 @@ impl AppState {
         // Keep this setter cheap for the settings UI. The ONNX engine can take
         // several seconds to initialize on Windows and is loaded on first use.
         if !enabled {
-            let mut engine_guard = self.local_embedding.lock().expect("lock");
+            let mut engine_guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
             *engine_guard = None;
         }
 
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let label = if enabled { "启用" } else { "禁用" };
         if let Err(e) = event::create_event(
             &db,
@@ -1274,7 +1282,7 @@ impl AppState {
     }
 
     pub fn embedding_status(&self) -> (bool, bool, Option<String>, Option<usize>) {
-        let enabled = *self.embedding_enabled.lock().expect("lock");
+        let enabled = *self.embedding_enabled.lock().unwrap_or_else(|e| e.into_inner());
         match self.local_embedding.try_lock() {
             Ok(guard) => {
                 let (model_loaded, model_dir, dimensions) = match *guard {
@@ -1360,13 +1368,13 @@ impl AppState {
     pub fn set_badge_config(&self, config: BadgeConfig) -> Result<(), AppError> {
         let sanitized = sanitize_badge_config(config);
         {
-            let mut cfg = self.badge_config.lock().expect("lock");
+            let mut cfg = self.badge_config.lock().unwrap_or_else(|e| e.into_inner());
             *cfg = sanitized.clone();
         }
         if let Err(e) = write_config(&self.paths.app_data_dir, "badge_config.json", &sanitized) {
             error!("Failed to persist badge config: {e}");
         }
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = event::create_event(
             &db,
             "config_change",
@@ -1383,12 +1391,12 @@ impl AppState {
     }
 
     pub fn get_badge_config(&self) -> BadgeConfig {
-        self.badge_config.lock().expect("lock").clone()
+        self.badge_config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn set_price_config(&self, config: PriceConfig) -> Result<(), AppError> {
         {
-            let mut cfg = self.price_config.lock().expect("lock");
+            let mut cfg = self.price_config.lock().unwrap_or_else(|e| e.into_inner());
             *cfg = config.clone();
         }
         if let Err(e) = write_config(&self.paths.app_data_dir, "price_config.json", &config) {
@@ -1398,7 +1406,7 @@ impl AppState {
     }
 
     pub fn get_price_config(&self) -> PriceConfig {
-        self.price_config.lock().expect("lock").clone()
+        self.price_config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn get_llm_usage(
@@ -1410,7 +1418,7 @@ impl AppState {
         if let Some(stats) = self.llm_usage_cache.get(&key) {
             return Ok(stats);
         }
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let stats = crate::extractor::get_llm_usage(&db, date_from.as_deref(), date_to.as_deref())?;
         self.llm_usage_cache.insert(key, stats.clone());
         Ok(stats)
@@ -1426,12 +1434,12 @@ impl AppState {
         group_name: String,
         value: Option<String>,
     ) -> Result<Vec<InvoiceBadgeSelection>, AppError> {
-        let mut db = self.db.lock().expect("database mutex poisoned");
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(set_invoice_badge(&mut db, invoice_id, group_name, value)?)
     }
 
     pub fn set_llm_config(&self, config: LlmProviderConfig) -> Result<(), AppError> {
-        let mut cfg = self.llm_config.lock().expect("lock");
+        let mut cfg = self.llm_config.lock().unwrap_or_else(|e| e.into_inner());
         *cfg = Some(config.clone());
         if let Err(e) = write_config(&self.paths.app_data_dir, "llm_config.json", &config) {
             error!("Failed to persist LLM config: {e}");
@@ -1441,17 +1449,17 @@ impl AppState {
     }
 
     pub fn get_llm_config(&self) -> Option<LlmProviderConfig> {
-        self.llm_config.lock().expect("lock").clone()
+        self.llm_config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn llm_audit_config(&self) -> Option<LlmAuditConfig> {
-        (*self.llm_audit_enabled.lock().expect("lock")).then(|| LlmAuditConfig {
+        (*self.llm_audit_enabled.lock().unwrap_or_else(|e| e.into_inner())).then(|| LlmAuditConfig {
             dir: self.paths.llm_audit_dir.clone(),
         })
     }
 
     pub fn set_llm_audit_enabled(&self, enabled: bool) {
-        *self.llm_audit_enabled.lock().expect("lock") = enabled;
+        *self.llm_audit_enabled.lock().unwrap_or_else(|e| e.into_inner()) = enabled;
         let json = serde_json::json!({"enabled": enabled});
         if let Err(e) = write_config(&self.paths.app_data_dir, "audit_config.json", &json) {
             error!("Failed to persist audit config: {e}");
@@ -1460,16 +1468,16 @@ impl AppState {
     }
 
     pub fn get_llm_audit_enabled(&self) -> bool {
-        *self.llm_audit_enabled.lock().expect("lock")
+        *self.llm_audit_enabled.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn test_chroma_connection(&self) -> Result<bool, AppError> {
-        Ok(self.chroma_config.lock().expect("lock").enabled)
+        Ok(self.chroma_config.lock().unwrap_or_else(|e| e.into_inner()).enabled)
     }
 
     pub fn test_embedding_connection(&self) -> Result<EmbeddingTestResult, AppError> {
         self.load_embedding_engine_if_available()?;
-        let mut guard = self.local_embedding.lock().expect("lock");
+        let mut guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
         let engine = guard
             .as_mut()
             .ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
@@ -1478,12 +1486,12 @@ impl AppState {
 
     pub fn regenerate_all_embeddings(&self) -> Result<RegenerateEmbeddingsResult, AppError> {
         self.load_embedding_engine_if_available()?;
-        let mut engine_guard = self.local_embedding.lock().expect("lock");
+        let mut engine_guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
         let engine = engine_guard
             .as_mut()
             .ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
 
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let thumb_dir = self.paths.thumbnails_dir.clone();
 
         let invoice_ids: Vec<i64> = {
@@ -1553,15 +1561,15 @@ impl AppState {
         query: String,
         limit: usize,
     ) -> Result<Vec<crate::chroma::SimilarResult>, AppError> {
-        if !self.chroma_config.lock().expect("lock").enabled {
+        if !self.chroma_config.lock().unwrap_or_else(|e| e.into_inner()).enabled {
             return Err(AppError::Chroma(chroma::ChromaError::NotConfigured));
         }
-        let mut guard = self.local_embedding.lock().expect("lock");
+        let mut guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
         let engine = guard
             .as_mut()
             .ok_or(AppError::Embedding(EmbeddingError::NotLoaded))?;
         let result = generate_embedding(engine, &query)?;
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(chroma::query_similar(&db, &result.embedding, limit)?)
     }
 
@@ -1569,7 +1577,7 @@ impl AppState {
         &self,
         raw_file_id: i64,
     ) -> Result<RawFileForRecognition, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let raw_file = db.query_row(
             "SELECT id, original_name, COALESCE(mime_type, ''), storage_path
             FROM raw_files
@@ -1622,32 +1630,32 @@ impl AppState {
         page_size: i64,
         event_type: Option<&str>,
     ) -> Result<EventListResult, AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::list_events(&db, page, page_size, event_type)?)
     }
 
     pub fn get_unread_event_count(&self) -> Result<i64, AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::get_unread_event_count(&db)?)
     }
 
     pub fn get_unread_failed_import_event_count(&self) -> Result<i64, AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::get_unread_failed_import_event_count(&db)?)
     }
 
     pub fn mark_event_read(&self, id: i64) -> Result<(), AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::mark_event_read(&db, id)?)
     }
 
     pub fn mark_all_events_read(&self) -> Result<(), AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::mark_all_events_read(&db)?)
     }
 
     pub fn delete_all_events(&self) -> Result<usize, AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::delete_all_events(&db)?)
     }
 
@@ -1659,7 +1667,7 @@ impl AppState {
         completion_tokens: i64,
         total_tokens: i64,
     ) -> Result<(), AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         crate::extractor::insert_usage_log(
             &db,
             operation,
@@ -1681,7 +1689,7 @@ impl AppState {
         model: &str,
         page_count: usize,
     ) -> Result<(), AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::record_recognition_event(
             &db,
             invoice_id,
@@ -1696,7 +1704,7 @@ impl AppState {
     // --- Agent methods ---
 
     pub fn create_agent_session(&self) -> Result<AgentSession, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let session = agent::create_session(&db, None)?;
         // Create temp directory for this session
         let _ = paths::session_temp_dir(&self.paths.sessions_dir, &session.uuid);
@@ -1704,12 +1712,12 @@ impl AppState {
     }
 
     pub fn list_agent_sessions(&self) -> Result<Vec<AgentSession>, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::list_sessions(&db)?)
     }
 
     pub fn get_agent_session(&self, session_id: i64) -> Result<Vec<AgentMessageRow>, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::get_session_messages(&db, session_id)?)
     }
 
@@ -1718,7 +1726,7 @@ impl AppState {
         session_id: i64,
         title: &str,
     ) -> Result<AgentSession, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::set_session_title(&db, session_id, title)?)
     }
 
@@ -1807,7 +1815,7 @@ impl AppState {
         info!("Log export complete: {} bytes", file_size);
 
         // Record event
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = event::create_event(
             &db,
             "export",
@@ -1860,7 +1868,7 @@ impl AppState {
         info!("Backup complete: {} bytes", file_size);
 
         // Record event
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = event::create_event(
             &db,
             "export",
@@ -1886,7 +1894,7 @@ impl AppState {
 
     pub fn cleanup_storage(&self) -> Result<CleanupStorageResult, AppError> {
         info!("Starting storage cleanup");
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
 
         // Collect all known storage paths from raw_files table
         let mut stmt = db.prepare("SELECT id, storage_path FROM raw_files")?;
@@ -1986,7 +1994,7 @@ impl AppState {
     }
 
     pub fn raw_file_has_invoices(&self, raw_file_id: i64) -> Result<bool, AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let count: i64 = db.query_row(
             "SELECT COUNT(*) FROM invoices WHERE raw_file_id = ?1",
             [raw_file_id],
@@ -2001,7 +2009,7 @@ impl AppState {
         status: &str,
         error_message: Option<&str>,
     ) -> Result<(), AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(update_import_job_status_by_raw_file(
             &db,
             raw_file_id,
@@ -2011,7 +2019,7 @@ impl AppState {
     }
 
     pub fn invoice_id_for_raw_file(&self, raw_file_id: i64) -> Result<Option<i64>, AppError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let invoice_id = db
             .query_row(
                 "SELECT id FROM invoices WHERE raw_file_id = ?1 ORDER BY id DESC LIMIT 1",
@@ -2059,7 +2067,7 @@ impl AppState {
             .first_raw()
             .map(|value| value.to_owned());
 
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::insert_attachment(
             &db,
             session_id,
@@ -2074,22 +2082,22 @@ impl AppState {
         &self,
         session_id: i64,
     ) -> Result<Vec<AgentAttachment>, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::list_session_attachments(&db, session_id)?)
     }
 
     pub fn remove_agent_attachment(&self, attachment_id: i64) -> Result<(), AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::delete_attachment(&db, attachment_id)?)
     }
 
     pub fn list_agent_tasks(&self, session_id: i64) -> Result<Vec<AgentTask>, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::list_session_tasks(&db, session_id)?)
     }
 
     pub fn list_agent_artifacts(&self, session_id: i64) -> Result<Vec<AgentArtifact>, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::list_session_artifacts(&db, session_id)?)
     }
 
@@ -2131,13 +2139,13 @@ impl AppState {
     }
 
     pub fn delete_agent_artifact(&self, session_id: i64, artifact_id: i64) -> Result<(), AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         agent::delete_artifact(&db, session_id, artifact_id)?;
         Ok(())
     }
 
     fn agent_artifact_path(&self, session_id: i64, artifact_id: i64) -> Result<PathBuf, AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let artifact = agent::get_artifact(&db, artifact_id)?;
         if artifact.session_id != session_id {
             return Err(AppError::InvalidOperation("产物不属于当前会话".to_owned()));
@@ -2149,7 +2157,7 @@ impl AppState {
     }
 
     pub fn delete_agent_session(&self, session_id: i64) -> Result<(), AppError> {
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::delete_session(&db, session_id)?)
     }
 
@@ -2225,7 +2233,7 @@ impl AppState {
         if attachment_ids.is_empty() {
             return Ok(None);
         }
-        let db = self.db.lock().expect("database mutex poisoned");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut lines = vec!["用户本次消息附带了以下文件，可使用 list_message_attachments 和 inspect_spreadsheet 工具读取：".to_owned()];
         for id in attachment_ids {
             let attachment = agent::get_attachment(&db, *id)?;
@@ -2312,7 +2320,7 @@ fn make_tool_executor(
 ) -> impl Fn(&str, &serde_json::Value) -> ToolExecResult {
     // Look up session UUID once for temp dir resolution
     let session_uuid = {
-        let conn = db.lock().expect("database mutex poisoned");
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         agent::get_session(&conn, session_id)
             .ok()
             .map(|s| s.uuid)
@@ -2378,7 +2386,7 @@ fn make_tool_executor(
                     .and_then(|v| v.as_str())
                     .map(String::from),
             };
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             match search_invoices(&conn, params) {
                 Ok(result) => {
                     let content = serde_json::to_string(&result).unwrap_or_default();
@@ -2396,7 +2404,7 @@ fn make_tool_executor(
                     message: "缺少 invoice_id 参数".to_owned(),
                 };
             };
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             match get_invoice_detail(&conn, &thumbnails_dir, invoice_id) {
                 Ok(detail) => {
                     let content = serde_json::to_string(&detail).unwrap_or_default();
@@ -2416,7 +2424,7 @@ fn make_tool_executor(
                 .get("date_to")
                 .and_then(|v| v.as_str())
                 .map(String::from);
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             match get_dashboard_stats(&conn, date_from.as_deref(), date_to.as_deref()) {
                 Ok(stats) => {
                     let content = serde_json::to_string(&stats).unwrap_or_default();
@@ -2454,7 +2462,7 @@ fn make_tool_executor(
             ToolExecResult::Success { content }
         }
         "list_message_attachments" => {
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             match agent::list_session_attachments(&conn, session_id) {
                 Ok(attachments) => {
                     let content = serde_json::to_string(&attachments).unwrap_or_default();
@@ -2476,7 +2484,7 @@ fn make_tool_executor(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(5)
                 .clamp(1, 20) as usize;
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             let attachment = match agent::get_attachment(&conn, attachment_id) {
                 Ok(attachment) if attachment.session_id == session_id => attachment,
                 Ok(_) => {
@@ -2501,7 +2509,7 @@ fn make_tool_executor(
         }
         "create_export_preview" => {
             let request = export_preview_request_from_args(args);
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             match preview_export(&conn, request) {
                 Ok(preview) => {
                     let content = serde_json::to_string(&preview).unwrap_or_default();
@@ -2518,7 +2526,7 @@ fn make_tool_executor(
                     message: "缺少 attachment_id 参数".to_owned(),
                 };
             };
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             let attachment = match agent::get_attachment(&conn, attachment_id) {
                 Ok(attachment) if attachment.session_id == session_id => attachment,
                 Ok(_) => {
@@ -2552,7 +2560,7 @@ fn make_tool_executor(
                     message: "缺少 attachment_id 参数".to_owned(),
                 };
             };
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             let attachment = match agent::get_attachment(&conn, attachment_id) {
                 Ok(attachment) if attachment.session_id == session_id => attachment,
                 Ok(_) => {
@@ -2605,7 +2613,7 @@ fn make_tool_executor(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if !is_confirmed {
-                let conn = db.lock().expect("db lock");
+                let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                 let rows = template_adapter::load_invoices(
                     &conn,
                     json_i64_vec(args, "invoice_ids").as_deref(),
@@ -2710,7 +2718,7 @@ fn make_tool_executor(
                 .into_owned();
             let temp_path = temp_dir.join(&temp_filename).to_string_lossy().into_owned();
             let template_path = &attachment.storage_path;
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             let rows = template_adapter::load_invoices(
                 &conn,
                 json_i64_vec(args, "invoice_ids").as_deref(),
@@ -2972,7 +2980,7 @@ fn make_tool_executor(
                     .and_then(|v| v.as_str())
                     .map(String::from),
             };
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             let input_json = serde_json::to_string(args).unwrap_or_default();
             let task =
                 match agent::create_task(&conn, session_id, "export_invoices", Some(&input_json)) {
@@ -3097,7 +3105,7 @@ fn make_tool_executor(
                 .and_then(|v| v.as_array())
                 .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect())
                 .unwrap_or_default();
-            let mut conn = db.lock().expect("db lock");
+            let mut conn = db.lock().unwrap_or_else(|e| e.into_inner());
             match merge_invoices(&mut conn, target_id, source_ids) {
                 Ok(result) => {
                     let content = serde_json::to_string(&result).unwrap_or_default();
@@ -3147,7 +3155,7 @@ fn make_tool_executor(
                     .map(String::from),
                 thumbnails_dir: Some(thumbnails_dir.to_string_lossy().to_string()),
             };
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             match export_pdf_report(&conn, request) {
                 Ok(result) => {
                     let content = serde_json::to_string(&result).unwrap_or_default();
@@ -3184,7 +3192,7 @@ fn make_tool_executor(
                     }
                 }
             };
-            let mut conn = db.lock().expect("db lock");
+            let mut conn = db.lock().unwrap_or_else(|e| e.into_inner());
             let invoice_id = request.id;
             match update_invoice(&mut conn, request) {
                 Ok(result) => {
@@ -3246,12 +3254,12 @@ fn make_tool_executor(
                 };
             }
             {
-                let mut cfg = badge_config.lock().expect("badge_config lock");
+                let mut cfg = badge_config.lock().unwrap_or_else(|e| e.into_inner());
                 *cfg = sanitized.clone();
             }
             match serde_json::to_string(&sanitized) {
                 Ok(content) => {
-                    let conn = db.lock().expect("db lock");
+                    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                     if let Err(e) = event::create_event(
                         &conn,
                         "config_change",
@@ -3306,7 +3314,7 @@ fn make_tool_executor(
                 };
             };
             let value = args.get("value").and_then(|v| v.as_str()).map(String::from);
-            let mut conn = db.lock().expect("db lock");
+            let mut conn = db.lock().unwrap_or_else(|e| e.into_inner());
             match set_invoice_badge(&mut conn, invoice_id, group_name.to_owned(), value) {
                 Ok(badges) => {
                     let content = serde_json::to_string(&badges).unwrap_or_default();
@@ -3356,7 +3364,7 @@ fn make_tool_executor(
                 };
             }
             {
-                let mut cfg = price_config.lock().expect("price_config lock");
+                let mut cfg = price_config.lock().unwrap_or_else(|e| e.into_inner());
                 *cfg = config.clone();
             }
             match serde_json::to_string(&config) {
@@ -3557,7 +3565,7 @@ fn make_tool_executor(
                                     options: None,
                 };
             }
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             let mut files_removed = 0usize;
             let mut bytes_freed: u64 = 0;
             let raw_dir = app_data_dir.join("raw");
@@ -3597,7 +3605,7 @@ fn make_tool_executor(
         "get_app_info" => {
             let db_path = app_data_dir.join("invoicevault.sqlite3");
             let migration_version: i64 = {
-                let conn = db.lock().expect("db lock");
+                let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                 conn.query_row(
                     "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
                     [],

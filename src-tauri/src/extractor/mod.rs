@@ -988,7 +988,8 @@ fn build_content_summary(items: &[InvoiceItemExtraction]) -> String {
         joined
     } else {
         let mut s = joined;
-        s.truncate(47);
+        let end = s.floor_char_boundary(47);
+        s.truncate(end);
         s.push_str("...");
         s
     }

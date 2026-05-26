@@ -1706,7 +1706,7 @@ async fn run_agent_turn_impl(
         reasoning_content: None,
     };
     {
-        let conn = db.lock().expect("db lock");
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         let saved = save_message(&conn, &user_msg, session_id)?;
         link_attachments_to_message(&conn, session_id, saved.id, &attachment_ids)?;
         let mut saved_messages = vec![saved];
@@ -1717,7 +1717,7 @@ async fn run_agent_turn_impl(
 
     // Load history for context (last 20 messages)
     let history = {
-        let conn = db.lock().expect("db lock");
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         get_recent_messages(&conn, session_id, 20)?
     };
 
@@ -1804,13 +1804,13 @@ async fn continue_agent_turn_impl(
 
     // Delete any pending confirmation messages for this session
     {
-        let conn = db.lock().expect("db lock");
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         let _ = delete_pending_confirmation(&conn, session_id);
     }
 
     // Load all messages for this session (after deleting pending)
     let history = {
-        let conn = db.lock().expect("db lock");
+        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
         get_recent_messages(&conn, session_id, 30)?
     };
     let mut llm_messages = build_llm_messages(&history);
@@ -1842,7 +1842,7 @@ async fn continue_agent_turn_impl(
             reasoning_content: None,
         };
         {
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             new_messages.push(save_message(&conn, &user_msg, session_id)?);
         }
         llm_messages.push(user_msg);
@@ -1883,7 +1883,7 @@ async fn continue_agent_turn_impl(
         let tool_content = match result {
             ToolExecResult::Success { content } => {
                 {
-                    let conn = db.lock().expect("db lock");
+                    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                     write_audit_log(
                         &conn,
                         "agent",
@@ -1900,7 +1900,7 @@ async fn continue_agent_turn_impl(
             }
             ToolExecResult::Error { message } => {
                 {
-                    let conn = db.lock().expect("db lock");
+                    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                     write_audit_log(
                         &conn,
                         "agent",
@@ -1923,7 +1923,7 @@ async fn continue_agent_turn_impl(
             reasoning_content: None,
         };
         {
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             new_messages.push(save_message(&conn, &tool_msg, session_id)?);
         }
         if let Some(sink) = &stream_sink {
@@ -1935,7 +1935,7 @@ async fn continue_agent_turn_impl(
     } else {
         // User rejected
         {
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             write_audit_log(
                 &conn,
                 "agent",
@@ -1954,7 +1954,7 @@ async fn continue_agent_turn_impl(
             reasoning_content: None,
         };
         {
-            let conn = db.lock().expect("db lock");
+            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             new_messages.push(save_message(&conn, &tool_msg, session_id)?);
         }
         if let Some(sink) = &stream_sink {
@@ -2020,7 +2020,7 @@ async fn run_agent_loop_from_inner(
                     reasoning_content: msg.reasoning_content.clone(),
                 };
                 {
-                    let conn = db.lock().expect("db lock");
+                    let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                     new_messages.push(save_message(&conn, &assistant_msg, session_id)?);
                 }
                 return Ok(AgentResponse {
@@ -2037,7 +2037,7 @@ async fn run_agent_loop_from_inner(
                 reasoning_content: msg.reasoning_content.clone(),
             };
             {
-                let conn = db.lock().expect("db lock");
+                let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                 new_messages.push(save_message(&conn, &assistant_msg, session_id)?);
             }
             llm_messages.push(assistant_msg);
@@ -2059,7 +2059,7 @@ async fn run_agent_loop_from_inner(
                 match result {
                     ToolExecResult::Success { content } => {
                         {
-                            let conn = db.lock().expect("db lock");
+                            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                             write_audit_log(
                                 &conn,
                                 "agent",
@@ -2079,7 +2079,7 @@ async fn run_agent_loop_from_inner(
                             reasoning_content: None,
                         };
                         {
-                            let conn = db.lock().expect("db lock");
+                            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                             new_messages.push(save_message(&conn, &tool_msg, session_id)?);
                         }
                         if let Some(sink) = &stream_sink {
@@ -2117,7 +2117,7 @@ async fn run_agent_loop_from_inner(
                             reasoning_content: None,
                         };
                         {
-                            let conn = db.lock().expect("db lock");
+                            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                             new_messages.push(save_message(&conn, &pending_msg, session_id)?);
                         }
                         if let Some(sink) = &stream_sink {
@@ -2140,7 +2140,7 @@ async fn run_agent_loop_from_inner(
                             reasoning_content: None,
                         };
                         {
-                            let conn = db.lock().expect("db lock");
+                            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                             new_messages.push(save_message(&conn, &tool_msg, session_id)?);
                         }
                         if let Some(sink) = &stream_sink {
@@ -2162,7 +2162,7 @@ async fn run_agent_loop_from_inner(
                 reasoning_content: msg.reasoning_content.clone(),
             };
             {
-                let conn = db.lock().expect("db lock");
+                let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                 new_messages.push(save_message(&conn, &assistant_msg, session_id)?);
             }
             return Ok(AgentResponse {

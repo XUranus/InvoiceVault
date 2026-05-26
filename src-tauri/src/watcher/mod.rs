@@ -130,7 +130,7 @@ impl WatcherManager {
     }
 
     pub fn resume_enabled(&self) -> Result<(), WatcherError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = db.prepare(
             "SELECT id, path, extensions, recursive, stable_wait_ms FROM watch_dirs WHERE enabled = 1",
         )?;
@@ -178,7 +178,7 @@ impl WatcherManager {
         let name_keywords = request.name_keywords.unwrap_or_default();
         let max_file_age_days = request.max_file_age_days.unwrap_or(0);
 
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         db.execute(
             "INSERT INTO watch_dirs (path, extensions, recursive, stable_wait_ms, name_keywords, max_file_age_days) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![request.path, extensions, recursive as i32, stable_wait_ms, name_keywords, max_file_age_days],
@@ -197,7 +197,7 @@ impl WatcherManager {
     pub fn remove_watch_dir(&self, id: i64) -> Result<(), WatcherError> {
         self.stop_watching(id);
 
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let affected = db.execute("DELETE FROM watch_dirs WHERE id = ?1", [id])?;
         if affected == 0 {
             return Err(WatcherError::NotFound(id));
@@ -207,7 +207,7 @@ impl WatcherManager {
     }
 
     pub fn list_watch_dirs(&self) -> Result<Vec<WatchDirStatus>, WatcherError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = db.prepare(
             "SELECT id, path, extensions, recursive, enabled, stable_wait_ms, archive_after_import, archive_path, name_keywords, max_file_age_days, created_at, updated_at
             FROM watch_dirs ORDER BY id",
@@ -233,7 +233,7 @@ impl WatcherManager {
         drop(stmt);
         drop(db);
 
-        let handles = self.handles.lock().expect("handles lock");
+        let handles = self.handles.lock().unwrap_or_else(|e| e.into_inner());
         let result: Vec<WatchDirStatus> = dirs
             .into_iter()
             .map(|d| {
@@ -257,7 +257,7 @@ impl WatcherManager {
         // Stop existing watcher first
         self.stop_watching(id);
 
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut sets = Vec::new();
         let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -326,7 +326,7 @@ impl WatcherManager {
     }
 
     pub fn toggle_watch_dir(&self, id: i64, enabled: bool) -> Result<WatchDirStatus, WatcherError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         db.execute(
             "UPDATE watch_dirs SET enabled = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
             params![id, enabled as i32],
@@ -361,7 +361,7 @@ impl WatcherManager {
     }
 
     fn get_watch_dir(&self, id: i64) -> Result<WatchDir, WatcherError> {
-        let db = self.db.lock().expect("db lock");
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let result = db.query_row(
             "SELECT id, path, extensions, recursive, enabled, stable_wait_ms, archive_after_import, archive_path, name_keywords, max_file_age_days, created_at, updated_at
             FROM watch_dirs WHERE id = ?1",
@@ -389,7 +389,7 @@ impl WatcherManager {
 
     fn get_status(&self, id: i64) -> Result<WatchDirStatus, WatcherError> {
         let config = self.get_watch_dir(id)?;
-        let handles = self.handles.lock().expect("handles lock");
+        let handles = self.handles.lock().unwrap_or_else(|e| e.into_inner());
         let running = handles.contains_key(&id) && config.enabled;
         Ok(WatchDirStatus {
             config,
@@ -457,7 +457,7 @@ impl WatcherManager {
     }
 
     fn stop_watching(&self, id: i64) {
-        if let Some(handle) = self.handles.lock().expect("handles lock").remove(&id) {
+        if let Some(handle) = self.handles.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
             handle.stop_flag.store(true, Ordering::Relaxed);
         }
     }
@@ -718,7 +718,7 @@ fn process_pending(
         };
         let db = Arc::clone(db);
         let thumbnails_dir = thumbnails_dir.to_path_buf();
-        let audit = (*llm_audit_enabled.lock().expect("lock")).then(|| LlmAuditConfig {
+        let audit = (*llm_audit_enabled.lock().unwrap_or_else(|e| e.into_inner())).then(|| LlmAuditConfig {
             dir: llm_audit_dir.to_path_buf(),
         });
         let app_handle = app_handle.clone();
