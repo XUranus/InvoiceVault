@@ -24,6 +24,8 @@ import {
   FileCode,
   HardDrive,
   Info,
+  MessageCircle,
+  Monitor,
 } from "lucide-react";
 
 interface ToolIconProps {
@@ -74,6 +76,10 @@ const toolIconMap: Record<string, React.ComponentType<{ className?: string; styl
   export_backup: HardDrive,
   cleanup_storage: Trash2,
   get_app_info: Info,
+  get_sysinfo: Monitor,
+
+  // 用户交互
+  ask_user: MessageCircle,
 };
 
 export function ToolIcon({ name, className, style }: ToolIconProps) {

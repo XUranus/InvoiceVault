@@ -9,6 +9,11 @@ export function ArtifactPanel() {
   const [activeTab, setActiveTab] = useState("files");
   const artifacts = useAgentStore((s) => s.artifacts);
   const tasks = useAgentStore((s) => s.tasks);
+  const activeSessionId = useAgentStore((s) => s.activeSessionId);
+
+  if (!activeSessionId || (artifacts.length === 0 && tasks.length === 0)) {
+    return null;
+  }
 
   return (
     <div

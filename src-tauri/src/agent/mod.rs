@@ -418,6 +418,45 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
             is_read_only: true,
             requires_confirmation: false,
         },
+        ToolDefinition {
+            name: "ask_user",
+            description: "向用户提出问题并提供选项供选择。当需要用户确认操作、选择偏好或做出决定时使用。用户也可以选择\"其他\"并输入自定义内容。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "向用户展示的问题或说明"
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": { "type": "string", "description": "选项显示文本" },
+                                "value": { "type": "string", "description": "选项的值" },
+                                "style": { "type": "string", "enum": ["primary", "secondary", "danger"], "description": "按钮样式" }
+                            },
+                            "required": ["label", "value"]
+                        },
+                        "description": "供用户选择的选项列表"
+                    }
+                },
+                "required": ["message"]
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
+            name: "get_sysinfo",
+            description: "获取当前操作系统、默认 Shell 和用户桌面路径等系统信息。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
     ]
 }
 
@@ -709,17 +748,17 @@ struct ToolCallAccumulator {
 const SYSTEM_PROMPT: &str = r#"你是 InvoiceVault 发票处理助手，只能使用内置工具完成用户的请求。
 
 规则：
+- 尽量自主完成任务，减少不必要的用户交互；只在存在多种合理方案且无法自行判断时才使用 ask_user 询问用户
 - 查询发票时使用 search_invoices 工具，根据用户意图设置筛选条件
 - 需要发票详情时使用 get_invoice_detail 工具
 - 统计信息使用 get_dashboard_stats 工具
 - 用户要求导出时，先用 get_invoice_field_catalog 映射列名；需要相对日期时先用 get_current_date_context；如果用户上传了表格模板，先用 list_message_attachments 和 inspect_spreadsheet 理解表头
-- 复杂导出前先调用 create_export_preview，向用户说明匹配行数、列和样例；确认后再调用 export_invoices 或 export_invoices_with_template
-- export_invoices 支持 columns，自定义列必须传字段 key。例如”只包含发票代码”应传 columns=[“invoice_code”]
+- export_invoices 支持 columns，自定义列必须传字段 key。例如"只包含发票代码"应传 columns=["invoice_code"]
 - 修改发票信息使用 update_invoice 工具
 - 自定义标签管理：使用 get_badge_config 获取当前配置，set_badge_config 修改配置（增删分组和选项），set_invoice_badge 给发票设置标签
 - 系统设置：使用 get_price_config/set_price_config 管理 LLM 价格配置
 - 主题切换：使用 get_theme/set_theme 切换亮色/暗色主题
-- 维护操作：export_logs 导出日志，export_backup 导出备份，cleanup_storage 清理存储空间，get_app_info 查看系统版本信息
+- 维护操作：export_logs 导出日志，export_backup 导出备份，cleanup_storage 清理存储空间，get_app_info 查看系统版本信息，get_sysinfo 查看操作系统、Shell 和桌面路径
 - 工具返回什么数据就如实汇报，不要虚构或编造数据
 - 如果用户请求超出你的工具能力范围，如实说明并给出建议
 - 回答使用中文，简洁清晰
@@ -831,6 +870,11 @@ pub fn list_session_attachments(
         .query_map([session_id], map_attachment)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(attachments)
+}
+
+pub fn delete_attachment(conn: &Connection, id: i64) -> Result<(), AgentError> {
+    conn.execute("DELETE FROM agent_attachments WHERE id = ?1", [id])?;
+    Ok(())
 }
 
 pub fn create_task(

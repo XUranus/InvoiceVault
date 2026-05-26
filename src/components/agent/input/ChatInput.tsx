@@ -67,19 +67,19 @@ export function ChatInput() {
 
   return (
     <div
-      className="border-t p-4"
+      className="border-t px-4 pt-2 pb-3"
       style={{ borderColor: "var(--color-border)" }}
     >
       {/* Attachment bar */}
       {pendingAttachments.length > 0 && (
-        <div className="mb-3">
+        <div className="mb-2">
           <AttachmentBar attachments={pendingAttachments} />
         </div>
       )}
 
       {/* Input area */}
       <div
-        className="flex items-end gap-3 rounded-lg p-3"
+        className="flex items-end gap-2 rounded-xl px-3 py-2"
         style={{
           backgroundColor: "var(--color-input-bg)",
           border: "1px solid var(--color-border)",
@@ -89,7 +89,7 @@ export function ChatInput() {
         <button
           onClick={handleAttachFile}
           disabled={isAttaching}
-          className="p-2 rounded-lg transition-colors"
+          className="p-1.5 rounded-lg transition-colors"
           style={{
             color: isAttaching ? "var(--color-text-muted)" : "var(--color-text-secondary)",
             opacity: isAttaching ? 0.5 : 1,
@@ -103,7 +103,7 @@ export function ChatInput() {
             e.currentTarget.style.backgroundColor = "transparent";
           }}
         >
-          <Paperclip className="w-5 h-5" />
+          <Paperclip className="w-4 h-4" />
         </button>
 
         {/* Textarea */}
@@ -132,7 +132,7 @@ export function ChatInput() {
           disabled={!message.trim() || isStreaming || activeSessionId === null}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg transition-colors"
+          className="p-1.5 rounded-lg transition-colors"
           style={{
             backgroundColor:
               message.trim() && !isStreaming && activeSessionId !== null
@@ -148,7 +148,7 @@ export function ChatInput() {
                 : "not-allowed",
           }}
         >
-          <Send className="w-5 h-5" />
+          <Send className="w-4 h-4" />
         </motion.button>
       </div>
     </div>

@@ -3,6 +3,21 @@ import { motion } from "framer-motion";
 import { CheckCircle, XCircle, Loader2, Clock } from "lucide-react";
 import type { AgentTask } from "../../../types";
 
+const TASK_NAME_MAP: Record<string, string> = {
+  export_invoices: "导出发票",
+  export_invoices_with_template: "按模板导出",
+};
+
+const STATUS_LABEL_MAP: Record<string, string> = {
+  completed: "完成",
+  failed: "失败",
+  running: "运行中",
+};
+
+function getTaskDisplayName(toolName: string): string {
+  return TASK_NAME_MAP[toolName] || toolName;
+}
+
 interface TaskListProps {
   tasks: AgentTask[];
 }
@@ -109,7 +124,7 @@ export function TaskList({ tasks }: TaskListProps) {
                     className="text-sm font-medium"
                     style={{ color: "var(--color-text)" }}
                   >
-                    {task.tool_name}
+                    {getTaskDisplayName(task.tool_name)}
                   </p>
                   <span
                     className="text-xs px-1.5 py-0.5 rounded"
@@ -118,7 +133,7 @@ export function TaskList({ tasks }: TaskListProps) {
                       color: statusColor.text,
                     }}
                   >
-                    {task.status}
+                    {STATUS_LABEL_MAP[task.status] || task.status}
                   </span>
                 </div>
                 <p

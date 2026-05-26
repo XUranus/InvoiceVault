@@ -70,6 +70,10 @@ export function ToolCallCard({ toolCall, message }: ToolCallCardProps) {
       export_backup: "导出备份",
       cleanup_storage: "清理存储空间",
       get_app_info: "获取应用信息",
+      get_sysinfo: "获取系统信息",
+
+      // 用户交互
+      ask_user: "询问用户",
     };
     return nameMap[name] || name;
   };

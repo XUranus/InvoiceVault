@@ -9,6 +9,20 @@ import {
 } from "../../../api";
 import { useAgentStore } from "../hooks/useAgentStore";
 
+const MIME_LABEL_MAP: Record<string, string> = {
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel",
+  "text/csv": "CSV",
+  "application/pdf": "PDF",
+  "application/zip": "ZIP",
+  "application/json": "JSON",
+  "text/plain": "文本",
+};
+
+function getMimeTypeLabel(mime: string | null): string {
+  if (!mime) return "未知类型";
+  return MIME_LABEL_MAP[mime] || mime;
+}
+
 interface FileListProps {
   artifacts: AgentArtifact[];
   onSelect?: (id: number) => void;
@@ -106,7 +120,7 @@ export function FileList({ artifacts, onSelect }: FileListProps) {
                 className="text-xs mt-0.5"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                {artifact.mime_type || "未知类型"}
+                {getMimeTypeLabel(artifact.mime_type)}
                 {artifact.byte_size && ` · ${formatBytes(artifact.byte_size)}`}
               </p>
             </div>

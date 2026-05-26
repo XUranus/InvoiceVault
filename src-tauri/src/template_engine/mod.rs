@@ -506,7 +506,11 @@ impl TemplateEngine {
             header_rows: vec![h.start_row],
             data_region: plan::PlanDataRegion {
                 start_row: d.start_row,
-                end_row: d.end_row,
+                end_row: if let Some(ss) = d.summary_start_row {
+                    ss - 1
+                } else {
+                    d.end_row
+                },
                 template_rows: vec![d.start_row],
                 preserve_empty_slots: true,
             },

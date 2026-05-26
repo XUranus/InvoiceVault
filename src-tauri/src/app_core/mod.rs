@@ -2069,6 +2069,11 @@ impl AppState {
         Ok(agent::list_session_attachments(&db, session_id)?)
     }
 
+    pub fn remove_agent_attachment(&self, attachment_id: i64) -> Result<(), AppError> {
+        let db = self.db.lock().expect("database mutex poisoned");
+        Ok(agent::delete_attachment(&db, attachment_id)?)
+    }
+
     pub fn list_agent_tasks(&self, session_id: i64) -> Result<Vec<AgentTask>, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
         Ok(agent::list_session_tasks(&db, session_id)?)
@@ -2591,11 +2596,6 @@ fn make_tool_executor(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if !is_confirmed {
-                let column_desc: Vec<String> = plan
-                    .columns
-                    .iter()
-                    .map(|c| format!("{} → {}", c.label, c.field_key))
-                    .collect();
                 let conn = db.lock().expect("db lock");
                 let rows = template_adapter::load_invoices(
                     &conn,
@@ -2605,6 +2605,7 @@ fn make_tool_executor(
                 )
                 .unwrap_or_default();
                 let row_count = rows.len();
+                let mapped_count = plan.columns.len();
                 let mut warnings = plan.warnings.clone();
                 if plan.confidence < 0.8 {
                     warnings.push(format!("置信度: {:.0}%", plan.confidence * 100.0));
@@ -2652,10 +2653,8 @@ fn make_tool_executor(
                     tool_name: "export_invoices_with_template".to_owned(),
                     arguments: confirm_args,
                     message: format!(
-                        "将按模板 {} 导出 {row_count} 张发票。\n字段映射:\n{}{}",
+                        "将按模板「{}」导出 {row_count} 张发票（已映射 {mapped_count} 列）{warning_text}",
                         attachment.original_name,
-                        column_desc.join("\n"),
-                        warning_text,
                     ),
                     options,
                 };
@@ -2766,11 +2765,15 @@ fn make_tool_executor(
                         byte_size: te_result.byte_size,
                         columns: plan.columns.iter().map(|c| c.label.clone()).collect(),
                     };
+                    let title = std::path::Path::new(&result.file_path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "导出文件".to_owned());
                     let artifact = record_export_artifact(
                         &conn,
                         session_id,
                         task.as_ref().map(|task| task.id),
-                        "模板导出结果",
+                        &title,
                         &result,
                     )
                     .ok();
@@ -3002,11 +3005,15 @@ fn make_tool_executor(
                     ) {
                         warn!("Failed to record agent export event: {e}");
                     }
+                    let title = std::path::Path::new(&result.file_path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "导出文件".to_owned());
                     let artifact = record_export_artifact(
                         &conn,
                         session_id,
                         task.as_ref().map(|task| task.id),
-                        "发票导出结果",
+                        &title,
                         &result,
                     )
                     .ok();
@@ -3598,6 +3605,70 @@ fn make_tool_executor(
             .to_string();
             ToolExecResult::Success { content }
         }
+        "get_sysinfo" => {
+            let os_name = detect_os_name();
+            let shell = detect_shell();
+            let desktop = dirs::desktop_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let home = dirs::home_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let content = serde_json::json!({
+                "os": os_name,
+                "shell": shell,
+                "desktop_path": desktop,
+                "home_path": home,
+            })
+            .to_string();
+            ToolExecResult::Success { content }
+        }
+        "ask_user" => {
+            let is_confirmed = args
+                .get("_confirmed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_confirmed {
+                let message = args
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("请确认")
+                    .to_owned();
+                let options: Option<Vec<crate::agent::ConfirmOption>> = args
+                    .get("options")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
+                ToolExecResult::ConfirmationRequired {
+                    tool_name: "ask_user".to_owned(),
+                    arguments: args.clone(),
+                    message,
+                    options,
+                }
+            } else {
+                let choice = args
+                    .get("choice")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                // Resolve "desktop" choice to actual path
+                let result = if choice == "desktop" {
+                    let desktop = dirs::desktop_dir()
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    serde_json::json!({
+                        "selected": "desktop",
+                        "resolved_path": desktop.to_string_lossy(),
+                    })
+                } else if choice == "__other__" && !text.is_empty() {
+                    serde_json::json!({ "selected": "__other__", "text": text })
+                } else if !choice.is_empty() {
+                    serde_json::json!({ "selected": choice })
+                } else {
+                    serde_json::json!({ "selected": serde_json::Value::Null })
+                };
+                ToolExecResult::Success {
+                    content: result.to_string(),
+                }
+            }
+        }
         _ => ToolExecResult::Error {
             message: format!("未知工具: {tool_name}"),
         },
@@ -3652,6 +3723,7 @@ fn json_i64_vec(args: &serde_json::Value, key: &str) -> Option<Vec<i64>> {
     args.get(key)
         .and_then(|value| value.as_array())
         .map(|items| items.iter().filter_map(|value| value.as_i64()).collect())
+        .filter(|v: &Vec<i64>| !v.is_empty())
 }
 
 fn json_string_vec(args: &serde_json::Value, key: &str) -> Option<Vec<String>> {
@@ -3879,6 +3951,63 @@ fn xml_unescape(value: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
         .replace("&amp;", "&")
+}
+
+fn detect_os_name() -> String {
+    match std::env::consts::OS {
+        "macos" => "macOS".to_owned(),
+        "windows" => "Windows".to_owned(),
+        "linux" => {
+            // Try to read /etc/os-release for distro name
+            if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
+                let pretty = content.lines().find_map(|line| {
+                    let line = line.trim();
+                    if let Some(rest) = line.strip_prefix("PRETTY_NAME=") {
+                        // Remove surrounding quotes
+                        let val = rest.trim_matches('"');
+                        if !val.is_empty() {
+                            return Some(val.to_owned());
+                        }
+                    }
+                    None
+                });
+                if let Some(name) = pretty {
+                    return name;
+                }
+            }
+            "Linux".to_owned()
+        }
+        other => other.to_owned(),
+    }
+}
+
+fn detect_shell() -> String {
+    if cfg!(target_os = "windows") {
+        // On Windows: check SHELL env (Git Bash, MSYS2) then ComSpec
+        if let Ok(shell) = std::env::var("SHELL") {
+            return std::path::Path::new(&shell)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or(shell);
+        }
+        if let Ok(comspec) = std::env::var("ComSpec") {
+            return std::path::Path::new(&comspec)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or(comspec);
+        }
+        "cmd".to_owned()
+    } else {
+        // Unix: $SHELL
+        std::env::var("SHELL")
+            .map(|s| {
+                std::path::Path::new(&s)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or(s)
+            })
+            .unwrap_or_else(|_| "sh".to_owned())
+    }
 }
 
 impl From<rusqlite::Error> for AppError {

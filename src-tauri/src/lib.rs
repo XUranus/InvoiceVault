@@ -1369,6 +1369,16 @@ fn list_agent_attachments(
 }
 
 #[tauri::command]
+fn remove_agent_attachment(
+    state: State<'_, AppState>,
+    attachment_id: i64,
+) -> Result<(), String> {
+    state
+        .remove_agent_attachment(attachment_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn list_agent_tasks(state: State<'_, AppState>, session_id: i64) -> Result<Vec<AgentTask>, String> {
     state
         .list_agent_tasks(session_id)
@@ -2064,6 +2074,7 @@ pub fn run() {
             send_agent_message_stream,
             attach_agent_file,
             list_agent_attachments,
+            remove_agent_attachment,
             list_agent_tasks,
             list_agent_artifacts,
             open_agent_artifact_file,
