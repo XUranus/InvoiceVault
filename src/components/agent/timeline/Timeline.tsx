@@ -43,7 +43,15 @@ export function Timeline({ messages }: TimelineProps) {
 
         <AnimatePresence initial={false}>
           {messages
-            .filter((msg) => msg.role !== "tool")
+            .filter((msg) => {
+              if (msg.role !== "tool") return true;
+              // Show pending confirmation tool messages as standalone cards
+              try {
+                const parsed = JSON.parse(msg.content);
+                if (parsed.__pending_confirmation) return true;
+              } catch { /* ignore */ }
+              return false;
+            })
             .map((msg) => (
               <motion.div
                 key={msg.id}

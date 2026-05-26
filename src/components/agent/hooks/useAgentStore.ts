@@ -5,7 +5,6 @@ import type {
   AgentAttachment,
   AgentTask,
   AgentArtifact,
-  PendingConfirmation,
   AgentStreamEvent,
 } from "../../../types";
 import {
@@ -58,7 +57,6 @@ interface AgentState {
   messages: AgentMessage[];
   artifacts: AgentArtifact[];
   tasks: AgentTask[];
-  pendingConfirm: PendingConfirmation | null;
   streamState: StreamState | null;
   pendingAttachments: AgentAttachment[];
   loading: boolean;
@@ -79,7 +77,6 @@ interface AgentState {
   refreshTasks: () => Promise<void>;
   handleStreamEvent: (event: AgentStreamEvent) => Promise<void>;
   resetStream: () => void;
-  setPendingConfirm: (confirm: PendingConfirmation | null) => void;
   updateSessionTitle: (sessionId: number, title: string) => Promise<void>;
   generateSessionTitle: (sessionId: number) => Promise<void>;
 }
@@ -90,13 +87,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   messages: [],
   artifacts: [],
   tasks: [],
-  pendingConfirm: null,
   streamState: null,
   pendingAttachments: [],
   loading: false,
 
   setActiveSession: (id) => {
-    set({ activeSessionId: id, messages: [], streamState: null, pendingConfirm: null });
+    set({ activeSessionId: id, messages: [], streamState: null });
     if (id !== null) {
       get().loadMessages(id);
       get().refreshTasks();
@@ -181,23 +177,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
       get().refreshTasks();
       get().refreshArtifacts();
-      // Handle pending confirmation
-      if (response.pending_confirmation) {
-        set({
-          pendingConfirm: response.pending_confirmation,
-          streamState: null,
-        });
-      } else {
-        set({
-          streamState: {
-            streamId: "",
-            phase: "done",
-            toolName: null,
-            deltaContent: "",
-            errorMessage: null,
-          },
-        });
-      }
+      // Pending confirmation is now inline in messages
+      set({
+        streamState: {
+          streamId: "",
+          phase: "done",
+          toolName: null,
+          deltaContent: "",
+          errorMessage: null,
+        },
+      });
       // Check if session title is default and generate a new one
       const currentSession = get().sessions.find((s) => s.id === activeSessionId);
       if (currentSession && currentSession.title === "新对话") {
@@ -224,7 +213,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const { activeSessionId } = get();
     if (activeSessionId === null) return;
 
-    set({ pendingConfirm: null });
     set({
       streamState: {
         streamId: "",
@@ -237,30 +225,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     try {
       const config = getLlmConfig();
-      const response = await confirmAgentAction(activeSessionId, confirmed, extra || null, config);
+      await confirmAgentAction(activeSessionId, confirmed, extra || null, config);
       // Reload messages and refresh tasks/artifacts
       if (activeSessionId !== null) {
         await get().loadMessages(activeSessionId);
       }
       get().refreshTasks();
       get().refreshArtifacts();
-      // Handle pending confirmation
-      if (response.pending_confirmation) {
-        set({
-          pendingConfirm: response.pending_confirmation,
-          streamState: null,
-        });
-      } else {
-        set({
-          streamState: {
-            streamId: "",
-            phase: "done",
-            toolName: null,
-            deltaContent: "",
-            errorMessage: null,
-          },
-        });
-      }
+      set({
+        streamState: {
+          streamId: "",
+          phase: "done",
+          toolName: null,
+          deltaContent: "",
+          errorMessage: null,
+        },
+      });
     } catch (err) {
       set({
         streamState: {
@@ -377,10 +357,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         break;
 
       case "pending_confirmation":
-        set({
-          pendingConfirm: event.pending_confirmation,
-          streamState: null,
-        });
+        // Pending confirmation is now inline in messages, reload to pick it up
+        if (get().activeSessionId !== null) {
+          get().loadMessages(get().activeSessionId!);
+        }
+        set({ streamState: null });
         break;
 
       case "finished":
@@ -422,10 +403,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   resetStream: () => {
     set({ streamState: null });
-  },
-
-  setPendingConfirm: (pendingConfirm) => {
-    set({ pendingConfirm });
   },
 
   updateSessionTitle: async (sessionId, title) => {

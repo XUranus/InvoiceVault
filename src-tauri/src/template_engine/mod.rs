@@ -3,6 +3,7 @@ pub mod binder;
 pub mod cloner;
 pub mod ir;
 pub mod parser;
+pub mod plan;
 pub mod region;
 pub mod strings;
 pub mod writer;
@@ -448,6 +449,193 @@ impl TemplateEngine {
             byte_size,
         })
     }
+
+    /// Generate a plan using the existing heuristic region detection.
+    /// Returns `None` if no header region could be detected (fewer than 2
+    /// column matches).
+    pub fn generate_heuristic_plan(
+        template_path: &str,
+        label_matcher: &dyn Fn(&[String]) -> Vec<(usize, String)>,
+    ) -> Result<Option<plan::TemplatePlan>, TemplateError> {
+        let ast = parser::parse_xlsx(template_path)?;
+        let regions = region::recognize_regions(&ast, label_matcher);
+
+        let header = regions
+            .iter()
+            .find(|r| r.kind == region::RegionKind::Header);
+        let data = regions
+            .iter()
+            .find(|r| r.kind == region::RegionKind::DataAppend);
+
+        let (Some(h), Some(d)) = (header, data) else {
+            return Ok(None);
+        };
+
+        // Build PlanColumn entries with labels from the field catalog
+        let columns: Vec<plan::PlanColumn> = h
+            .column_map
+            .iter()
+            .map(|(col_idx, key)| {
+                let label = crate::exporter::ALL_COLUMNS
+                    .iter()
+                    .find(|c| c.key == key.as_str())
+                    .map(|c| c.label.to_owned())
+                    .unwrap_or_else(|| key.clone());
+                plan::PlanColumn {
+                    col: *col_idx,
+                    label,
+                    field_key: key.clone(),
+                    confidence: h.confidence,
+                }
+            })
+            .collect();
+
+        // Detect sequence columns from the AST
+        let sheet = &ast.sheets[h.sheet_index];
+        let template_row = sheet
+            .rows
+            .iter()
+            .find(|r| r.row_num >= d.start_row && r.cells.iter().any(|c| c.raw_value.is_some()));
+        let sequence_columns = detect_sequence_cols(template_row);
+
+        // Build summary rows from detected markers
+        let summary_rows = build_plan_summary_rows(&columns, d, sheet, &ast.shared_strings);
+
+        let plan = plan::TemplatePlan {
+            target_sheet: h.sheet_index,
+            header_rows: vec![h.start_row],
+            data_region: plan::PlanDataRegion {
+                start_row: d.start_row,
+                end_row: d.end_row,
+                template_rows: vec![d.start_row],
+                preserve_empty_slots: true,
+            },
+            columns,
+            sequence_columns,
+            summary_rows,
+            footer_rows: Vec::new(),
+            warnings: Vec::new(),
+            confidence: h.confidence,
+            source: plan::PlanSource::Heuristic,
+        };
+
+        Ok(Some(plan))
+    }
+
+    /// Export using an explicit `TemplatePlan` instead of heuristic region
+    /// detection. The plan is validated against the parsed template before
+    /// binding.
+    pub fn export_with_plan(
+        template_path: &str,
+        output_path: &str,
+        source: &dyn binder::DataSource,
+        export_plan: &plan::TemplatePlan,
+    ) -> Result<ExportResult, TemplateError> {
+        // 1. Copy template to output
+        std::fs::copy(template_path, output_path)
+            .map_err(|e| trace_export_error("copy_template", template_path, output_path, e))?;
+
+        // 2. Parse
+        let ast = parser::parse_xlsx(output_path)
+            .map_err(|e| trace_export_error("parse_xlsx", template_path, output_path, e))?;
+
+        // 3. Validate plan against the parsed AST
+        let max_row = ast
+            .sheets
+            .get(export_plan.target_sheet)
+            .map(|s| s.rows.iter().map(|r| r.row_num).max().unwrap_or(0))
+            .unwrap_or(0);
+        let field_catalog: Vec<(&str, bool)> = crate::exporter::ALL_COLUMNS
+            .iter()
+            .map(|c| (c.key, c.numeric))
+            .collect();
+        let validation =
+            plan::validate_plan(export_plan, ast.sheets.len(), max_row, &field_catalog);
+        if !validation.valid {
+            return Err(trace_export_error(
+                "validate_plan",
+                template_path,
+                output_path,
+                TemplateError::Bind(format!("plan validation failed: {:?}", validation.errors)),
+            ));
+        }
+
+        // 4. Convert plan to regions and bind
+        let regions = export_plan.to_regions();
+        let mut ir = binder::bind(&ast, &regions, source)
+            .map_err(|e| trace_export_error("bind_data", template_path, output_path, e))?;
+
+        // 5. Write
+        writer::write_xlsx(output_path, &mut ir)
+            .map_err(|e| trace_export_error("write_xlsx", template_path, output_path, e))?;
+
+        let byte_size = std::fs::metadata(output_path)
+            .map_err(|e| trace_export_error("stat_output", template_path, output_path, e))?
+            .len();
+        Ok(ExportResult {
+            file_path: output_path.to_owned(),
+            row_count: source.row_count(),
+            byte_size,
+        })
+    }
+}
+
+/// Detect sequence columns from the template data row (columns where the
+/// value is numeric `1`).
+fn detect_sequence_cols(
+    template_row: Option<&ast::RowAst>,
+) -> Vec<usize> {
+    let Some(row) = template_row else {
+        return Vec::new();
+    };
+    row.cells
+        .iter()
+        .filter(|c| {
+            (c.cell_type.is_none() || c.cell_type.as_deref() == Some("n"))
+                && c.raw_value.as_deref() == Some("1")
+        })
+        .map(|c| c.col)
+        .collect()
+}
+
+/// Build `PlanSummaryRow` entries from the detected summary markers in the
+/// sheet, limited to numeric columns from the column map.
+fn build_plan_summary_rows(
+    columns: &[plan::PlanColumn],
+    data_region: &region::Region,
+    sheet: &ast::SheetAst,
+    shared_strings: &[String],
+) -> Vec<plan::PlanSummaryRow> {
+    let Some(summary_start) = data_region.summary_start_row else {
+        return Vec::new();
+    };
+
+    let numeric_col_indices: Vec<usize> = columns
+        .iter()
+        .filter(|c| {
+            crate::exporter::ALL_COLUMNS
+                .iter()
+                .any(|ac| ac.key == c.field_key.as_str() && ac.numeric)
+        })
+        .map(|c| c.col)
+        .collect();
+
+    sheet
+        .rows
+        .iter()
+        .filter(|r| r.row_num >= summary_start && r.row_num <= data_region.end_row)
+        .filter(|r| {
+            r.cells.iter().any(|cell| {
+                let text = region::resolve_cell_text(cell, shared_strings);
+                region::SUMMARY_MARKERS.iter().any(|m| text.trim() == *m)
+            })
+        })
+        .map(|r| plan::PlanSummaryRow {
+            row: r.row_num,
+            kind: "subtotal".to_string(),
+            formula_columns: numeric_col_indices.clone(),
+        })
+        .collect()
 }
 
 fn trace_export_error(

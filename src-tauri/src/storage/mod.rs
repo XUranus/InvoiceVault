@@ -3,6 +3,7 @@ use rusqlite::Connection;
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../migrations/0001_initial.sql")),
     (2, include_str!("../../migrations/0002_indexes.sql")),
+    (3, include_str!("../../migrations/0003_add_uuid.sql")),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -59,6 +60,6 @@ mod tests {
             )
             .expect("read migration version");
 
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
 }

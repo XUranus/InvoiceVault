@@ -3,7 +3,6 @@ import { SessionSidebar } from "./panels/SessionSidebar";
 import { Timeline } from "./timeline/Timeline";
 import { ChatInput } from "./input/ChatInput";
 import { ArtifactPanel } from "./panels/ArtifactPanel";
-import { ConfirmationDialog } from "./panels/ConfirmationDialog";
 import { useAgentStore } from "./hooks/useAgentStore";
 import { useAgentStream } from "./hooks/useAgentStream";
 import { MessageSquare, Sparkles, Paperclip } from "lucide-react";
@@ -105,9 +104,6 @@ function AgentPage() {
 
       {/* Artifact panel */}
       <ArtifactPanel />
-
-      {/* Confirmation dialog */}
-      <ConfirmationDialog />
     </div>
   );
 }

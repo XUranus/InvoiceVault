@@ -500,10 +500,17 @@ export type AgentMessage = {
   attachments: AgentAttachment[];
 };
 
+export type ConfirmOption = {
+  label: string;
+  value: string;
+  style?: "primary" | "secondary" | "danger";
+};
+
 export type PendingConfirmation = {
   tool_name: string;
   arguments: Record<string, unknown>;
   message: string;
+  options?: ConfirmOption[];
 };
 
 export type AgentResponse = {

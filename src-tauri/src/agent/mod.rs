@@ -174,11 +174,12 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "export_invoices_with_template",
-            description: "按上传表格模板的表头列顺序导出发票。当前版本复用模板列结构，不复制样式/公式/合并单元格。需要用户选择保存位置。",
+            description: "按上传表格模板的表头列顺序导出发票。保留原格式、样式、合并单元格、公式。需要用户选择保存位置。",
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "attachment_id": {"type": "integer", "description": "模板表格附件 ID"},
+                    "plan": {"type": "object", "description": "导出计划 JSON（来自 generate_template_plan）。为空时自动分析模板生成计划。"},
                     "format": {"type": "string", "enum": ["xlsx", "csv"], "description": "导出格式，默认 xlsx"},
                     "invoice_ids": {
                         "type": "array",
@@ -192,6 +193,19 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
             }),
             is_read_only: false,
             requires_confirmation: true,
+        },
+        ToolDefinition {
+            name: "generate_template_plan",
+            description: "分析 Excel 模板结构，生成字段映射导出计划。返回 JSON 计划，可传给 export_invoices_with_template 的 plan 参数。只读操作，不修改模板。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "attachment_id": {"type": "integer", "description": "模板表格附件 ID"}
+                },
+                "required": ["attachment_id"]
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
         },
         ToolDefinition {
             name: "update_invoice",
@@ -414,6 +428,7 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSession {
     pub id: i64,
+    pub uuid: String,
     pub title: String,
     pub created_at: String,
     pub updated_at: String,
@@ -503,10 +518,18 @@ pub enum AgentStreamEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfirmOption {
+    pub label: String,
+    pub value: String,
+    pub style: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingConfirmation {
     pub tool_name: String,
     pub arguments: serde_json::Value,
     pub message: String,
+    pub options: Option<Vec<ConfirmOption>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -528,6 +551,7 @@ pub enum ToolExecResult {
         tool_name: String,
         arguments: serde_json::Value,
         message: String,
+        options: Option<Vec<ConfirmOption>>,
     },
     Error {
         message: String,
@@ -707,10 +731,15 @@ const SYSTEM_PROMPT: &str = r#"你是 InvoiceVault 发票处理助手，只能�
 
 pub fn create_session(conn: &Connection, title: Option<&str>) -> Result<AgentSession, AgentError> {
     let title = title.unwrap_or("新对话");
-    conn.execute("INSERT INTO agent_sessions (title) VALUES (?1)", [title])?;
+    let uuid = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO agent_sessions (uuid, title) VALUES (?1, ?2)",
+        rusqlite::params![uuid, title],
+    )?;
     let id = conn.last_insert_rowid();
     Ok(AgentSession {
         id,
+        uuid,
         title: title.to_owned(),
         created_at: String::new(),
         updated_at: String::new(),
@@ -719,15 +748,16 @@ pub fn create_session(conn: &Connection, title: Option<&str>) -> Result<AgentSes
 
 pub fn list_sessions(conn: &Connection) -> Result<Vec<AgentSession>, AgentError> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, created_at, updated_at FROM agent_sessions ORDER BY updated_at DESC",
+        "SELECT id, uuid, title, created_at, updated_at FROM agent_sessions ORDER BY updated_at DESC",
     )?;
     let sessions = stmt
         .query_map([], |row| {
             Ok(AgentSession {
                 id: row.get(0)?,
-                title: row.get(1)?,
-                created_at: row.get(2)?,
-                updated_at: row.get(3)?,
+                uuid: row.get(1)?,
+                title: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1056,6 +1086,14 @@ fn save_message(
     })
 }
 
+fn delete_pending_confirmation(conn: &Connection, session_id: i64) -> Result<usize, AgentError> {
+    let deleted = conn.execute(
+        "DELETE FROM agent_messages WHERE session_id = ?1 AND role = 'tool' AND content LIKE '%__pending_confirmation%'",
+        [session_id],
+    )?;
+    Ok(deleted)
+}
+
 pub fn write_audit_log(
     conn: &Connection,
     actor: &str,
@@ -1111,14 +1149,15 @@ pub fn get_first_user_message(conn: &Connection, session_id: i64) -> Option<Stri
 
 pub fn get_session(conn: &Connection, session_id: i64) -> Result<AgentSession, AgentError> {
     conn.query_row(
-        "SELECT id, title, created_at, updated_at FROM agent_sessions WHERE id = ?1",
+        "SELECT id, uuid, title, created_at, updated_at FROM agent_sessions WHERE id = ?1",
         [session_id],
         |row| {
             Ok(AgentSession {
                 id: row.get(0)?,
-                title: row.get(1)?,
-                created_at: row.get(2)?,
-                updated_at: row.get(3)?,
+                uuid: row.get(1)?,
+                title: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
             })
         },
     )
@@ -1719,7 +1758,13 @@ async fn continue_agent_turn_impl(
 ) -> Result<AgentResponse, AgentError> {
     let mut new_messages: Vec<AgentMessageRow> = Vec::new();
 
-    // Load all messages for this session
+    // Delete any pending confirmation messages for this session
+    {
+        let conn = db.lock().expect("db lock");
+        let _ = delete_pending_confirmation(&conn, session_id);
+    }
+
+    // Load all messages for this session (after deleting pending)
     let history = {
         let conn = db.lock().expect("db lock");
         get_recent_messages(&conn, session_id, 30)?
@@ -1905,7 +1950,7 @@ async fn run_agent_loop_from_inner(
     stream_sink: Option<AgentStreamSink>,
 ) -> Result<AgentResponse, AgentError> {
     let mut new_messages: Vec<AgentMessageRow> = Vec::new();
-    const MAX_ITERATIONS: usize = 10;
+    const MAX_ITERATIONS: usize = 20;
 
     for _iteration in 0..MAX_ITERATIONS {
         let response = match &stream_sink {
@@ -2004,12 +2049,33 @@ async fn run_agent_loop_from_inner(
                         tool_name,
                         arguments,
                         message,
+                        options,
                     } => {
                         let pending_confirmation = PendingConfirmation {
-                            tool_name,
-                            arguments,
-                            message,
+                            tool_name: tool_name.clone(),
+                            arguments: arguments.clone(),
+                            message: message.clone(),
+                            options: options.clone(),
                         };
+                        // Save pending confirmation as a tool result message
+                        let pending_content = serde_json::json!({
+                            "__pending_confirmation": true,
+                            "tool_name": tool_name,
+                            "message": message,
+                            "options": options,
+                            "arguments": arguments,
+                        });
+                        let pending_msg = LlmMessage {
+                            role: "tool".to_owned(),
+                            content: Some(pending_content.to_string()),
+                            tool_calls: None,
+                            tool_call_id: Some(tc.id.clone()),
+                            reasoning_content: None,
+                        };
+                        {
+                            let conn = db.lock().expect("db lock");
+                            new_messages.push(save_message(&conn, &pending_msg, session_id)?);
+                        }
                         if let Some(sink) = &stream_sink {
                             sink(AgentStreamEvent::PendingConfirmation {
                                 pending_confirmation: pending_confirmation.clone(),
@@ -2112,6 +2178,15 @@ fn build_llm_messages(history: &[AgentMessageRow]) -> Vec<LlmMessage> {
     }];
 
     for m in history {
+        // Skip pending confirmation messages
+        if m.role == "tool" {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&m.content) {
+                if val.get("__pending_confirmation").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    continue;
+                }
+            }
+        }
+
         let tool_calls: Option<Vec<ToolCall>> = m
             .tool_call_json
             .as_ref()

@@ -1,19 +1,14 @@
 import React, { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { motion, AnimatePresence } from "framer-motion";
-import { FileText, History, Eye } from "lucide-react";
+import { FileText, History } from "lucide-react";
 import { useAgentStore } from "../hooks/useAgentStore";
 import { FileList } from "./FileList";
 import { TaskList } from "./TaskList";
-import { ArtifactPreview } from "./ArtifactPreview";
 
 export function ArtifactPanel() {
   const [activeTab, setActiveTab] = useState("files");
   const artifacts = useAgentStore((s) => s.artifacts);
   const tasks = useAgentStore((s) => s.tasks);
-  const [selectedArtifactId, setSelectedArtifactId] = useState<number | null>(
-    null
-  );
 
   return (
     <div
@@ -89,42 +84,15 @@ export function ArtifactPanel() {
             <History className="w-3.5 h-3.5" />
             任务
           </Tabs.Trigger>
-          <Tabs.Trigger
-            value="preview"
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors"
-            style={{
-              color:
-                activeTab === "preview"
-                  ? "var(--color-primary-text)"
-                  : "var(--color-text-muted)",
-              borderBottom:
-                activeTab === "preview"
-                  ? "2px solid var(--color-primary)"
-                  : "2px solid transparent",
-            }}
-          >
-            <Eye className="w-3.5 h-3.5" />
-            预览
-          </Tabs.Trigger>
         </Tabs.List>
 
         <div className="flex-1 overflow-hidden">
           <Tabs.Content value="files" className="h-full">
-            <FileList
-              artifacts={artifacts}
-              onSelect={(id) => {
-                setSelectedArtifactId(id);
-                setActiveTab("preview");
-              }}
-            />
+            <FileList artifacts={artifacts} />
           </Tabs.Content>
 
           <Tabs.Content value="tasks" className="h-full">
             <TaskList tasks={tasks} />
-          </Tabs.Content>
-
-          <Tabs.Content value="preview" className="h-full">
-            <ArtifactPreview artifactId={selectedArtifactId} />
           </Tabs.Content>
         </div>
       </Tabs.Root>

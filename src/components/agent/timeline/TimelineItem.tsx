@@ -1,18 +1,58 @@
 import React from "react";
-import type { AgentMessage } from "../../../types";
+import type { AgentMessage, PendingConfirmation } from "../../../types";
+import { useAgentStore } from "../hooks/useAgentStore";
 import { UserMessage } from "./UserMessage";
 import { AssistantMessage } from "./AssistantMessage";
 import { ToolCallCard } from "./ToolCallCard";
+import { PendingConfirmationCard } from "./PendingConfirmationCard";
 
 interface TimelineItemProps {
   message: AgentMessage;
   toolResultMap: Map<string, AgentMessage>;
 }
 
+function isPendingConfirmation(msg: AgentMessage): PendingConfirmation | null {
+  if (msg.role !== "tool" || !msg.content) return null;
+  try {
+    const parsed = JSON.parse(msg.content);
+    if (parsed.__pending_confirmation) {
+      return {
+        tool_name: parsed.tool_name,
+        arguments: parsed.arguments || {},
+        message: parsed.message,
+        options: parsed.options,
+      };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 export function TimelineItem({ message, toolResultMap }: TimelineItemProps) {
+  const confirmAction = useAgentStore((s) => s.confirmAction);
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isToolResult = message.role === "tool";
+
+  // Check if this is a pending confirmation (standalone card)
+  const pending = isPendingConfirmation(message);
+  if (pending) {
+    return (
+      <div className="relative pl-10 pb-2">
+        <div
+          className="absolute left-[11px] top-[8px] w-[10px] h-[10px] rounded-full border-2"
+          style={{
+            borderColor: "var(--color-warn, #d97706)",
+            backgroundColor: "var(--color-warn-bg, #fef3c7)",
+          }}
+        />
+        <PendingConfirmationCard
+          pending={pending}
+          onConfirm={(extraParams) => confirmAction(true, extraParams)}
+          onCancel={() => confirmAction(false)}
+        />
+      </div>
+    );
+  }
 
   // Parse tool call from assistant message
   let toolCalls: Array<{ name: string; args: Record<string, unknown>; id?: string }> = [];
@@ -42,7 +82,7 @@ export function TimelineItem({ message, toolResultMap }: TimelineItemProps) {
 
   const hasToolCalls = toolCalls.length > 0;
 
-  // Tool result messages are already shown inside ToolCallCard, skip entirely
+  // Regular tool result messages are shown inside ToolCallCard, skip
   if (isToolResult && !hasToolCalls) {
     return null;
   }
@@ -80,7 +120,7 @@ export function TimelineItem({ message, toolResultMap }: TimelineItemProps) {
               <ToolCallCard
                 key={index}
                 toolCall={toolCall}
-                message={toolResult || message}
+                message={toolResult || undefined}
               />
             );
           })}

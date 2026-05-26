@@ -27,19 +27,18 @@ pub fn resolve_column_defs(keys: &[(usize, String)]) -> Vec<(usize, &'static Col
         .collect()
 }
 
-/// Get the matched column keys from a template attachment by parsing and
-/// running region recognition. Returns the keys from the best-matched header row.
-pub fn matched_keys_from_attachment(
+
+/// Generate a `TemplatePlan` from a template attachment using heuristic
+/// region detection. Returns `Err` if parsing fails, `Ok(None)` if no
+/// header region could be detected.
+pub fn generate_plan_from_attachment(
     attachment: &AgentAttachment,
-) -> Result<Vec<(usize, String)>, String> {
-    let ast = crate::template_engine::parser::parse_xlsx(&attachment.storage_path)
-        .map_err(|e| format!("模板解析失败: {e}"))?;
-    let regions = crate::template_engine::region::recognize_regions(&ast, &label_matcher);
-    let header = regions
-        .iter()
-        .find(|r| r.kind == crate::template_engine::region::RegionKind::Header)
-        .ok_or("模板表头未匹配到可导出的发票字段")?;
-    Ok(header.column_map.clone())
+) -> Result<Option<crate::template_engine::plan::TemplatePlan>, String> {
+    crate::template_engine::TemplateEngine::generate_heuristic_plan(
+        &attachment.storage_path,
+        &label_matcher,
+    )
+    .map_err(|e| format!("模板分析失败: {e}"))
 }
 
 /// Adapter that implements `template_engine::binder::DataSource` for invoice export.

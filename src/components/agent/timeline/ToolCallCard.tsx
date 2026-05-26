@@ -7,7 +7,7 @@ import { JsonHighlight } from "../shared/JsonHighlight";
 
 interface ToolCallCardProps {
   toolCall: { name: string; args: Record<string, unknown> };
-  message: AgentMessage;
+  message?: AgentMessage;
 }
 
 export function ToolCallCard({ toolCall, message }: ToolCallCardProps) {
@@ -15,13 +15,15 @@ export function ToolCallCard({ toolCall, message }: ToolCallCardProps) {
 
   // Parse result from message content
   let result: unknown = null;
-  if (message.content) {
+  if (message?.content) {
     try {
       result = JSON.parse(message.content);
     } catch {
       result = message.content;
     }
   }
+
+  const hasResult = message !== undefined && result !== null && result !== undefined;
 
   // Get display name for the tool
   const getToolDisplayName = (name: string) => {
@@ -42,6 +44,7 @@ export function ToolCallCard({ toolCall, message }: ToolCallCardProps) {
       // 导出功能
       export_invoices: "导出发票",
       create_export_preview: "创建导出预览",
+      generate_template_plan : "生成模板计划",
       export_invoices_with_template: "按模板导出",
       export_pdf_report: "导出PDF报表",
 
@@ -97,15 +100,27 @@ export function ToolCallCard({ toolCall, message }: ToolCallCardProps) {
             >
               {getToolDisplayName(toolCall.name)}
             </span>
-            <span
-              className="text-xs px-2 py-0.5 rounded"
-              style={{
-                backgroundColor: "var(--color-success-bg)",
-                color: "var(--color-success)",
-              }}
-            >
-              成功
-            </span>
+            {message === undefined ? (
+              <span
+                className="text-xs px-2 py-0.5 rounded"
+                style={{
+                  backgroundColor: "var(--color-warn-bg, #fef3c7)",
+                  color: "var(--color-warn, #d97706)",
+                }}
+              >
+                等待确认
+              </span>
+            ) : (
+              <span
+                className="text-xs px-2 py-0.5 rounded"
+                style={{
+                  backgroundColor: "var(--color-success-bg)",
+                  color: "var(--color-success)",
+                }}
+              >
+                成功
+              </span>
+            )}
             <svg
               className="w-4 h-4 transition-transform"
               style={{
@@ -179,7 +194,7 @@ export function ToolCallCard({ toolCall, message }: ToolCallCardProps) {
                   )}
 
                 {/* Result */}
-                {result !== null && result !== undefined && (
+                {hasResult && (
                   <div
                     className="px-4 py-3 border-t"
                     style={{ borderColor: "var(--color-border)" }}

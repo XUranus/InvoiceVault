@@ -1688,7 +1688,10 @@ impl AppState {
 
     pub fn create_agent_session(&self) -> Result<AgentSession, AppError> {
         let db = self.db.lock().expect("database mutex poisoned");
-        Ok(agent::create_session(&db, None)?)
+        let session = agent::create_session(&db, None)?;
+        // Create temp directory for this session
+        let _ = paths::session_temp_dir(&self.paths.sessions_dir, &session.uuid);
+        Ok(session)
     }
 
     pub fn list_agent_sessions(&self) -> Result<Vec<AgentSession>, AppError> {
@@ -2147,6 +2150,7 @@ impl AppState {
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
             self.paths.app_data_dir.clone(),
+            self.paths.sessions_dir.clone(),
             Arc::clone(&self.db),
             Arc::clone(&self.badge_config),
             Arc::clone(&self.price_config),
@@ -2178,6 +2182,7 @@ impl AppState {
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
             self.paths.app_data_dir.clone(),
+            self.paths.sessions_dir.clone(),
             Arc::clone(&self.db),
             Arc::clone(&self.badge_config),
             Arc::clone(&self.price_config),
@@ -2232,6 +2237,7 @@ impl AppState {
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
             self.paths.app_data_dir.clone(),
+            self.paths.sessions_dir.clone(),
             Arc::clone(&self.db),
             Arc::clone(&self.badge_config),
             Arc::clone(&self.price_config),
@@ -2259,6 +2265,7 @@ impl AppState {
         let executor = Arc::new(make_tool_executor(
             self.paths.thumbnails_dir.clone(),
             self.paths.app_data_dir.clone(),
+            self.paths.sessions_dir.clone(),
             Arc::clone(&self.db),
             Arc::clone(&self.badge_config),
             Arc::clone(&self.price_config),
@@ -2282,12 +2289,21 @@ impl AppState {
 fn make_tool_executor(
     thumbnails_dir: std::path::PathBuf,
     app_data_dir: std::path::PathBuf,
+    sessions_dir: std::path::PathBuf,
     db: Arc<Mutex<Connection>>,
     badge_config: Arc<Mutex<BadgeConfig>>,
     price_config: Arc<Mutex<PriceConfig>>,
     app_handle: AppHandle,
     session_id: i64,
 ) -> impl Fn(&str, &serde_json::Value) -> ToolExecResult {
+    // Look up session UUID once for temp dir resolution
+    let session_uuid = {
+        let conn = db.lock().expect("database mutex poisoned");
+        agent::get_session(&conn, session_id)
+            .ok()
+            .map(|s| s.uuid)
+            .unwrap_or_default()
+    };
     move |tool_name: &str, args: &serde_json::Value| match tool_name {
         "search_invoices" => {
             let params = InvoiceSearchParams {
@@ -2482,6 +2498,40 @@ fn make_tool_executor(
                 },
             }
         }
+        "generate_template_plan" => {
+            let Some(attachment_id) = args.get("attachment_id").and_then(|v| v.as_i64()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 attachment_id 参数".to_owned(),
+                };
+            };
+            let conn = db.lock().expect("db lock");
+            let attachment = match agent::get_attachment(&conn, attachment_id) {
+                Ok(attachment) if attachment.session_id == session_id => attachment,
+                Ok(_) => {
+                    return ToolExecResult::Error {
+                        message: "附件不属于当前会话".to_owned(),
+                    }
+                }
+                Err(e) => {
+                    return ToolExecResult::Error {
+                        message: e.to_string(),
+                    }
+                }
+            };
+            drop(conn);
+
+            match template_adapter::generate_plan_from_attachment(&attachment) {
+                Ok(Some(plan)) => {
+                    let content = serde_json::to_string_pretty(&plan)
+                        .unwrap_or_else(|_| "序列化失败".to_owned());
+                    ToolExecResult::Success { content }
+                }
+                Ok(None) => ToolExecResult::Error {
+                    message: "模板表头未匹配到可导出的发票字段".to_owned(),
+                },
+                Err(e) => ToolExecResult::Error { message: e },
+            }
+        }
         "export_invoices_with_template" => {
             let Some(attachment_id) = args.get("attachment_id").and_then(|v| v.as_i64()) else {
                 return ToolExecResult::Error {
@@ -2504,16 +2554,36 @@ fn make_tool_executor(
             };
             drop(conn);
 
-            // Resolve column map via engine's region detection
-            let matched_keys = match template_adapter::matched_keys_from_attachment(&attachment) {
-                Ok(keys) if !keys.is_empty() => keys,
-                Ok(_) => {
-                    return ToolExecResult::Error {
-                        message: "模板表头未匹配到可导出的发票字段".to_owned(),
+            // Use provided plan or generate one via heuristic
+            let plan = if let Some(plan_json) = args.get("plan") {
+                match serde_json::from_value::<crate::template_engine::plan::TemplatePlan>(
+                    plan_json.clone(),
+                ) {
+                    Ok(plan) => plan,
+                    Err(e) => {
+                        return ToolExecResult::Error {
+                            message: format!("plan 参数解析失败: {e}"),
+                        }
                     }
                 }
-                Err(e) => return ToolExecResult::Error { message: e },
+            } else {
+                match template_adapter::generate_plan_from_attachment(&attachment) {
+                    Ok(Some(plan)) => plan,
+                    Ok(None) => {
+                        return ToolExecResult::Error {
+                            message: "模板表头未匹配到可导出的发票字段".to_owned(),
+                        }
+                    }
+                    Err(e) => return ToolExecResult::Error { message: e },
+                }
             };
+
+            // Build column map from plan for the DataSource
+            let matched_keys: Vec<(usize, String)> = plan
+                .columns
+                .iter()
+                .map(|c| (c.col, c.field_key.clone()))
+                .collect();
             let column_map = template_adapter::resolve_column_defs(&matched_keys);
 
             let is_confirmed = args
@@ -2521,8 +2591,11 @@ fn make_tool_executor(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if !is_confirmed {
-                let column_desc: Vec<&str> = column_map.iter().map(|(_, c)| c.label).collect();
-                let column_desc = column_desc.join(", ");
+                let column_desc: Vec<String> = plan
+                    .columns
+                    .iter()
+                    .map(|c| format!("{} → {}", c.label, c.field_key))
+                    .collect();
                 let conn = db.lock().expect("db lock");
                 let rows = template_adapter::load_invoices(
                     &conn,
@@ -2532,21 +2605,102 @@ fn make_tool_executor(
                 )
                 .unwrap_or_default();
                 let row_count = rows.len();
+                let mut warnings = plan.warnings.clone();
+                if plan.confidence < 0.8 {
+                    warnings.push(format!("置信度: {:.0}%", plan.confidence * 100.0));
+                }
+                let warning_text = if warnings.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n注意: {}", warnings.join("; "))
+                };
+
+                // Check if user already specified a path
+                let has_user_path = args
+                    .get("output_path")
+                    .and_then(|v| v.as_str())
+                    .is_some();
+
+                // Store the plan in arguments so it's available after confirmation
+                let mut confirm_args = args.clone();
+                confirm_args["plan"] =
+                    serde_json::to_value(&plan).unwrap_or(serde_json::Value::Null);
+
+                let options = if has_user_path {
+                    None // User already specified path, no options needed
+                } else {
+                    Some(vec![
+                        crate::agent::ConfirmOption {
+                            label: "保存到桌面".into(),
+                            value: "desktop".into(),
+                            style: Some("primary".into()),
+                        },
+                        crate::agent::ConfirmOption {
+                            label: "选择位置...".into(),
+                            value: "pick_path".into(),
+                            style: Some("secondary".into()),
+                        },
+                        crate::agent::ConfirmOption {
+                            label: "取消".into(),
+                            value: "cancel".into(),
+                            style: Some("danger".into()),
+                        },
+                    ])
+                };
+
                 return ToolExecResult::ConfirmationRequired {
                     tool_name: "export_invoices_with_template".to_owned(),
-                    arguments: args.clone(),
+                    arguments: confirm_args,
                     message: format!(
-                        "将按模板 {} 的表头保留原格式导出 {row_count} 张发票，字段: {column_desc}。请选择保存位置。",
-                        attachment.original_name
+                        "将按模板 {} 导出 {row_count} 张发票。\n字段映射:\n{}{}",
+                        attachment.original_name,
+                        column_desc.join("\n"),
+                        warning_text,
                     ),
+                    options,
                 };
             }
 
-            let Some(output_path) = args.get("output_path").and_then(|v| v.as_str()) else {
+            // Handle choice from options
+            let choice = args
+                .get("choice")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if choice == "cancel" {
+                return ToolExecResult::Success {
+                    content: "用户取消了导出".to_owned(),
+                };
+            }
+
+            // Determine output path
+            let output_path = if choice == "desktop" {
+                let desktop = dirs::desktop_dir().unwrap_or_else(|| sessions_dir.clone());
+                let filename = format!(
+                    "发票导出_{}.xlsx",
+                    chrono::Local::now().format("%Y%m%d_%H%M%S")
+                );
+                desktop.join(filename).to_string_lossy().into_owned()
+            } else if let Some(p) = args.get("output_path").and_then(|v| v.as_str()) {
+                p.to_owned()
+            } else {
                 return ToolExecResult::Error {
                     message: "缺少 output_path 参数".to_owned(),
                 };
             };
+
+            // Write to temp directory first
+            let temp_dir = match paths::session_temp_dir(&sessions_dir, &session_uuid) {
+                Ok(d) => d,
+                Err(e) => return ToolExecResult::Error {
+                    message: format!("创建临时目录失败: {e}"),
+                },
+            };
+            let temp_filename = std::path::Path::new(&output_path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let temp_path = temp_dir.join(&temp_filename).to_string_lossy().into_owned();
             let template_path = &attachment.storage_path;
             let conn = db.lock().expect("db lock");
             let rows = template_adapter::load_invoices(
@@ -2580,19 +2734,37 @@ fn make_tool_executor(
                 rows: &rows,
                 column_map: &column_map,
             };
-            match crate::template_engine::TemplateEngine::export(
+            // Export to temp path first
+            match crate::template_engine::TemplateEngine::export_with_plan(
                 template_path,
-                output_path,
+                &temp_path,
                 &source,
-                &template_adapter::label_matcher,
+                &plan,
             ) {
                 Ok(te_result) => {
+                    // Move temp file to final destination
+                    let final_path = if temp_path != output_path {
+                        match std::fs::rename(&temp_path, &output_path) {
+                            Ok(_) => output_path.clone(),
+                            Err(_) => {
+                                // Fallback: copy + delete
+                                match std::fs::copy(&temp_path, &output_path)
+                                    .and_then(|_| std::fs::remove_file(&temp_path))
+                                {
+                                    Ok(_) => output_path.clone(),
+                                    Err(_) => temp_path.clone(), // Keep in temp if move fails
+                                }
+                            }
+                        }
+                    } else {
+                        output_path.clone()
+                    };
                     let result = ExportResult {
-                        file_path: te_result.file_path,
+                        file_path: final_path,
                         row_count: te_result.row_count,
                         format: "xlsx".to_owned(),
                         byte_size: te_result.byte_size,
-                        columns: column_map.iter().map(|(_, c)| c.label.to_owned()).collect(),
+                        columns: plan.columns.iter().map(|c| c.label.clone()).collect(),
                     };
                     let artifact = record_export_artifact(
                         &conn,
@@ -2684,13 +2856,66 @@ fn make_tool_executor(
                 let desc = format!(
                     "将导出{scope}为 {format} 格式，{column_desc}{date_desc}。请选择保存位置。"
                 );
+
+                let has_user_path = args
+                    .get("output_path")
+                    .and_then(|v| v.as_str())
+                    .is_some();
+                let options = if has_user_path {
+                    None
+                } else {
+                    Some(vec![
+                        crate::agent::ConfirmOption {
+                            label: "保存到桌面".into(),
+                            value: "desktop".into(),
+                            style: Some("primary".into()),
+                        },
+                        crate::agent::ConfirmOption {
+                            label: "选择位置...".into(),
+                            value: "pick_path".into(),
+                            style: Some("secondary".into()),
+                        },
+                        crate::agent::ConfirmOption {
+                            label: "取消".into(),
+                            value: "cancel".into(),
+                            style: Some("danger".into()),
+                        },
+                    ])
+                };
+
                 return ToolExecResult::ConfirmationRequired {
                     tool_name: "export_invoices".to_owned(),
                     arguments: args.clone(),
                     message: desc,
+                    options,
                 };
             }
-            let Some(output_path) = args.get("output_path").and_then(|v| v.as_str()) else {
+
+            // Handle choice from options
+            let choice = args
+                .get("choice")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if choice == "cancel" {
+                return ToolExecResult::Success {
+                    content: "用户取消了导出".to_owned(),
+                };
+            }
+
+            // Determine output path
+            let output_path = if choice == "desktop" {
+                let desktop = dirs::desktop_dir().unwrap_or_else(|| sessions_dir.clone());
+                let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("csv");
+                let ext = if format == "xlsx" { "xlsx" } else { "csv" };
+                let filename = format!(
+                    "发票导出_{}.{}",
+                    chrono::Local::now().format("%Y%m%d_%H%M%S"),
+                    ext
+                );
+                desktop.join(filename).to_string_lossy().into_owned()
+            } else if let Some(p) = args.get("output_path").and_then(|v| v.as_str()) {
+                p.to_owned()
+            } else {
                 return ToolExecResult::Error {
                     message: "缺少 output_path 参数".to_owned(),
                 };
@@ -2700,6 +2925,22 @@ fn make_tool_executor(
                 .and_then(|v| v.as_str())
                 .unwrap_or("csv")
                 .to_owned();
+
+            // Write to temp directory first
+            let temp_dir = match paths::session_temp_dir(&sessions_dir, &session_uuid) {
+                Ok(d) => d,
+                Err(e) => return ToolExecResult::Error {
+                    message: format!("创建临时目录失败: {e}"),
+                },
+            };
+            let ext = if format == "xlsx" { "xlsx" } else { "csv" };
+            let temp_filename = format!(
+                "发票导出_{}.{}",
+                chrono::Local::now().format("%Y%m%d_%H%M%S"),
+                ext
+            );
+            let temp_path = temp_dir.join(&temp_filename).to_string_lossy().into_owned();
+
             let invoice_ids: Option<Vec<i64>> = args
                 .get("invoice_ids")
                 .and_then(|v| v.as_array())
@@ -2707,7 +2948,7 @@ fn make_tool_executor(
             let columns: Option<Vec<String>> = json_string_vec(args, "columns");
             let request = ExportInvoicesRequest {
                 format,
-                output_path: output_path.to_owned(),
+                output_path: temp_path.clone(),
                 invoice_ids,
                 columns,
                 date_from: args
@@ -2731,6 +2972,24 @@ fn make_tool_executor(
                 };
             match export_invoices(&conn, request) {
                 Ok(result) => {
+                    // Move temp file to final destination
+                    let final_path = if temp_path != output_path {
+                        match std::fs::rename(&temp_path, &output_path) {
+                            Ok(_) => output_path.clone(),
+                            Err(_) => {
+                                match std::fs::copy(&temp_path, &output_path)
+                                    .and_then(|_| std::fs::remove_file(&temp_path))
+                                {
+                                    Ok(_) => output_path.clone(),
+                                    Err(_) => temp_path.clone(),
+                                }
+                            }
+                        }
+                    } else {
+                        output_path.clone()
+                    };
+                    let mut result = result;
+                    result.file_path = final_path;
                     let count = result.row_count;
                     let format = &result.format;
                     if let Err(e) = event::record_agent_event(
@@ -2810,6 +3069,7 @@ fn make_tool_executor(
                         "将发票 {:?} 合并到发票 #{}，是否确认？",
                         source_ids, target_id
                     ),
+                    options: None,
                 };
             }
             let target_id = args
@@ -2847,6 +3107,7 @@ fn make_tool_executor(
                     tool_name: "export_pdf_report".to_owned(),
                     arguments: args.clone(),
                     message: format!("将导出 {count} 张发票的 PDF 报表，是否确认？"),
+                                    options: None,
                 };
             }
             let invoice_ids: Option<Vec<i64>> = args
@@ -2896,6 +3157,7 @@ fn make_tool_executor(
                     tool_name: "update_invoice".to_owned(),
                     arguments: args.clone(),
                     message: format!("将更新发票 #{invoice_id} ({seller}) 的字段信息，是否确认？"),
+                                    options: None,
                 };
             }
             let request: UpdateInvoiceRequest = match serde_json::from_value(args.clone()) {
@@ -2948,6 +3210,7 @@ fn make_tool_executor(
                     tool_name: "set_badge_config".to_owned(),
                     arguments: args.clone(),
                     message: "将更新自定义标签配置（替换所有分组和选项），是否确认？".to_owned(),
+                                    options: None,
                 };
             }
             let config: BadgeConfig = match serde_json::from_value(
@@ -3013,6 +3276,7 @@ fn make_tool_executor(
                     message: format!(
                         "将设置发票 #{invoice_id} 的标签 {group} = {value}，是否确认？"
                     ),
+                                    options: None,
                 };
             }
             let Some(invoice_id) = args.get("invoice_id").and_then(|v| v.as_i64()) else {
@@ -3057,6 +3321,7 @@ fn make_tool_executor(
                     tool_name: "set_price_config".to_owned(),
                     arguments: args.clone(),
                     message: "将更新 LLM 价格配置，是否确认？".to_owned(),
+                                    options: None,
                 };
             }
             let config: PriceConfig = match serde_json::from_value(
@@ -3125,6 +3390,7 @@ fn make_tool_executor(
                     tool_name: "export_logs".to_owned(),
                     arguments: args.clone(),
                     message: "将导出应用日志文件，请选择保存位置。".to_owned(),
+                                    options: None,
                 };
             }
             let Some(output_path) = args.get("output_path").and_then(|v| v.as_str()) else {
@@ -3219,6 +3485,7 @@ fn make_tool_executor(
                     tool_name: "export_backup".to_owned(),
                     arguments: args.clone(),
                     message: "将导出数据库和配置文件的备份包，请选择保存位置。".to_owned(),
+                                    options: None,
                 };
             }
             let Some(output_path) = args.get("output_path").and_then(|v| v.as_str()) else {
@@ -3271,6 +3538,7 @@ fn make_tool_executor(
                     tool_name: "cleanup_storage".to_owned(),
                     arguments: args.clone(),
                     message: "将清理孤立文件和过期数据以释放存储空间，是否确认？".to_owned(),
+                                    options: None,
                 };
             }
             let conn = db.lock().expect("db lock");

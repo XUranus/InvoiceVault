@@ -1,7 +1,7 @@
 use super::ast::{MergeCell, RowAst, TemplateAst};
 use super::cloner;
 use super::ir::*;
-use super::region::{Region, RegionKind};
+use super::region::{Region, RegionKind, SUMMARY_MARKERS};
 use super::strings::SharedStringPool;
 use super::TemplateError;
 
@@ -306,10 +306,6 @@ fn build_static_rows(rows: &[RowAst]) -> Vec<RowIR> {
 fn row_has_values(row: &RowAst) -> bool {
     row.cells.iter().any(|c| c.raw_value.is_some())
 }
-
-const SUMMARY_MARKERS: &[&str] = &[
-    "小 计", "小计", "合 计", "合计", "总计", "总 计", "汇总", "小  计", "合  计",
-];
 
 fn row_contains_summary_marker(row: &RowAst, shared_strings: &[String]) -> bool {
     row.cells.iter().any(|cell| {

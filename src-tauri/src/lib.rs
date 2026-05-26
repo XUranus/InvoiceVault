@@ -1419,6 +1419,18 @@ fn delete_agent_artifact(
 }
 
 #[tauri::command]
+fn move_export_file(source_path: String, dest_path: String) -> Result<(), String> {
+    std::fs::rename(&source_path, &dest_path).map_err(|e| {
+        // Fallback: copy + delete (works across filesystems)
+        std::fs::copy(&source_path, &dest_path)
+            .and_then(|_| std::fs::remove_file(&source_path))
+            .map_err(|e2| format!("移动文件失败: {e2}"))
+            .err()
+            .unwrap_or_else(|| e.to_string())
+    })
+}
+
+#[tauri::command]
 async fn confirm_agent_action(
     state: State<'_, AppState>,
     request: ConfirmRequest,
@@ -2057,6 +2069,7 @@ pub fn run() {
             open_agent_artifact_file,
             open_agent_artifact_folder,
             delete_agent_artifact,
+            move_export_file,
             confirm_agent_action,
             confirm_agent_action_stream,
             generate_session_title,

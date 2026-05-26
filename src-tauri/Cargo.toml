@@ -55,6 +55,7 @@ ndarray = { version = "0.17", features = ["std"] }
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 hf-hub = { version = "0.4", features = ["tokio", "rustls-tls"] }
 dirs = "6"
+uuid = { version = "1", features = ["v4"] }
 printpdf = { version = "0.9", default-features = false, features = ["images", "jpeg", "png", "text_layout"] }
 scnetocr = { git = "https://github.com/XUranus/scnetocr-rs" }
 

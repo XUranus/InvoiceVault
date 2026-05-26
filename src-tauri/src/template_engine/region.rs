@@ -135,7 +135,7 @@ fn row_has_values(row: &super::ast::RowAst) -> bool {
 }
 
 /// Summary markers — Chinese labels for subtotal/total rows.
-const SUMMARY_MARKERS: &[&str] = &[
+pub(crate) const SUMMARY_MARKERS: &[&str] = &[
     "小 计", "小计", "合 计", "合计", "总计", "总 计", "汇总", "小  计", "合  计",
 ];
 
@@ -169,7 +169,7 @@ fn row_text_values(row: &super::ast::RowAst, shared_strings: &[String]) -> Vec<S
 }
 
 /// Resolve the display text of a cell.
-fn resolve_cell_text(cell: &super::ast::CellAst, shared_strings: &[String]) -> String {
+pub(crate) fn resolve_cell_text(cell: &super::ast::CellAst, shared_strings: &[String]) -> String {
     match cell.cell_type.as_deref() {
         Some("s") => cell
             .raw_value

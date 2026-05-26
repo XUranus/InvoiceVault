@@ -11,7 +11,7 @@ import { useAgentStore } from "../hooks/useAgentStore";
 
 interface FileListProps {
   artifacts: AgentArtifact[];
-  onSelect: (id: number) => void;
+  onSelect?: (id: number) => void;
 }
 
 export function FileList({ artifacts, onSelect }: FileListProps) {
@@ -87,7 +87,7 @@ export function FileList({ artifacts, onSelect }: FileListProps) {
             backgroundColor: "var(--color-surface-subtle)",
             border: "1px solid var(--color-border)",
           }}
-          onClick={() => onSelect(artifact.id)}
+          onClick={() => onSelect?.(artifact.id)}
           whileHover={{ borderColor: "var(--color-primary)" }}
         >
           <div className="flex items-start gap-2">
