@@ -114,7 +114,7 @@ fn parse_sheet(name: &str, path: &str, xml: &str, shared_strings: &[String]) -> 
         (xml.as_ref(), "")
     };
     let xml_after_sheet_data = if let Some(end) = after.find("</sheetData>") {
-        after[end + "</sheetData>".len()..].to_owned()
+        strip_merge_cells_block(&after[end + "</sheetData>".len()..])
     } else {
         String::new()
     };
@@ -278,6 +278,17 @@ fn parse_merge_cells(xml: &str) -> Vec<MergeCell> {
     }
 
     merges
+}
+
+fn strip_merge_cells_block(xml: &str) -> String {
+    let Some(start) = xml.find("<mergeCells") else {
+        return xml.to_owned();
+    };
+    let Some(end_offset) = xml[start..].find("</mergeCells>") else {
+        return xml.to_owned();
+    };
+    let end = start + end_offset + "</mergeCells>".len();
+    format!("{}{}", &xml[..start], &xml[end..])
 }
 
 /// Parse a merge reference like "A1:C3" into a MergeCell.

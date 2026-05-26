@@ -96,7 +96,14 @@ fn find_sheet_index(name: &str, _sheet_count: usize) -> Option<usize> {
 
 /// Render a SheetIR back to sheet XML.
 fn render_sheet_xml(sheet: &SheetIR, strings: &mut SharedStringPool) -> String {
-    let mut xml = sheet.xml_before_sheet_data.clone();
+    let max_row = sheet.rows.iter().map(|row| row.row_num).max().unwrap_or(1);
+    let max_col = sheet
+        .rows
+        .iter()
+        .flat_map(|row| row.cells.iter().map(|cell| cell.col))
+        .max()
+        .unwrap_or(0);
+    let mut xml = update_dimension_ref(&sheet.xml_before_sheet_data, max_row, max_col);
     xml.push_str("<sheetData>");
 
     for row in &sheet.rows {
@@ -122,6 +129,32 @@ fn render_sheet_xml(sheet: &SheetIR, strings: &mut SharedStringPool) -> String {
 
     xml.push_str(&sheet.xml_after_sheet_data);
     xml
+}
+
+fn update_dimension_ref(xml_before_sheet_data: &str, max_row: u32, max_col: usize) -> String {
+    let new_ref = format!("A1:{}{}", col_index_to_letter(max_col), max_row.max(1));
+    let Some(dim_start) = xml_before_sheet_data.find("<dimension") else {
+        return xml_before_sheet_data.to_owned();
+    };
+    let Some(tag_end_offset) = xml_before_sheet_data[dim_start..].find('>') else {
+        return xml_before_sheet_data.to_owned();
+    };
+    let tag_end = dim_start + tag_end_offset + 1;
+    let tag = &xml_before_sheet_data[dim_start..tag_end];
+    let Some(ref_start_offset) = tag.find("ref=\"") else {
+        return xml_before_sheet_data.to_owned();
+    };
+    let value_start = dim_start + ref_start_offset + "ref=\"".len();
+    let Some(value_end_offset) = xml_before_sheet_data[value_start..].find('"') else {
+        return xml_before_sheet_data.to_owned();
+    };
+    let value_end = value_start + value_end_offset;
+    format!(
+        "{}{}{}",
+        &xml_before_sheet_data[..value_start],
+        new_ref,
+        &xml_before_sheet_data[value_end..]
+    )
 }
 
 /// Render a single RowIR to <row>...</row> XML.
@@ -164,6 +197,22 @@ fn render_row_xml(row: &RowIR, strings: &mut SharedStringPool) -> String {
 
 /// Render a CellIR to <c>...</c> XML.
 fn render_cell_xml(cell: &CellIR, row_num: u32, strings: &mut SharedStringPool) -> String {
+    if let Some(formula) = &cell.formula {
+        let ref_str = format!("{}{}", col_index_to_letter(cell.col), row_num);
+        let style_attr = cell
+            .style_index
+            .map(|s| format!(r#" s="{s}""#))
+            .unwrap_or_default();
+        let cached_value = match &cell.value {
+            CellValue::Number(n) => format!("<v>{n}</v>"),
+            _ => String::new(),
+        };
+        return format!(
+            r#"<c r="{ref_str}"{style_attr}><f>{}</f>{cached_value}</c>"#,
+            xml_escape(formula),
+        );
+    }
+
     match &cell.value {
         CellValue::Preserve(ast_cell) => {
             // For static rows, emit raw XML but update row number if needed
@@ -172,7 +221,9 @@ fn render_cell_xml(cell: &CellIR, row_num: u32, strings: &mut SharedStringPool) 
             } else {
                 // Update cell reference with new row number
                 let new_ref = format!("{}{}", col_index_to_letter(ast_cell.col), row_num);
-                replace_cell_ref(&ast_cell.raw_xml, &new_ref)
+                let raw = replace_cell_ref(&ast_cell.raw_xml, &new_ref);
+                let offset = row_num as i32 - ast_cell.row as i32;
+                shift_formula_refs(&raw, offset)
             }
         }
         CellValue::String(s) => {
@@ -192,7 +243,48 @@ fn render_cell_xml(cell: &CellIR, row_num: u32, strings: &mut SharedStringPool) 
                 .unwrap_or_default();
             format!(r#"<c r="{ref_str}"{style_attr}><v>{n}</v></c>"#)
         }
+        CellValue::Blank => {
+            let ref_str = format!("{}{}", col_index_to_letter(cell.col), row_num);
+            let style_attr = cell
+                .style_index
+                .map(|s| format!(r#" s="{s}""#))
+                .unwrap_or_default();
+            format!(r#"<c r="{ref_str}"{style_attr}/>"#)
+        }
     }
+}
+
+fn shift_formula_refs(raw_xml: &str, offset: i32) -> String {
+    if offset == 0 {
+        return raw_xml.to_owned();
+    }
+
+    let Some(start_tag_pos) = raw_xml.find("<f") else {
+        return raw_xml.to_owned();
+    };
+    let Some(content_start_offset) = raw_xml[start_tag_pos..].find('>') else {
+        return raw_xml.to_owned();
+    };
+    let content_start = start_tag_pos + content_start_offset + 1;
+    let Some(content_end_offset) = raw_xml[content_start..].find("</f>") else {
+        return raw_xml.to_owned();
+    };
+    let content_end = content_start + content_end_offset;
+    let formula = &raw_xml[content_start..content_end];
+    let shifted = super::cloner::shift_formula_row(formula, offset);
+    format!(
+        "{}{}{}",
+        &raw_xml[..content_start],
+        xml_escape(&shifted),
+        &raw_xml[content_end..]
+    )
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Extract the row number from a <row r="N" ...> tag.

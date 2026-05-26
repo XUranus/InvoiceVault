@@ -14,6 +14,16 @@ pub trait DataSource {
     /// Get a cell value for a given row index and column key.
     /// Returns None if the key is not available for this row.
     fn cell_value(&self, row_index: usize, col_key: &str) -> Option<DataValue>;
+
+    /// Whether this column should be included in generated summary formulas.
+    fn is_numeric_column(&self, col_key: &str) -> bool {
+        (0..self.row_count()).any(|row_index| {
+            matches!(
+                self.cell_value(row_index, col_key),
+                Some(DataValue::Number(_))
+            )
+        })
+    }
 }
 
 /// A typed cell value from the data source.
@@ -78,27 +88,13 @@ pub fn bind(
         // Detect sequence columns (columns where the template data row has value "1")
         let seq_cols = detect_sequence_columns(template_row.as_ref());
 
-        // The clone range: data_start to (summary_start - 1) or data_end
+        // The clone range is the template's data capacity, including
+        // preformatted blank placeholder rows before summary/footer rows.
         let clone_end = summary_start.map(|s| s - 1).unwrap_or(data_end);
-
         let data_count = source.row_count();
-        let row_offset = if data_count > 0 {
-            // Rows from clone_end+1 to data_end will be shifted by (data_count - number_of_cloned_template_rows)
-            let template_data_rows = sheet
-                .rows
-                .iter()
-                .filter(|r| r.row_num >= data_start && r.row_num <= clone_end && row_has_values(r))
-                .count();
-            data_count as i32 - template_data_rows as i32
-        } else {
-            // No data: remove template data rows
-            let template_data_rows = sheet
-                .rows
-                .iter()
-                .filter(|r| r.row_num >= data_start && r.row_num <= clone_end && row_has_values(r))
-                .count();
-            -(template_data_rows as i32)
-        };
+        let template_capacity = clone_end.saturating_sub(data_start).saturating_add(1) as usize;
+        let output_data_slots = data_count.max(template_capacity);
+        let row_offset = output_data_slots as i32 - template_capacity as i32;
 
         let mut ir_rows = Vec::new();
 
@@ -114,52 +110,99 @@ pub fn bind(
             ir_rows.push(build_static_row(header_row));
         }
 
-        // 3. Data rows (cloned from template)
+        let template_rows_in_clone_range: Vec<&RowAst> = sheet
+            .rows
+            .iter()
+            .filter(|r| r.row_num >= data_start && r.row_num <= clone_end)
+            .collect();
+
+        // 3. Data rows plus any preformatted blank placeholder rows.
         if let Some(ref tmpl) = template_row {
-            for data_idx in 0..data_count {
-                let target_row_num = data_start + data_idx as u32;
-                let values = column_map.iter().filter_map(|(col_idx, key)| {
-                    source.cell_value(data_idx, key).map(|v| {
-                        let cv = match v {
-                            DataValue::String(s) => CellValue::String(s),
-                            DataValue::Number(n) => CellValue::Number(n),
-                        };
-                        (*col_idx, cv)
-                    })
-                });
-                let mut cloned = cloner::clone_row_with_values(tmpl, target_row_num, values);
+            for slot_idx in 0..output_data_slots {
+                let target_row_num = data_start + slot_idx as u32;
+                let style_row = template_rows_in_clone_range
+                    .get(slot_idx)
+                    .copied()
+                    .unwrap_or(tmpl);
 
-                // Auto-fill sequence columns
-                for &seq_col in &seq_cols {
-                    if let Some(cell) = cloned.cells.iter_mut().find(|c| c.col == seq_col) {
-                        cell.value = CellValue::Number((data_idx + 1) as f64);
+                if slot_idx < data_count {
+                    let values = column_map.iter().filter_map(|(col_idx, key)| {
+                        source.cell_value(slot_idx, key).map(|v| {
+                            let cv = match v {
+                                DataValue::String(s) => CellValue::String(s),
+                                DataValue::Number(n) => CellValue::Number(n),
+                            };
+                            (*col_idx, cv)
+                        })
+                    });
+                    let mut cloned =
+                        cloner::clone_row_with_values(style_row, target_row_num, values);
+
+                    // Auto-fill sequence columns.
+                    for &seq_col in &seq_cols {
+                        if let Some(cell) = cloned.cells.iter_mut().find(|c| c.col == seq_col) {
+                            cell.value = CellValue::Number((slot_idx + 1) as f64);
+                            cell.formula = None;
+                        }
                     }
-                }
 
-                ir_rows.push(cloned);
+                    ir_rows.push(cloned);
+                } else {
+                    let mut blank = cloner::clone_blank_row(style_row, target_row_num);
+                    for &seq_col in &seq_cols {
+                        if let Some(cell) = blank.cells.iter_mut().find(|c| c.col == seq_col) {
+                            cell.value = CellValue::Blank;
+                            cell.formula = None;
+                        }
+                    }
+                    ir_rows.push(blank);
+                }
             }
         }
+
+        let numeric_summary_cols: Vec<(usize, f64)> = column_map
+            .iter()
+            .filter_map(|(col_idx, key)| {
+                if !source.is_numeric_column(key) {
+                    return None;
+                }
+                let total = (0..data_count)
+                    .filter_map(|row_index| match source.cell_value(row_index, key) {
+                        Some(DataValue::Number(value)) => Some(value),
+                        _ => None,
+                    })
+                    .sum();
+                Some((*col_idx, total))
+            })
+            .collect();
+        let summary_range_end = data_start + output_data_slots.saturating_sub(1) as u32;
 
         // 4. Rows after data clone range: summary rows + footer + other static rows
         for row in &sheet.rows {
             if row.row_num <= clone_end {
-                continue; // already handled (data rows or skipped empty rows)
+                continue; // already handled (data rows or preserved placeholder rows)
             }
             if row.row_num > data_end {
                 break; // beyond the region
             }
 
-            // Summary rows and empty rows in the gap: shift down
-            if row_has_values(row) || row_has_formulas(row) {
-                let shifted_num = (row.row_num as i32 + row_offset).max(1) as u32;
-                let mut shifted = build_static_row(row);
-                shifted.row_num = shifted_num;
-                for cell in &mut shifted.cells {
-                    cell.row = shifted_num;
-                }
-                ir_rows.push(shifted);
+            let shifted_num = (row.row_num as i32 + row_offset).max(1) as u32;
+            let mut shifted = build_static_row(row);
+            shifted.row_num = shifted_num;
+            for cell in &mut shifted.cells {
+                cell.row = shifted_num;
             }
-            // Empty rows (no values, no formulas) are dropped — they're template placeholders
+            if summary_start.is_some_and(|start| row.row_num >= start)
+                && row_contains_summary_marker(row, &ast.shared_strings)
+            {
+                apply_summary_formulas(
+                    &mut shifted,
+                    &numeric_summary_cols,
+                    data_start,
+                    summary_range_end,
+                );
+            }
+            ir_rows.push(shifted);
         }
 
         // 5. Rows after the data region (footer etc.)
@@ -176,7 +219,7 @@ pub fn bind(
         }
 
         // 6. Shift merge cells
-        let merge_cells = shift_merges(&sheet.merge_cells, data_start, data_end, row_offset);
+        let merge_cells = shift_merges(&sheet.merge_cells, data_start, clone_end, row_offset);
 
         ir_sheets.push(SheetIR {
             sheet_index: sheet_idx,
@@ -194,6 +237,34 @@ pub fn bind(
         shared_strings,
         passthrough_entries: ast.other_entries.clone(),
     })
+}
+
+fn apply_summary_formulas(
+    row: &mut RowIR,
+    numeric_cols: &[(usize, f64)],
+    data_start: u32,
+    data_end: u32,
+) {
+    if data_end < data_start {
+        return;
+    }
+
+    let mut changed = false;
+    for &(col, total) in numeric_cols {
+        let Some(cell) = row.cells.iter_mut().find(|cell| cell.col == col) else {
+            continue;
+        };
+        let col_letter = super::writer::col_index_to_letter(col);
+        cell.formula = Some(format!(
+            "SUM({col_letter}{data_start}:{col_letter}{data_end})"
+        ));
+        cell.value = CellValue::Number(total);
+        changed = true;
+    }
+
+    if changed {
+        row.raw_row_xml = None;
+    }
 }
 
 /// Build a static RowIR from a RowAst (preserving all cells as-is).
@@ -221,7 +292,7 @@ fn build_static_row(row: &RowAst) -> RowIR {
         row_num: row.row_num,
         cells,
         is_data: false,
-        template_row_header: None,
+        template_row_header: Some(row.raw_xml_header.clone()),
         raw_row_xml: Some(raw),
     }
 }
@@ -236,9 +307,27 @@ fn row_has_values(row: &RowAst) -> bool {
     row.cells.iter().any(|c| c.raw_value.is_some())
 }
 
-/// Check if a row has at least one cell with a formula in its raw XML.
-fn row_has_formulas(row: &RowAst) -> bool {
-    row.cells.iter().any(|c| c.raw_xml.contains("<f"))
+const SUMMARY_MARKERS: &[&str] = &[
+    "小 计", "小计", "合 计", "合计", "总计", "总 计", "汇总", "小  计", "合  计",
+];
+
+fn row_contains_summary_marker(row: &RowAst, shared_strings: &[String]) -> bool {
+    row.cells.iter().any(|cell| {
+        let Some(raw_value) = cell.raw_value.as_deref() else {
+            return false;
+        };
+        let text = if cell.cell_type.as_deref() == Some("s") {
+            raw_value
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| shared_strings.get(index))
+                .map(String::as_str)
+                .unwrap_or("")
+        } else {
+            raw_value
+        };
+        SUMMARY_MARKERS.iter().any(|marker| text.contains(marker))
+    })
 }
 
 /// Detect sequence columns: columns where the template data row has a numeric value of 1.
@@ -250,8 +339,7 @@ fn detect_sequence_columns(template_row: Option<&RowAst>) -> Vec<usize> {
     let mut seq_cols = Vec::new();
     for cell in &row.cells {
         // Numeric cells: no type attribute (default) or explicit t="n"
-        let is_numeric = cell.cell_type.is_none()
-            || cell.cell_type.as_deref() == Some("n");
+        let is_numeric = cell.cell_type.is_none() || cell.cell_type.as_deref() == Some("n");
         if is_numeric {
             if let Some(ref val) = cell.raw_value {
                 if val.trim() == "1" {

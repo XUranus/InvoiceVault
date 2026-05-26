@@ -5,6 +5,14 @@ interface JsonHighlightProps {
   maxHeight?: number;
 }
 
+function isCommaElement(node: React.ReactNode): boolean {
+  return (
+    React.isValidElement<{ children?: React.ReactNode }>(node) &&
+    typeof node.props.children === "string" &&
+    node.props.children.includes(",")
+  );
+}
+
 export function JsonHighlight({ data, maxHeight = 400 }: JsonHighlightProps) {
   const keyRef = React.useRef(0);
 
@@ -73,10 +81,7 @@ export function JsonHighlight({ data, maxHeight = 400 }: JsonHighlightProps) {
         if (nodes.length >= 2) {
           const last = nodes[nodes.length - 1];
           const secondLast = nodes[nodes.length - 2];
-          if (
-            React.isValidElement(last) && last.type === "br" &&
-            React.isValidElement(secondLast) && typeof secondLast.props.children === "string" && secondLast.props.children.includes(",")
-          ) {
+          if (React.isValidElement(last) && last.type === "br" && isCommaElement(secondLast)) {
             nodes.length -= 2;
             nodes.push(<br key={k()} />);
           }
@@ -129,10 +134,7 @@ export function JsonHighlight({ data, maxHeight = 400 }: JsonHighlightProps) {
         if (nodes.length >= 2) {
           const last = nodes[nodes.length - 1];
           const secondLast = nodes[nodes.length - 2];
-          if (
-            React.isValidElement(last) && last.type === "br" &&
-            React.isValidElement(secondLast) && typeof secondLast.props.children === "string" && secondLast.props.children.includes(",")
-          ) {
+          if (React.isValidElement(last) && last.type === "br" && isCommaElement(secondLast)) {
             nodes.length -= 2;
             nodes.push(<br key={k()} />);
           }

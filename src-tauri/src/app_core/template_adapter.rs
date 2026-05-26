@@ -67,6 +67,12 @@ impl DataSource for InvoiceDataSource<'_> {
             Some(DataValue::String(val))
         }
     }
+
+    fn is_numeric_column(&self, col_key: &str) -> bool {
+        self.column_map
+            .iter()
+            .any(|(_, col_def)| col_def.key == col_key && col_def.numeric)
+    }
 }
 
 /// Load invoices from the database and return them as InvoiceRow for template export.

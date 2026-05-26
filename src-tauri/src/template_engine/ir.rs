@@ -8,6 +8,8 @@ pub enum CellValue {
     String(String),
     /// Numeric value — written directly as <v>N</v>.
     Number(f64),
+    /// Empty cell that keeps row/cell style but clears any template sample value.
+    Blank,
     /// Preserve the original cell as-is (for header/static rows).
     Preserve(CellAst),
 }

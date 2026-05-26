@@ -14,16 +14,21 @@ pub fn clone_row_with_values(
 ) -> RowIR {
     let value_map: HashMap<usize, CellValue> = values.collect();
 
-    // Start by cloning all template cells as Preserve
+    // Start by cloning all template cells as blank cells, preserving style but
+    // clearing sample values from the template data area.
     let mut cells: Vec<CellIR> = template_row
         .cells
         .iter()
-        .map(|c| CellIR {
-            col: c.col,
-            row: target_row_num,
-            value: CellValue::Preserve(c.clone()),
-            style_index: c.style_index,
-            formula: None,
+        .map(|c| {
+            let formula = extract_formula_from_raw_xml(&c.raw_xml)
+                .map(|formula| shift_formula_row(&formula, target_row_num as i32 - c.row as i32));
+            CellIR {
+                col: c.col,
+                row: target_row_num,
+                value: CellValue::Blank,
+                style_index: c.style_index,
+                formula,
+            }
         })
         .collect();
 
@@ -49,25 +54,32 @@ pub fn clone_row_with_values(
         }
     }
 
-    // For formula cells NOT in the data map, propagate the formula with row offset
-    let offset = target_row_num as i32 - template_row.row_num as i32;
-    if offset != 0 {
-        for cell in cells.iter_mut() {
-            if value_map.contains_key(&cell.col) {
-                continue;
-            }
-            if let CellValue::Preserve(ref ast_cell) = cell.value {
-                // Check if the original cell has a formula in its raw XML
-                if let Some(formula) = extract_formula_from_raw_xml(&ast_cell.raw_xml) {
-                    cell.formula = Some(shift_formula_row(&formula, offset));
-                    // Keep as Preserve so the writer can handle it
-                }
-            }
-        }
-    }
-
     // Sort by column
     cells.sort_by_key(|c| c.col);
+
+    RowIR {
+        row_num: target_row_num,
+        cells,
+        is_data: true,
+        template_row_header: Some(template_row.raw_xml_header.clone()),
+        raw_row_xml: None,
+    }
+}
+
+/// Clone a template row as an empty placeholder row, keeping cell styles but
+/// removing values and formulas so old sample data cannot leak into exports.
+pub fn clone_blank_row(template_row: &RowAst, target_row_num: u32) -> RowIR {
+    let cells = template_row
+        .cells
+        .iter()
+        .map(|c| CellIR {
+            col: c.col,
+            row: target_row_num,
+            value: CellValue::Blank,
+            style_index: c.style_index,
+            formula: None,
+        })
+        .collect();
 
     RowIR {
         row_num: target_row_num,

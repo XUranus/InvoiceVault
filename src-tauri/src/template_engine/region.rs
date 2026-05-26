@@ -45,8 +45,7 @@ pub fn recognize_regions(
         {
             let data_start = header_row + 1;
             let last_content_row = find_last_content_row(&sheet.rows, data_start);
-            let summary_start =
-                find_summary_start(&sheet.rows, &ast.shared_strings, data_start);
+            let summary_start = find_summary_start(&sheet.rows, &ast.shared_strings, data_start);
             // Data ends at the row before the summary, or at the last content row
             let data_end = summary_start
                 .map(|s| s - 1)
@@ -119,18 +118,6 @@ fn find_best_header(
     }
 }
 
-/// Find the end of the data region: the last row with actual values after the header.
-/// Skips empty rows (cells with styles but no values).
-fn find_data_end(rows: &[super::ast::RowAst], header_row: u32) -> u32 {
-    let mut last_content_row = header_row;
-    for row in rows {
-        if row.row_num > header_row && row_has_values(row) {
-            last_content_row = row.row_num;
-        }
-    }
-    last_content_row
-}
-
 /// Find the last row with actual values at or after `from_row`.
 fn find_last_content_row(rows: &[super::ast::RowAst], from_row: u32) -> u32 {
     let mut last = from_row;
@@ -149,15 +136,7 @@ fn row_has_values(row: &super::ast::RowAst) -> bool {
 
 /// Summary markers — Chinese labels for subtotal/total rows.
 const SUMMARY_MARKERS: &[&str] = &[
-    "小 计",
-    "小计",
-    "合 计",
-    "合计",
-    "总计",
-    "总 计",
-    "汇总",
-    "小  计",
-    "合  计",
+    "小 计", "小计", "合 计", "合计", "总计", "总 计", "汇总", "小  计", "合  计",
 ];
 
 /// Find the first summary row (containing markers like "小计", "合计") at or after `from_row`.

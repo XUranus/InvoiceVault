@@ -376,16 +376,14 @@ async fn pick_invoice_files(app: AppHandle) -> Result<Vec<String>, String> {
 #[tauri::command]
 async fn pick_any_files(app: AppHandle) -> Result<Vec<String>, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .file()
-        .pick_files(move |paths| {
-            let selected = paths
-                .unwrap_or_default()
-                .into_iter()
-                .map(|path| path.to_string())
-                .collect::<Vec<_>>();
-            let _ = tx.send(selected);
-        });
+    app.dialog().file().pick_files(move |paths| {
+        let selected = paths
+            .unwrap_or_default()
+            .into_iter()
+            .map(|path| path.to_string())
+            .collect::<Vec<_>>();
+        let _ = tx.send(selected);
+    });
     rx.await.map_err(|err| err.to_string())
 }
 
