@@ -32,6 +32,7 @@ export function InvoiceEditForm({ detail, onSaved, onError, onStateChange }: Pro
     total_amount: detail.total_amount,
     category: detail.category,
     remarks: detail.remarks,
+    content_summary: detail.content_summary,
     confidence: detail.confidence,
     status: detail.status,
     extra_fields: parseExtraFields(detail.extra_fields),
@@ -119,6 +120,7 @@ export function InvoiceEditForm({ detail, onSaved, onError, onStateChange }: Pro
           ))}
         </select>
       </label>
+      <TextInput label="内容摘要" value={form.content_summary ?? ""} onChange={(v) => setField("content_summary", v)} error={fieldError("content_summary")} fullWidth />
       <TextInput label="备注" value={form.remarks ?? ""} onChange={(v) => setField("remarks", v)} error={fieldError("remarks")} fullWidth />
 
       <div className="edit-field field-full" style={{ flexDirection: "column", alignItems: "stretch" }}>

@@ -638,13 +638,16 @@ impl AppState {
 
                     // Best-effort embedding generation
                     if chroma_enabled && embedding_on {
-                        if let Some(ref mut engine) = *embedding_engine.lock().expect("lock") {
+                        if let Some(ref mut engine) = *embedding_engine.lock().unwrap_or_else(|e| e.into_inner()) {
                             let invoice_id = invoice.id;
                             let thumb_dir = thumbnails_dir.clone();
                             let detail = get_invoice_detail(&conn, &thumb_dir, invoice_id).ok();
                             if let Some(detail) = detail {
                                 let text = invoice_to_embedding_text(&detail);
-                                if let Ok(result) = generate_embedding(engine, &text) {
+                                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    generate_embedding(engine, &text)
+                                }));
+                                if let Ok(Ok(result)) = result {
                                     let embedding = result.embedding;
                                     let prompt_tokens = result.prompt_tokens;
                                     let total_tokens = result.total_tokens;
@@ -828,7 +831,10 @@ impl AppState {
                 let detail = get_invoice_detail(&db, &thumb_dir, invoice_id).ok();
                 if let Some(detail) = detail {
                     let text = invoice_to_embedding_text(&detail);
-                    if let Ok(result) = generate_embedding(engine, &text) {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        generate_embedding(engine, &text)
+                    }));
+                    if let Ok(Ok(result)) = result {
                         let embedding = result.embedding;
                         let prompt_tokens = result.prompt_tokens;
                         let total_tokens = result.total_tokens;
@@ -966,7 +972,10 @@ impl AppState {
                 let detail = get_invoice_detail(&db, &thumb_dir, invoice_id).ok();
                 if let Some(detail) = detail {
                     let text = invoice_to_embedding_text(&detail);
-                    if let Ok(emb_result) = generate_embedding(engine, &text) {
+                    let emb_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        generate_embedding(engine, &text)
+                    }));
+                    if let Ok(Ok(emb_result)) = emb_result {
                         let embedding = emb_result.embedding;
                         let prompt_tokens = emb_result.prompt_tokens;
                         let total_tokens = emb_result.total_tokens;

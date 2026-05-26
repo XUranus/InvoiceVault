@@ -86,7 +86,7 @@ mod tests {
                 ("开具时间", "issue_date"),
                 ("发票代码", "invoice_code"),
                 ("发票号码", "invoice_number"),
-                ("开票内容", "remarks"),
+                ("开票内容", "content_summary"),
                 ("销售方", "seller_name"),
                 ("价税合计", "total_amount"),
                 ("金额", "amount_without_tax"),

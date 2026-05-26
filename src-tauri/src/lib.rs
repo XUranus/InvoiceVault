@@ -1586,7 +1586,7 @@ async fn get_recognition_queue_status(app: AppHandle) -> Result<RecognitionQueue
     debug!("[poll] get_recognition_queue_status: start");
     let result = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let db = state.db().lock().expect("db lock");
+        let db = state.db().lock().map_err(|e| format!("db lock: {e}"))?;
         let running: i64 = db
             .query_row(
                 "SELECT COUNT(*) FROM import_jobs WHERE status = 'recognizing'",

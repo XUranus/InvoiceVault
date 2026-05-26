@@ -45,6 +45,7 @@ pub struct InvoiceSummary {
     pub updated_at: String,
     pub viewed_at: Option<String>,
     pub item_names: Option<String>,
+    pub content_summary: Option<String>,
     pub badges: Vec<InvoiceBadgeSelection>,
 }
 
@@ -105,7 +106,8 @@ pub fn search_invoices(
             issue_date, seller_name, buyer_name, currency, total_amount,
             category, source_page_range, confidence, status, duplicate_status,
             created_at, updated_at, viewed_at,
-            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names
+            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names,
+            content_summary
         FROM invoices
         WHERE 1=1 {where_clause}
         {sort_clause}
@@ -154,6 +156,7 @@ fn build_search_where(
                 OR invoice_type LIKE ?{n}
                 OR category LIKE ?{n}
                 OR remarks LIKE ?{n}
+                OR content_summary LIKE ?{n}
                 OR EXISTS (
                     SELECT 1 FROM invoice_items item
                     WHERE item.invoice_id = invoices.id
@@ -310,6 +313,7 @@ pub struct InvoiceDetail {
     pub total_amount: Option<String>,
     pub category: Option<String>,
     pub remarks: Option<String>,
+    pub content_summary: Option<String>,
     pub extra_fields: Option<String>,
     pub source_page_range: Option<String>,
     pub confidence: Option<f64>,
@@ -390,7 +394,7 @@ pub fn get_invoice_detail(
             id, raw_file_id, invoice_type, invoice_code, invoice_number,
             issue_date, seller_name, seller_tax_id, buyer_name, buyer_tax_id,
             currency, amount_without_tax, tax_amount, total_amount,
-            category, remarks, extra_fields, source_page_range, confidence, status,
+            category, remarks, content_summary, extra_fields, source_page_range, confidence, status,
             duplicate_status, created_at, updated_at, viewed_at
         FROM invoices WHERE id = ?1",
         [invoice_id],
@@ -414,18 +418,19 @@ pub fn get_invoice_detail(
                 total_amount: row.get(13)?,
                 category: row.get(14)?,
                 remarks: row.get(15)?,
-                extra_fields: row.get(16)?,
-                source_page_range: row.get(17)?,
-                confidence: row.get(18)?,
+                content_summary: row.get(16)?,
+                extra_fields: row.get(17)?,
+                source_page_range: row.get(18)?,
+                confidence: row.get(19)?,
                 status: row
-                    .get::<_, Option<String>>(19)?
+                    .get::<_, Option<String>>(20)?
                     .unwrap_or_else(|| "pending_confirmation".into()),
                 duplicate_status: row
-                    .get::<_, Option<String>>(20)?
+                    .get::<_, Option<String>>(21)?
                     .unwrap_or_else(|| "unknown".into()),
-                created_at: row.get(21)?,
-                updated_at: row.get(22)?,
-                viewed_at: row.get(23)?,
+                created_at: row.get(22)?,
+                updated_at: row.get(23)?,
+                viewed_at: row.get(24)?,
                 items: Vec::new(),
                 raw_file_name: None,
                 raw_file_mime: None,
@@ -610,6 +615,7 @@ pub struct UpdateInvoiceRequest {
     pub total_amount: Option<Option<String>>,
     pub category: Option<Option<String>>,
     pub remarks: Option<Option<String>>,
+    pub content_summary: Option<Option<String>>,
     pub confidence: Option<Option<f64>>,
     pub status: Option<Option<String>>,
     #[serde(default)]
@@ -662,6 +668,7 @@ pub fn update_invoice(
     add_field!(total_amount, request.total_amount);
     add_field!(category, request.category);
     add_field!(remarks, request.remarks);
+    add_field!(content_summary, request.content_summary);
     add_field!(confidence, request.confidence);
     add_field!(status, request.status);
 
@@ -967,6 +974,26 @@ pub enum ExtractorError {
     MergeError(String),
 }
 
+fn build_content_summary(items: &[InvoiceItemExtraction]) -> String {
+    let names: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item.name.as_deref())
+        .filter(|n| !n.is_empty())
+        .collect();
+    if names.is_empty() {
+        return String::new();
+    }
+    let joined = names.join("、");
+    if joined.len() <= 50 {
+        joined
+    } else {
+        let mut s = joined;
+        s.truncate(47);
+        s.push_str("...");
+        s
+    }
+}
+
 pub fn save_invoice_extraction(
     conn: &mut Connection,
     request: SaveInvoiceExtractionRequest,
@@ -974,12 +1001,14 @@ pub fn save_invoice_extraction(
     ensure_raw_file_exists(conn, request.raw_file_id)?;
 
     let extraction = parse_invoice_extraction_json(&request.response_json)?;
+    let content_summary = build_content_summary(&extraction.items);
     let tx = conn.transaction()?;
     let invoice_id = insert_invoice(
         &tx,
         request.raw_file_id,
         request.source_page_range.as_deref(),
         &extraction,
+        if content_summary.is_empty() { None } else { Some(content_summary.as_str()) },
     )?;
     insert_invoice_items(&tx, invoice_id, &extraction.items)?;
     insert_extraction_run(&tx, request, invoice_id)?;
@@ -1010,7 +1039,8 @@ pub fn list_invoices(conn: &Connection) -> Result<Vec<InvoiceSummary>, Extractor
             created_at,
             updated_at,
             viewed_at,
-            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names
+            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names,
+            content_summary
         FROM invoices
         ORDER BY id DESC
         LIMIT 100",
@@ -1076,6 +1106,7 @@ fn insert_invoice(
     raw_file_id: i64,
     source_page_range: Option<&str>,
     extraction: &InvoiceExtraction,
+    content_summary: Option<&str>,
 ) -> Result<i64, ExtractorError> {
     let currency = extraction.currency.as_deref().unwrap_or("CNY");
     let status = "recognized";
@@ -1097,12 +1128,13 @@ fn insert_invoice(
             total_amount,
             category,
             remarks,
+            content_summary,
             extra_fields,
             source_page_range,
             confidence,
             status,
             duplicate_status
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, 'unknown')",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 'unknown')",
         params![
             raw_file_id,
             extraction.invoice_type,
@@ -1119,6 +1151,7 @@ fn insert_invoice(
             extraction.total_amount,
             extraction.category,
             extraction.remarks,
+            content_summary,
             extra_fields_json(extraction),
             source_page_range,
             extraction.confidence,
@@ -1241,7 +1274,8 @@ fn load_invoice_summary(
             created_at,
             updated_at,
             viewed_at,
-            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names
+            (SELECT GROUP_CONCAT(DISTINCT name) FROM invoice_items WHERE invoice_id = invoices.id) AS item_names,
+            content_summary
         FROM invoices
         WHERE id = ?1",
         [invoice_id],
@@ -1274,6 +1308,7 @@ fn row_to_invoice_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceSu
         updated_at: row.get(17)?,
         viewed_at: row.get(18)?,
         item_names: row.get(19)?,
+        content_summary: row.get(20)?,
         badges: Vec::new(),
     })
 }

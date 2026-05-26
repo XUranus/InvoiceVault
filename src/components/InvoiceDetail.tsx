@@ -286,6 +286,7 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
               <Field label="税额" value={detail.tax_amount} />
               <Field label="价税合计" value={detail.total_amount} />
               <Field label="币种" value={detail.currency} />
+              <Field label="内容摘要" value={detail.content_summary} fullWidth />
               <Field label="备注" value={detail.remarks} fullWidth />
               {renderTypedExtraFields(detail.invoice_type, detail.extra_fields)}
             </div>

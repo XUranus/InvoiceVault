@@ -204,7 +204,7 @@ function StreamIndicator({
           transition={{ duration: 1, repeat: Infinity }}
         />
         <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-          连接中...
+          思考中...
         </span>
       </div>
     );

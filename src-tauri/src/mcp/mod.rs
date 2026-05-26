@@ -530,6 +530,7 @@ fn execute_tool(
                     .map(|v| v.as_str().map(String::from)),
                 category: args.get("category").map(|v| v.as_str().map(String::from)),
                 remarks: args.get("remarks").map(|v| v.as_str().map(String::from)),
+                content_summary: args.get("content_summary").map(|v| v.as_str().map(String::from)),
                 confidence: None,
                 status: args.get("status").map(|v| v.as_str().map(String::from)),
                 extra_fields: None,

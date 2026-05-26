@@ -144,6 +144,7 @@ export type InvoiceDetail = {
   total_amount: string | null;
   category: string | null;
   remarks: string | null;
+  content_summary: string | null;
   extra_fields: string | null;
   source_page_range: string | null;
   confidence: number | null;
@@ -184,6 +185,7 @@ export type UpdateInvoiceRequest = {
   total_amount?: string | null;
   category?: string | null;
   remarks?: string | null;
+  content_summary?: string | null;
   confidence?: number | null;
   status?: string | null;
   extra_fields?: Record<string, unknown> | null;

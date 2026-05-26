@@ -157,7 +157,13 @@ pub(crate) const ALL_COLUMNS: &[ColumnDef] = &[
         key: "remarks",
         label: "备注",
         numeric: false,
-        aliases: &["说明", "发票内容", "内容", "开票内容"],
+        aliases: &["说明", "备注"],
+    },
+    ColumnDef {
+        key: "content_summary",
+        label: "内容摘要",
+        numeric: false,
+        aliases: &["开票内容", "发票内容", "内容摘要", "内容"],
     },
     ColumnDef {
         key: "source_page_range",
@@ -285,6 +291,7 @@ pub(crate) struct InvoiceRow {
     pub(crate) total_amount: Option<String>,
     pub(crate) category: Option<String>,
     pub(crate) remarks: Option<String>,
+    pub(crate) content_summary: Option<String>,
     pub(crate) source_page_range: Option<String>,
     pub(crate) confidence: Option<f64>,
     pub(crate) status: String,
@@ -309,6 +316,7 @@ impl InvoiceRow {
             "total_amount" => self.total_amount.clone().unwrap_or_default(),
             "category" => self.category.clone().unwrap_or_default(),
             "remarks" => self.remarks.clone().unwrap_or_default(),
+            "content_summary" => self.content_summary.clone().unwrap_or_default(),
             "source_page_range" => self.source_page_range.clone().unwrap_or_default(),
             "confidence" => self
                 .confidence
@@ -429,7 +437,7 @@ pub(crate) fn load_invoices_for_export(
         "SELECT invoice_type, invoice_code, invoice_number, issue_date,
             seller_name, seller_tax_id, buyer_name, buyer_tax_id, currency,
             amount_without_tax, tax_amount, total_amount, category, remarks,
-            source_page_range, confidence, status, duplicate_status, created_at
+            content_summary, source_page_range, confidence, status, duplicate_status, created_at
         FROM invoices
         {}
         ORDER BY id DESC",
@@ -464,15 +472,16 @@ fn map_invoice_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceRow> {
         total_amount: row.get(11)?,
         category: row.get(12)?,
         remarks: row.get(13)?,
-        source_page_range: row.get(14)?,
-        confidence: row.get(15)?,
+        content_summary: row.get(14)?,
+        source_page_range: row.get(15)?,
+        confidence: row.get(16)?,
         status: row
-            .get::<_, Option<String>>(16)?
-            .unwrap_or_else(|| "unknown".into()),
-        duplicate_status: row
             .get::<_, Option<String>>(17)?
             .unwrap_or_else(|| "unknown".into()),
-        created_at: row.get(18)?,
+        duplicate_status: row
+            .get::<_, Option<String>>(18)?
+            .unwrap_or_else(|| "unknown".into()),
+        created_at: row.get(19)?,
     })
 }
 

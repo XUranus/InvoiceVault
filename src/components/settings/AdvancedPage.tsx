@@ -535,8 +535,8 @@ export function AdvancedPage() {
         <div className="section">
           <h3>系统信息</h3>
           <dl className="info-grid">
-            <dt>应用</dt>
-            <dd>InvoiceVault : v{appVersion || "—"}</dd>
+            <dt>应用版本</dt>
+            <dd>{appVersion || "—"}</dd>
             <dt>数据目录</dt>
             <dd>
               <button
