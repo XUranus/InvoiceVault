@@ -5,6 +5,10 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
+use crate::app_core::constants::{
+    AGENT_DEFAULT_TIMEOUT_SECS, AGENT_DEFAULT_TITLE, AGENT_HISTORY_LIMIT, AGENT_MAX_ITERATIONS,
+    AGENT_MAX_TOKENS,
+};
 use crate::llm::{
     body_to_value, headers, write_llm_audit_record, LlmAuditConfig, LlmAuditRecord, LlmError,
     LlmProviderConfig,
@@ -769,7 +773,7 @@ const SYSTEM_PROMPT: &str = r#"你是 InvoiceVault 发票处理助手，只能�
 // ---------------------------------------------------------------------------
 
 pub fn create_session(conn: &Connection, title: Option<&str>) -> Result<AgentSession, AgentError> {
-    let title = title.unwrap_or("新对话");
+    let title = title.unwrap_or(AGENT_DEFAULT_TITLE);
     let uuid = uuid::Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO agent_sessions (uuid, title) VALUES (?1, ?2)",
@@ -1231,7 +1235,7 @@ async fn send_chat_request(
         return Err(LlmError::MissingModel.into());
     }
 
-    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(60).clamp(1, 300));
+    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(AGENT_DEFAULT_TIMEOUT_SECS).clamp(1, 300));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
     let started_at = chrono::Utc::now();
     let started = std::time::Instant::now();
@@ -1254,7 +1258,7 @@ async fn send_chat_request(
         tools,
         tool_choice: "auto",
         temperature: 0.0,
-        max_tokens: 2000,
+        max_tokens: AGENT_MAX_TOKENS,
         stream: None,
     };
     let endpoint = format!("{base_url}/chat/completions");
@@ -1355,7 +1359,7 @@ async fn send_chat_request_stream(
         return Err(LlmError::MissingModel.into());
     }
 
-    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(60).clamp(1, 300));
+    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(AGENT_DEFAULT_TIMEOUT_SECS).clamp(1, 300));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
     let started_at = chrono::Utc::now();
     let started = std::time::Instant::now();
@@ -1378,7 +1382,7 @@ async fn send_chat_request_stream(
         tools,
         tool_choice: "auto",
         temperature: 0.0,
-        max_tokens: 2000,
+        max_tokens: AGENT_MAX_TOKENS,
         stream: Some(true),
     };
     let endpoint = format!("{base_url}/chat/completions");
@@ -1718,7 +1722,7 @@ async fn run_agent_turn_impl(
     // Load history for context (last 20 messages)
     let history = {
         let conn = db.lock().unwrap_or_else(|e| e.into_inner());
-        get_recent_messages(&conn, session_id, 20)?
+        get_recent_messages(&conn, session_id, AGENT_HISTORY_LIMIT)?
     };
 
     // Build initial message list
@@ -1994,9 +1998,7 @@ async fn run_agent_loop_from_inner(
     stream_sink: Option<AgentStreamSink>,
 ) -> Result<AgentResponse, AgentError> {
     let mut new_messages: Vec<AgentMessageRow> = Vec::new();
-    const MAX_ITERATIONS: usize = 20;
-
-    for _iteration in 0..MAX_ITERATIONS {
+    for _iteration in 0..AGENT_MAX_ITERATIONS {
         let response = match &stream_sink {
             Some(sink) => {
                 send_chat_request_stream(llm_messages.clone(), config, sink, audit).await?

@@ -1,3 +1,7 @@
+//! 发票导出模块：支持 CSV、Excel 和 PDF 报表格式导出。
+//!
+//! 提供发票数据的多格式导出、列配置管理、导出预览和 PDF 报表生成。
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -8,6 +12,7 @@ use printpdf::{
     Point, Pt, RawImage, Rect, Rgb, TextItem, XObjectTransform,
 };
 
+/// 发票导出请求参数。
 #[derive(Debug, Deserialize)]
 pub struct ExportInvoicesRequest {
     pub format: String,
@@ -18,6 +23,7 @@ pub struct ExportInvoicesRequest {
     pub date_to: Option<String>,
 }
 
+/// 导出预览请求参数。
 #[derive(Debug, Deserialize)]
 pub struct ExportPreviewRequest {
     pub invoice_ids: Option<Vec<i64>>,
@@ -27,6 +33,7 @@ pub struct ExportPreviewRequest {
     pub limit: Option<usize>,
 }
 
+/// 导出操作结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportResult {
     pub file_path: String,
@@ -36,6 +43,7 @@ pub struct ExportResult {
     pub columns: Vec<String>,
 }
 
+/// 导出预览结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportPreviewResult {
     pub row_count: usize,
@@ -43,6 +51,7 @@ pub struct ExportPreviewResult {
     pub sample_rows: Vec<Vec<String>>,
 }
 
+/// 导出模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
     #[error("database error: {0}")]
@@ -65,6 +74,7 @@ pub(crate) struct ColumnDef {
     pub(crate) aliases: &'static [&'static str],
 }
 
+/// 导出列信息，描述可导出字段的元数据。
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportColumnInfo {
     pub key: String,
@@ -197,6 +207,7 @@ pub(crate) const ALL_COLUMNS: &[ColumnDef] = &[
     },
 ];
 
+/// 返回所有可导出列的完整目录。
 pub fn export_column_catalog() -> Vec<ExportColumnInfo> {
     ALL_COLUMNS
         .iter()
@@ -214,6 +225,7 @@ pub fn export_column_catalog() -> Vec<ExportColumnInfo> {
         .collect()
 }
 
+/// 将用户提供的列标签或别名解析为标准列 key 列表。
 pub fn resolve_export_column_keys_from_labels(labels: &[String]) -> Vec<String> {
     let mut keys = Vec::new();
     for label in labels {
@@ -340,6 +352,7 @@ impl InvoiceRow {
     }
 }
 
+/// 将发票数据导出为 CSV 或 Excel 文件。
 pub fn export_invoices(
     conn: &Connection,
     request: ExportInvoicesRequest,
@@ -365,6 +378,7 @@ pub fn export_invoices(
     })
 }
 
+/// 预览导出结果，返回匹配行数和前几行样例数据。
 pub fn preview_export(
     conn: &Connection,
     request: ExportPreviewRequest,
@@ -621,6 +635,7 @@ const TABLE_HEADER_FIELDS: &[(&str, f32)] = &[
     ("Type", 25.0),
 ];
 
+/// PDF 报表导出请求参数。
 #[derive(Debug, Deserialize)]
 pub struct PdfReportRequest {
     pub output_path: String,
@@ -630,6 +645,7 @@ pub struct PdfReportRequest {
     pub thumbnails_dir: Option<String>,
 }
 
+/// PDF 报表导出结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct PdfReportResult {
     pub file_path: String,
@@ -637,6 +653,7 @@ pub struct PdfReportResult {
     pub byte_size: u64,
 }
 
+/// 生成 PDF 报表，包含汇总表和每张发票的详情页。
 pub fn export_pdf_report(
     conn: &Connection,
     request: PdfReportRequest,

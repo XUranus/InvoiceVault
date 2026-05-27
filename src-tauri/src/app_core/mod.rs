@@ -1,3 +1,6 @@
+//! 应用核心模块，提供全局状态管理、发票 CRUD、导入导出、
+//! 目录监控、邮件同步、Agent 会话和存储清理等功能。
+
 use std::{
     collections::HashSet,
     fs,
@@ -14,6 +17,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 mod archive;
+pub mod constants;
 mod config;
 mod fs_utils;
 mod paths;
@@ -75,42 +79,60 @@ use crate::{
     },
 };
 
-const EMBEDDING_MODEL_NAME: &str = "bge-small-zh-v1.5";
+use constants::{DIR_LOGS, DIR_MODELS, EMBEDDING_MODEL_DIR};
+const EMBEDDING_MODEL_NAME: &str = EMBEDDING_MODEL_DIR;
 
+/// 应用统一错误类型，聚合各子模块的错误。
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    /// 无法获取应用数据目录
     #[error("failed to resolve application data directory")]
     MissingAppDataDir,
+    /// I/O 操作错误
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// 数据库/存储错误
     #[error("storage error: {0}")]
     Storage(#[from] StorageError),
+    /// 文件导入错误
     #[error("import error: {0}")]
     Import(#[from] ImportError),
+    /// 发票提取错误
     #[error("extractor error: {0}")]
     Extractor(#[from] ExtractorError),
+    /// 重复检测错误
     #[error("dedupe error: {0}")]
     Dedupe(#[from] DedupeError),
+    /// 导出错误
     #[error("export error: {0}")]
     Export(#[from] ExportError),
+    /// 文档处理错误
     #[error("document error: {0}")]
     Document(#[from] DocumentError),
+    /// 目录监控错误
     #[error("watcher error: {0}")]
     Watcher(#[from] WatcherError),
+    /// 邮件同步错误
     #[error("email error: {0}")]
     Email(#[from] EmailError),
+    /// ChromaDB 向量数据库错误
     #[error("chromadb error: {0}")]
     Chroma(#[from] ChromaError),
+    /// 本地 Embedding 引擎错误
     #[error("embedding error: {0}")]
     Embedding(#[from] EmbeddingError),
+    /// Agent 会话错误
     #[error("agent error: {0}")]
     Agent(#[from] AgentError),
+    /// 事件记录错误
     #[error("event error: {0}")]
     Event(#[from] EventError),
+    /// 非法操作
     #[error("{0}")]
     InvalidOperation(String),
 }
 
+/// 应用健康状态，用于前端诊断面板展示。
 #[derive(Debug, Clone, Serialize)]
 pub struct AppHealth {
     pub app_data_dir: String,
@@ -118,6 +140,7 @@ pub struct AppHealth {
     pub migration_version: i64,
 }
 
+/// 待识别的原始文件元数据。
 #[derive(Debug, Clone, Serialize)]
 pub struct RawFileForRecognition {
     pub id: i64,
@@ -126,6 +149,7 @@ pub struct RawFileForRecognition {
     pub storage_path: PathBuf,
 }
 
+/// 识别队列状态，显示待处理和正在处理的任务数量。
 #[derive(Debug, Clone, Serialize)]
 pub struct RecognitionQueueStatus {
     pub pending: i64,
@@ -133,12 +157,14 @@ pub struct RecognitionQueueStatus {
     pub max_concurrent: usize,
 }
 
+/// 日志导出结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportLogsResult {
     pub file_path: String,
     pub byte_size: u64,
 }
 
+/// 存储清理结果，统计删除的文件和释放的空间。
 #[derive(Debug, Clone, Serialize)]
 pub struct CleanupStorageResult {
     pub files_removed: usize,
@@ -146,6 +172,7 @@ pub struct CleanupStorageResult {
     pub bytes_freed: u64,
 }
 
+/// 全量重新生成 Embedding 的结果统计。
 #[derive(Debug, Clone, Serialize)]
 pub struct RegenerateEmbeddingsResult {
     pub total_invoices: usize,
@@ -153,6 +180,7 @@ pub struct RegenerateEmbeddingsResult {
     pub failure_count: usize,
 }
 
+/// 电子表格文件检查结果，用于 Agent 读取附件内容。
 #[derive(Debug, Clone, Serialize)]
 pub struct SpreadsheetInspection {
     pub attachment_id: i64,
@@ -161,6 +189,7 @@ pub struct SpreadsheetInspection {
     pub sheets: Vec<SpreadsheetSheet>,
 }
 
+/// 工作表信息，包含表头和样本数据行。
 #[derive(Debug, Clone, Serialize)]
 pub struct SpreadsheetSheet {
     pub name: String,
@@ -169,12 +198,14 @@ pub struct SpreadsheetSheet {
     pub sample_rows: Vec<Vec<String>>,
 }
 
+/// 电子表格列定义。
 #[derive(Debug, Clone, Serialize)]
 pub struct SpreadsheetColumn {
     pub index: usize,
     pub label: String,
 }
 
+/// 将识别错误信息转为用户友好的中文提示。
 pub fn import_failure_message(error: &str) -> String {
     if error.contains("文件不含有发票") || error.contains("non-invoice") {
         "文件不含有发票".to_owned()
@@ -189,6 +220,9 @@ pub fn import_failure_message(error: &str) -> String {
     }
 }
 
+/// 应用全局状态，持有数据库连接、配置、各管理器实例和缓存。
+///
+/// 通过 Tauri 的状态管理机制注入到所有命令处理器中。
 pub struct AppState {
     app_handle: AppHandle,
     paths: AppPaths,
@@ -217,6 +251,7 @@ fn cache_key(date_from: &Option<String>, date_to: &Option<String>) -> String {
 }
 
 impl AppState {
+    /// 初始化应用状态，包括数据库迁移、配置加载和管理器创建。
     pub fn initialize(app: &AppHandle) -> Result<Self, AppError> {
         info!("[init] AppState::initialize: start");
         let app_data_dir = app
@@ -310,7 +345,7 @@ impl AppState {
             let model_dir = state
                 .paths
                 .app_data_dir
-                .join("models")
+                .join(DIR_MODELS)
                 .join(EMBEDDING_MODEL_NAME);
             if !model_dir.join("onnx").join("model_q4.onnx").exists()
                 || !model_dir.join("tokenizer.json").exists()
@@ -326,6 +361,7 @@ impl AppState {
         Ok(state)
     }
 
+    /// 尝试加载本地 Embedding 引擎（ONNX Runtime），未就绪时返回 `false`。
     pub fn load_embedding_engine_if_available(&self) -> Result<bool, AppError> {
         if !*self.embedding_enabled.lock().unwrap_or_else(|e| e.into_inner()) {
             return Ok(false);
@@ -341,7 +377,7 @@ impl AppState {
         let model_dir = self
             .paths
             .app_data_dir
-            .join("models")
+            .join(DIR_MODELS)
             .join(EMBEDDING_MODEL_NAME);
         let onnx_path = model_dir.join("onnx").join("model_q4.onnx");
         let tok_path = model_dir.join("tokenizer.json");
@@ -359,6 +395,7 @@ impl AppState {
         Ok(true)
     }
 
+    /// 返回应用健康状态，包括数据目录、数据库路径和迁移版本。
     pub fn health(&self) -> Result<AppHealth, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let migration_version = db.query_row(
@@ -374,20 +411,24 @@ impl AppState {
         })
     }
 
+    /// 恢复已启用的目录监控任务。
     pub fn resume_watchers(&self) -> Result<(), AppError> {
         self.watcher_manager
             .resume_enabled()
             .map_err(AppError::from)
     }
 
+    /// 获取应用数据目录路径。
     pub fn app_data_dir(&self) -> &Path {
         &self.paths.app_data_dir
     }
 
+    /// 获取数据库连接的共享引用。
     pub fn db(&self) -> &Arc<Mutex<Connection>> {
         &self.db
     }
 
+    /// 存储拖拽到窗口的文件路径，供前端轮询获取。
     pub fn push_dropped_files(&self, paths: Vec<String>) {
         let mut guard = self
             .pending_dropped_files
@@ -396,6 +437,7 @@ impl AppState {
         guard.extend(paths);
     }
 
+    /// 取出并清空已存储的拖拽文件路径。
     pub fn take_dropped_files(&self) -> Vec<String> {
         let mut guard = self
             .pending_dropped_files
@@ -404,6 +446,7 @@ impl AppState {
         std::mem::take(&mut *guard)
     }
 
+    /// 导入文件列表，自动去重并异步触发发票识别。
     pub fn import_files(
         &self,
         paths: Vec<String>,
@@ -786,6 +829,7 @@ impl AppState {
         });
     }
 
+    /// 分页查询导入任务列表。
     pub fn list_import_jobs(
         &self,
         page: i64,
@@ -795,11 +839,13 @@ impl AppState {
         Ok(list_import_jobs(&db, page, page_size)?)
     }
 
+    /// 删除指定导入任务记录。
     pub fn delete_import_job(&self, job_id: i64) -> Result<(), AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(delete_import_job(&db, job_id)?)
     }
 
+    /// 保存发票识别结果，并自动检测重复和生成 Embedding。
     pub fn save_invoice_extraction(
         &self,
         request: SaveInvoiceExtractionRequest,
@@ -890,11 +936,13 @@ impl AppState {
         Ok(invoice)
     }
 
+    /// 查询全部发票摘要列表。
     pub fn list_invoices(&self) -> Result<Vec<InvoiceSummary>, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(list_invoices(&db)?)
     }
 
+    /// 按条件搜索发票，支持关键词、日期、金额等多维度过滤。
     pub fn search_invoices(
         &self,
         params: InvoiceSearchParams,
@@ -903,11 +951,13 @@ impl AppState {
         Ok(search_invoices(&db, params)?)
     }
 
+    /// 获取所有可选的标签选项。
     pub fn get_tag_options(&self) -> Result<Vec<crate::extractor::TagOption>, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(crate::extractor::get_tag_options(&db)?)
     }
 
+    /// 获取单张发票的完整详情。
     pub fn get_invoice_detail(&self, invoice_id: i64) -> Result<InvoiceDetail, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(get_invoice_detail(
@@ -917,16 +967,19 @@ impl AppState {
         )?)
     }
 
+    /// 标记发票为已查看。
     pub fn mark_invoice_viewed(&self, invoice_id: i64) -> Result<bool, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(mark_invoice_viewed(&db, invoice_id)?)
     }
 
+    /// 统计未查看的发票数量。
     pub fn count_unviewed_invoices(&self) -> Result<i64, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(count_unviewed_invoices(&db)?)
     }
 
+    /// 获取发票关联的原始文件存储路径。
     pub fn raw_file_path_for_invoice(&self, invoice_id: i64) -> Result<PathBuf, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let path = db.query_row(
@@ -940,6 +993,7 @@ impl AppState {
         Ok(PathBuf::from(path))
     }
 
+    /// 更新发票字段，并自动重新检测重复和更新 Embedding。
     pub fn update_invoice(
         &self,
         request: UpdateInvoiceRequest,
@@ -1031,6 +1085,7 @@ impl AppState {
         Ok(result)
     }
 
+    /// 更新发票明细行项目。
     pub fn update_invoice_items(
         &self,
         request: UpdateInvoiceItemsRequest,
@@ -1039,6 +1094,7 @@ impl AppState {
         Ok(update_invoice_items(&mut db, request)?)
     }
 
+    /// 批量更新多张发票的字段。
     pub fn batch_update_invoices(
         &self,
         request: BatchUpdateRequest,
@@ -1049,6 +1105,7 @@ impl AppState {
         Ok(result)
     }
 
+    /// 批量删除多张发票。
     pub fn batch_delete_invoices(&self, ids: Vec<i64>) -> Result<usize, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let result = batch_delete_invoices(&db, &ids)?;
@@ -1056,11 +1113,13 @@ impl AppState {
         Ok(result)
     }
 
+    /// 检查指定发票的重复候选列表。
     pub fn check_invoice_duplicates(&self, invoice_id: i64) -> Result<DedupeCheckResult, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(run_dedupe_check(&db, invoice_id)?)
     }
 
+    /// 解决重复发票冲突（保留或合并）。
     pub fn resolve_duplicate(
         &self,
         request: ResolveDuplicateRequest,
@@ -1069,6 +1128,7 @@ impl AppState {
         Ok(run_dedupe_resolve(&db, request)?)
     }
 
+    /// 清除所有重复检测结果并重新全量检测。
     pub fn regenerate_all_duplicates(&self) -> Result<usize, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let deleted = db.execute("DELETE FROM dedupe_candidates", [])?;
@@ -1094,6 +1154,7 @@ impl AppState {
         Ok(count)
     }
 
+    /// 导出发票数据为 CSV 或 Excel 文件。
     pub fn export_invoices(
         &self,
         request: ExportInvoicesRequest,
@@ -1102,6 +1163,7 @@ impl AppState {
         Ok(export_invoices(&db, request)?)
     }
 
+    /// 将多张源发票合并到目标发票。
     pub fn merge_invoices(
         &self,
         target_invoice_id: i64,
@@ -1113,6 +1175,7 @@ impl AppState {
         Ok(result)
     }
 
+    /// 导出发票 PDF 报表。
     pub fn export_pdf_report(
         &self,
         request: PdfReportRequest,
@@ -1121,18 +1184,22 @@ impl AppState {
         Ok(export_pdf_report(&db, request)?)
     }
 
+    /// 添加目录监控任务。
     pub fn add_watch_dir(&self, request: AddWatchDirRequest) -> Result<WatchDirStatus, AppError> {
         Ok(self.watcher_manager.add_watch_dir(request)?)
     }
 
+    /// 移除目录监控任务。
     pub fn remove_watch_dir(&self, id: i64) -> Result<(), AppError> {
         Ok(self.watcher_manager.remove_watch_dir(id)?)
     }
 
+    /// 列出所有目录监控任务及其状态。
     pub fn list_watch_dirs(&self) -> Result<Vec<WatchDirStatus>, AppError> {
         Ok(self.watcher_manager.list_watch_dirs()?)
     }
 
+    /// 更新目录监控任务的配置。
     pub fn update_watch_dir(
         &self,
         id: i64,
@@ -1141,12 +1208,14 @@ impl AppState {
         Ok(self.watcher_manager.update_watch_dir(id, request)?)
     }
 
+    /// 切换目录监控的启用/禁用状态。
     pub fn toggle_watch_dir(&self, id: i64, enabled: bool) -> Result<WatchDirStatus, AppError> {
         Ok(self.watcher_manager.toggle_watch_dir(id, enabled)?)
     }
 
     // --- Email Sources ---
 
+    /// 添加邮件源配置。
     pub fn add_email_source(
         &self,
         request: AddEmailSourceRequest,
@@ -1154,6 +1223,7 @@ impl AppState {
         Ok(self.email_manager.add_email_source(request)?)
     }
 
+    /// 更新邮件源配置。
     pub fn update_email_source(
         &self,
         id: i64,
@@ -1162,26 +1232,32 @@ impl AppState {
         Ok(self.email_manager.update_email_source(id, request)?)
     }
 
+    /// 删除邮件源配置。
     pub fn remove_email_source(&self, id: i64) -> Result<(), AppError> {
         Ok(self.email_manager.remove_email_source(id)?)
     }
 
+    /// 列出所有邮件源配置。
     pub fn list_email_sources(&self) -> Result<Vec<EmailSource>, AppError> {
         Ok(self.email_manager.list_email_sources()?)
     }
 
+    /// 切换邮件源的启用/禁用状态。
     pub fn toggle_email_source(&self, id: i64, enabled: bool) -> Result<EmailSource, AppError> {
         Ok(self.email_manager.toggle_email_source(id, enabled)?)
     }
 
+    /// 同步指定邮件源的新邮件。
     pub fn sync_email_source(&self, id: i64) -> Result<EmailSyncResult, AppError> {
         Ok(self.email_manager.sync_email_source(id)?)
     }
 
+    /// 同步所有已启用的邮件源。
     pub fn sync_all_email_sources(&self) -> Result<Vec<EmailSyncResult>, AppError> {
         Ok(self.email_manager.sync_all_enabled()?)
     }
 
+    /// 测试邮件服务器连接。
     pub fn test_email_connection(
         &self,
         protocol: &str,
@@ -1205,6 +1281,7 @@ impl AppState {
         )?)
     }
 
+    /// 获取仪表盘统计数据，结果带缓存。
     pub fn get_dashboard_stats(
         &self,
         date_from: Option<String>,
@@ -1224,6 +1301,7 @@ impl AppState {
         self.dashboard_cache.invalidate_all();
     }
 
+    /// 更新 ChromaDB 向量搜索配置。
     pub fn set_chroma_config(&self, config: ChromaConfig) -> Result<(), AppError> {
         let mut cfg = self.chroma_config.lock().unwrap_or_else(|e| e.into_inner());
         *cfg = config;
@@ -1243,10 +1321,12 @@ impl AppState {
         Ok(())
     }
 
+    /// 获取当前 ChromaDB 配置。
     pub fn get_chroma_config(&self) -> ChromaConfig {
         self.chroma_config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// 启用或禁用本地 Embedding 功能。
     pub fn set_embedding_enabled(&self, enabled: bool) -> Result<(), AppError> {
         {
             let mut flag = self.embedding_enabled.lock().unwrap_or_else(|e| e.into_inner());
@@ -1281,6 +1361,7 @@ impl AppState {
         Ok(())
     }
 
+    /// 查询 Embedding 状态：是否启用、模型是否加载、模型目录和向量维度。
     pub fn embedding_status(&self) -> (bool, bool, Option<String>, Option<usize>) {
         let enabled = *self.embedding_enabled.lock().unwrap_or_else(|e| e.into_inner());
         match self.local_embedding.try_lock() {
@@ -1365,6 +1446,7 @@ impl AppState {
         }
     }
 
+    /// 更新自定义标签配置。
     pub fn set_badge_config(&self, config: BadgeConfig) -> Result<(), AppError> {
         let sanitized = sanitize_badge_config(config);
         {
@@ -1390,10 +1472,12 @@ impl AppState {
         Ok(())
     }
 
+    /// 获取当前标签配置。
     pub fn get_badge_config(&self) -> BadgeConfig {
         self.badge_config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// 更新 LLM 调用价格配置。
     pub fn set_price_config(&self, config: PriceConfig) -> Result<(), AppError> {
         {
             let mut cfg = self.price_config.lock().unwrap_or_else(|e| e.into_inner());
@@ -1405,10 +1489,12 @@ impl AppState {
         Ok(())
     }
 
+    /// 获取当前价格配置。
     pub fn get_price_config(&self) -> PriceConfig {
         self.price_config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// 获取 LLM 用量统计数据，结果带缓存。
     pub fn get_llm_usage(
         &self,
         date_from: Option<String>,
@@ -1428,6 +1514,7 @@ impl AppState {
         self.llm_usage_cache.invalidate_all();
     }
 
+    /// 设置单张发票的标签值。
     pub fn set_invoice_badge(
         &self,
         invoice_id: i64,
@@ -1438,6 +1525,7 @@ impl AppState {
         Ok(set_invoice_badge(&mut db, invoice_id, group_name, value)?)
     }
 
+    /// 更新 LLM 服务配置（API 地址、密钥等）。
     pub fn set_llm_config(&self, config: LlmProviderConfig) -> Result<(), AppError> {
         let mut cfg = self.llm_config.lock().unwrap_or_else(|e| e.into_inner());
         *cfg = Some(config.clone());
@@ -1448,16 +1536,19 @@ impl AppState {
         Ok(())
     }
 
+    /// 获取当前 LLM 配置。
     pub fn get_llm_config(&self) -> Option<LlmProviderConfig> {
         self.llm_config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// 获取 LLM 审计配置（启用时返回审计目录）。
     pub fn llm_audit_config(&self) -> Option<LlmAuditConfig> {
         (*self.llm_audit_enabled.lock().unwrap_or_else(|e| e.into_inner())).then(|| LlmAuditConfig {
             dir: self.paths.llm_audit_dir.clone(),
         })
     }
 
+    /// 启用或禁用 LLM 请求审计记录。
     pub fn set_llm_audit_enabled(&self, enabled: bool) {
         *self.llm_audit_enabled.lock().unwrap_or_else(|e| e.into_inner()) = enabled;
         let json = serde_json::json!({"enabled": enabled});
@@ -1467,14 +1558,17 @@ impl AppState {
         info!("LLM audit enabled: {enabled}");
     }
 
+    /// 查询 LLM 审计是否启用。
     pub fn get_llm_audit_enabled(&self) -> bool {
         *self.llm_audit_enabled.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// 测试 ChromaDB 连接状态。
     pub fn test_chroma_connection(&self) -> Result<bool, AppError> {
         Ok(self.chroma_config.lock().unwrap_or_else(|e| e.into_inner()).enabled)
     }
 
+    /// 测试本地 Embedding 引擎连通性。
     pub fn test_embedding_connection(&self) -> Result<EmbeddingTestResult, AppError> {
         self.load_embedding_engine_if_available()?;
         let mut guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
@@ -1484,6 +1578,7 @@ impl AppState {
         Ok(run_embedding_test(engine)?)
     }
 
+    /// 全量重新生成所有发票的 Embedding 向量。
     pub fn regenerate_all_embeddings(&self) -> Result<RegenerateEmbeddingsResult, AppError> {
         self.load_embedding_engine_if_available()?;
         let mut engine_guard = self.local_embedding.lock().unwrap_or_else(|e| e.into_inner());
@@ -1556,6 +1651,7 @@ impl AppState {
         })
     }
 
+    /// 基于语义向量搜索相似发票。
     pub fn search_invoices_semantic(
         &self,
         query: String,
@@ -1573,6 +1669,7 @@ impl AppState {
         Ok(chroma::query_similar(&db, &result.embedding, limit)?)
     }
 
+    /// 获取待识别的原始文件元数据。
     pub fn raw_file_for_recognition(
         &self,
         raw_file_id: i64,
@@ -1596,6 +1693,7 @@ impl AppState {
         Ok(raw_file)
     }
 
+    /// 渲染 PDF 文件为图片页面用于 OCR 识别。
     pub fn render_pdf_pages_for_recognition(
         &self,
         raw_file_id: i64,
@@ -1608,6 +1706,7 @@ impl AppState {
         )?)
     }
 
+    /// 预处理图片用于识别（缩放、标准化）。
     pub fn prepare_image_for_recognition(
         &self,
         raw_file_id: i64,
@@ -1624,6 +1723,7 @@ impl AppState {
 
     // --- Event methods ---
 
+    /// 分页查询事件列表。
     pub fn list_events(
         &self,
         page: i64,
@@ -1634,31 +1734,37 @@ impl AppState {
         Ok(event::list_events(&db, page, page_size, event_type)?)
     }
 
+    /// 获取未读事件数量。
     pub fn get_unread_event_count(&self) -> Result<i64, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::get_unread_event_count(&db)?)
     }
 
+    /// 获取未读的导入失败事件数量。
     pub fn get_unread_failed_import_event_count(&self) -> Result<i64, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::get_unread_failed_import_event_count(&db)?)
     }
 
+    /// 标记单个事件为已读。
     pub fn mark_event_read(&self, id: i64) -> Result<(), AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::mark_event_read(&db, id)?)
     }
 
+    /// 标记所有事件为已读。
     pub fn mark_all_events_read(&self) -> Result<(), AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::mark_all_events_read(&db)?)
     }
 
+    /// 删除所有事件记录。
     pub fn delete_all_events(&self) -> Result<usize, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(event::delete_all_events(&db)?)
     }
 
+    /// 记录 LLM 调用的 Token 用量。
     pub fn record_usage_log(
         &self,
         operation: &str,
@@ -1680,6 +1786,7 @@ impl AppState {
         Ok(())
     }
 
+    /// 记录识别完成事件。
     pub fn record_recognition_event(
         &self,
         invoice_id: i64,
@@ -1703,6 +1810,7 @@ impl AppState {
 
     // --- Agent methods ---
 
+    /// 创建新的 Agent 会话。
     pub fn create_agent_session(&self) -> Result<AgentSession, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let session = agent::create_session(&db, None)?;
@@ -1711,16 +1819,19 @@ impl AppState {
         Ok(session)
     }
 
+    /// 列出所有 Agent 会话。
     pub fn list_agent_sessions(&self) -> Result<Vec<AgentSession>, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::list_sessions(&db)?)
     }
 
+    /// 获取指定 Agent 会话的消息历史。
     pub fn get_agent_session(&self, session_id: i64) -> Result<Vec<AgentMessageRow>, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::get_session_messages(&db, session_id)?)
     }
 
+    /// 更新 Agent 会话标题。
     pub fn update_agent_session_title(
         &self,
         session_id: i64,
@@ -1730,6 +1841,7 @@ impl AppState {
         Ok(agent::set_session_title(&db, session_id, title)?)
     }
 
+    /// 导出应用日志、数据库和配置文件为 ZIP 包。
     pub fn export_logs(&self, output_path: &str) -> Result<ExportLogsResult, AppError> {
         info!("Exporting logs to {}", output_path);
         let output_path = Path::new(output_path);
@@ -1839,6 +1951,7 @@ impl AppState {
         })
     }
 
+    /// 导出完整数据备份（排除大型可再生文件）。
     pub fn export_backup(&self, output_path: &str) -> Result<ExportLogsResult, AppError> {
         info!("Creating full backup at {}", output_path);
         let output_path = Path::new(output_path);
@@ -1852,7 +1965,7 @@ impl AppState {
         let skip_dirs = [
             "storage",      // raw file archives (large binary files)
             "WebKitCache",  // webview cache (regenerable)
-            "models",       // ONNX embedding models (downloadable)
+            DIR_MODELS,     // ONNX embedding models (downloadable)
             "localStorage", // webview local storage
             "CacheStorage", // webview cache storage
             "sample",       // sample/test files
@@ -1892,6 +2005,7 @@ impl AppState {
         })
     }
 
+    /// 清理孤立文件和失效数据库记录以释放存储空间。
     pub fn cleanup_storage(&self) -> Result<CleanupStorageResult, AppError> {
         info!("Starting storage cleanup");
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
@@ -1993,6 +2107,7 @@ impl AppState {
         Ok(result)
     }
 
+    /// 检查原始文件是否已关联发票。
     pub fn raw_file_has_invoices(&self, raw_file_id: i64) -> Result<bool, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let count: i64 = db.query_row(
@@ -2003,6 +2118,7 @@ impl AppState {
         Ok(count > 0)
     }
 
+    /// 根据原始文件 ID 更新关联导入任务的状态。
     pub fn set_import_job_status_for_raw_file(
         &self,
         raw_file_id: i64,
@@ -2018,6 +2134,7 @@ impl AppState {
         )?)
     }
 
+    /// 根据原始文件 ID 查找关联的发票 ID。
     pub fn invoice_id_for_raw_file(&self, raw_file_id: i64) -> Result<Option<i64>, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let invoice_id = db
@@ -2030,6 +2147,7 @@ impl AppState {
         Ok(invoice_id)
     }
 
+    /// 为 Agent 会话附加文件（仅支持 xlsx/csv）。
     pub fn attach_agent_file(
         &self,
         session_id: i64,
@@ -2078,6 +2196,7 @@ impl AppState {
         )?)
     }
 
+    /// 列出 Agent 会话的所有附件。
     pub fn list_agent_attachments(
         &self,
         session_id: i64,
@@ -2086,21 +2205,25 @@ impl AppState {
         Ok(agent::list_session_attachments(&db, session_id)?)
     }
 
+    /// 删除 Agent 会话附件。
     pub fn remove_agent_attachment(&self, attachment_id: i64) -> Result<(), AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::delete_attachment(&db, attachment_id)?)
     }
 
+    /// 列出 Agent 会话的任务记录。
     pub fn list_agent_tasks(&self, session_id: i64) -> Result<Vec<AgentTask>, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::list_session_tasks(&db, session_id)?)
     }
 
+    /// 列出 Agent 会话的产物（导出文件等）。
     pub fn list_agent_artifacts(&self, session_id: i64) -> Result<Vec<AgentArtifact>, AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::list_session_artifacts(&db, session_id)?)
     }
 
+    /// 用系统默认程序打开 Agent 产物文件。
     pub fn open_agent_artifact_file(
         &self,
         session_id: i64,
@@ -2116,6 +2239,7 @@ impl AppState {
         open_path_with_system(&path)
     }
 
+    /// 用系统文件管理器打开 Agent 产物所在目录。
     pub fn open_agent_artifact_folder(
         &self,
         session_id: i64,
@@ -2138,6 +2262,7 @@ impl AppState {
         open_path_with_system(&folder)
     }
 
+    /// 删除 Agent 产物记录。
     pub fn delete_agent_artifact(&self, session_id: i64, artifact_id: i64) -> Result<(), AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         agent::delete_artifact(&db, session_id, artifact_id)?;
@@ -2156,11 +2281,13 @@ impl AppState {
         Ok(PathBuf::from(path))
     }
 
+    /// 删除 Agent 会话及其所有关联数据。
     pub fn delete_agent_session(&self, session_id: i64) -> Result<(), AppError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(agent::delete_session(&db, session_id)?)
     }
 
+    /// 向 Agent 会话发送消息并获取回复。
     pub async fn send_agent_message(
         &self,
         session_id: i64,
@@ -2192,6 +2319,7 @@ impl AppState {
         .await?)
     }
 
+    /// 向 Agent 会话发送消息并以流式方式获取回复。
     pub async fn send_agent_message_stream(
         &self,
         session_id: i64,
@@ -2251,6 +2379,7 @@ impl AppState {
         Ok(Some(lines.join("\n")))
     }
 
+    /// 确认或拒绝 Agent 待执行的操作。
     pub async fn confirm_agent_action(
         &self,
         request: ConfirmRequest,
@@ -2278,6 +2407,7 @@ impl AppState {
         .await?)
     }
 
+    /// 确认或拒绝 Agent 待执行的操作（流式版本）。
     pub async fn confirm_agent_action_stream(
         &self,
         request: ConfirmRequest,
@@ -3422,7 +3552,7 @@ fn make_tool_executor(
                     message: "缺少 output_path 参数".to_owned(),
                 };
             };
-            let logs_dir = app_data_dir.join("logs");
+            let logs_dir = app_data_dir.join(DIR_LOGS);
             let file = match std::fs::File::create(output_path) {
                 Ok(f) => f,
                 Err(e) => {

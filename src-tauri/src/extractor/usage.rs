@@ -1,8 +1,13 @@
+//! LLM 使用量统计模块。
+//!
+//! 记录和查询 LLM 调用的 token 消耗情况。
+
 use rusqlite::Connection;
 use serde::Serialize;
 
 use super::ExtractorError;
 
+/// 插入一条 LLM 使用量日志记录。
 pub fn insert_usage_log(
     conn: &Connection,
     operation: &str,
@@ -25,6 +30,7 @@ pub fn insert_usage_log(
     Ok(())
 }
 
+/// LLM 使用量统计汇总，包含总调用次数、token 消耗和本月数据。
 #[derive(Debug, Clone, Serialize)]
 pub struct LlmUsageStats {
     pub total_calls: i64,
@@ -37,6 +43,7 @@ pub struct LlmUsageStats {
     pub this_month_tokens: i64,
 }
 
+/// 查询 LLM 使用量统计，支持可选的日期范围过滤。
 pub fn get_llm_usage(
     conn: &Connection,
     date_from: Option<&str>,

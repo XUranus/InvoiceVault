@@ -1,8 +1,14 @@
+//! 向量存储模块：管理发票 Embedding 的存取和相似度查询。
+//!
+//! 使用 SQLite 存储向量数据，提供余弦相似度查询，
+//! 支持发票 Embedding 的插入、删除和相似发票检索。
+
 use std::collections::HashMap;
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+/// 向量存储配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChromaConfig {
     pub enabled: bool,
@@ -14,6 +20,7 @@ impl Default for ChromaConfig {
     }
 }
 
+/// 相似度查询结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct SimilarResult {
     pub invoice_id: i64,
@@ -21,6 +28,7 @@ pub struct SimilarResult {
     pub metadata: HashMap<String, String>,
 }
 
+/// 向量存储模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum ChromaError {
     #[error("vector store not enabled")]
@@ -29,6 +37,7 @@ pub enum ChromaError {
     Database(#[from] rusqlite::Error),
 }
 
+/// 插入或更新发票的 Embedding 向量。
 pub fn upsert_embedding(
     conn: &Connection,
     invoice_id: i64,
@@ -48,6 +57,7 @@ pub fn upsert_embedding(
     Ok(())
 }
 
+/// 删除指定发票的 Embedding 向量。
 #[allow(dead_code)]
 pub fn delete_embedding(conn: &Connection, invoice_id: i64) -> Result<(), ChromaError> {
     conn.execute(
@@ -57,6 +67,7 @@ pub fn delete_embedding(conn: &Connection, invoice_id: i64) -> Result<(), Chroma
     Ok(())
 }
 
+/// 查询与给定向量最相似的发票，按余弦相似度降序返回。
 pub fn query_similar(
     conn: &Connection,
     query_embedding: &[f32],

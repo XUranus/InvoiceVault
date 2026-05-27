@@ -1,3 +1,8 @@
+//! LLM 连接与发票识别模块。
+//!
+//! 封装与 OpenAI 兼容 API 的交互逻辑，提供连接测试、发票图片识别（含重试与审计）、
+//! 对话标题生成和错误分析等功能。支持可选的 SCNet OCR 交叉验证。
+
 use std::{
     fs,
     io::Write,
@@ -12,6 +17,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tracing::{error, info, warn};
 
+use crate::app_core::constants::{
+    LLM_CONNECT_TEST_TIMEOUT_SECS, LLM_DEFAULT_TIMEOUT_SECS, LLM_MAX_RETRIES as MAX_RETRIES,
+    LLM_RECOGNITION_MAX_TOKENS, LLM_RECOGNITION_TIMEOUT_SECS,
+    LLM_VLM_CONFIDENCE_THRESHOLD as CONFIDENCE_THRESHOLD, LLM_VLM_MAX_ATTEMPTS as MAX_VLM_ATTEMPTS,
+    LLM_VLM_TEMPERATURES as VLM_TEMPERATURES,
+};
+
+/// LLM 提供商连接配置，包含 API 地址、密钥、模型名称和可选的 SCNet OCR 密钥。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmProviderConfig {
     pub base_url: String,
@@ -22,11 +35,13 @@ pub struct LlmProviderConfig {
     pub scnet_ocr_api_key: Option<String>,
 }
 
+/// LLM 审计日志配置，指定日志输出目录。
 #[derive(Debug, Clone)]
 pub struct LlmAuditConfig {
     pub dir: PathBuf,
 }
 
+/// LLM 连接测试结果，包含响应模型名、耗时和响应预览。
 #[derive(Debug, Clone, Serialize)]
 pub struct LlmConnectionTestResult {
     pub model: String,
@@ -34,6 +49,7 @@ pub struct LlmConnectionTestResult {
     pub response_preview: String,
 }
 
+/// 发票识别结果，包含模型信息、耗时、响应 JSON 和 token 用量。
 #[derive(Debug, Clone, Serialize)]
 pub struct InvoiceRecognitionResult {
     pub model: String,
@@ -45,6 +61,7 @@ pub struct InvoiceRecognitionResult {
     pub total_tokens: i64,
 }
 
+/// LLM 模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
     #[error("base URL is required")]
@@ -136,6 +153,7 @@ struct ChatChoiceMessage {
     content: Option<String>,
 }
 
+/// 测试 LLM 连接，发送 "pong" 测试消息并返回连接结果。
 pub async fn test_llm_connection(
     config: LlmProviderConfig,
     audit: Option<&LlmAuditConfig>,
@@ -154,7 +172,7 @@ pub async fn test_llm_connection(
         return Err(LlmError::MissingModel);
     }
 
-    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(30).clamp(1, 300));
+    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(LLM_DEFAULT_TIMEOUT_SECS).clamp(1, 300));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
     let started_at = Utc::now();
     let started = Instant::now();
@@ -261,6 +279,7 @@ pub async fn test_llm_connection(
     })
 }
 
+/// 根据用户首条消息，使用 LLM 生成简短的对话标题。
 pub async fn generate_title(
     config: &LlmProviderConfig,
     first_user_message: &str,
@@ -268,7 +287,7 @@ pub async fn generate_title(
     let base_url = config.base_url.trim().trim_end_matches('/');
     let api_key = config.api_key.trim();
     let model = config.model.trim();
-    let timeout = Duration::from_secs(30);
+    let timeout = Duration::from_secs(LLM_CONNECT_TEST_TIMEOUT_SECS);
     let client = reqwest::Client::builder().timeout(timeout).build()?;
     let prompt = format!(
         "请根据以下对话内容生成一个简短的标题（不超过20个字）：\n\n用户：{}\n\n只输出标题，不要其他内容。",
@@ -308,8 +327,7 @@ pub async fn generate_title(
     Ok(title)
 }
 
-const MAX_RETRIES: u32 = 3;
-
+/// 使用视觉大模型（VLM）识别单张发票图片，支持指定温度和重试。
 pub async fn recognize_invoice_image(
     config: LlmProviderConfig,
     image_path: &Path,
@@ -334,7 +352,7 @@ pub async fn recognize_invoice_image(
         return Err(LlmError::UnsupportedImageMimeType(mime_type.to_owned()));
     }
 
-    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(90).clamp(1, 300));
+    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(LLM_RECOGNITION_TIMEOUT_SECS).clamp(1, 300));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
     let image_bytes = fs::read(image_path)
         .inspect_err(|e| error!("Failed to read image for recognition: {e}"))?;
@@ -358,7 +376,7 @@ pub async fn recognize_invoice_image(
             ],
         }],
         temperature,
-        max_tokens: 4096,
+        max_tokens: LLM_RECOGNITION_MAX_TOKENS,
     };
     let endpoint = format!("{base_url}/chat/completions");
     let request_json = serde_json::to_value(&request)?;
@@ -502,13 +520,8 @@ pub async fn recognize_invoice_image(
     Err(last_err.unwrap_or(LlmError::MissingAssistantContent))
 }
 
-const MAX_VLM_ATTEMPTS: u32 = 3;
-const CONFIDENCE_THRESHOLD: f64 = 0.5;
-const VLM_TEMPERATURES: [f32; 3] = [0.0, 0.3, 0.5];
-
-/// Try VLM recognition multiple times with varying temperatures.
-/// If all attempts yield low confidence, send all results to LLM for audit.
-/// Then optionally cross-validate with SCNet OCR if API key is configured.
+/// 多次尝试 VLM 识别（不同温度），置信度不足时交由 LLM 审计择优，
+/// 可选使用 SCNet OCR 进行交叉验证。
 pub async fn recognize_invoice_with_retries(
     config: LlmProviderConfig,
     image_path: &Path,
@@ -592,7 +605,7 @@ pub async fn recognize_invoice_with_retries(
     Ok(vlm_result)
 }
 
-/// Core VLM recognition with retries and LLM audit fallback.
+/// VLM 识别核心逻辑，带重试和 LLM 审计回退。
 async fn recognize_vlm_only(
     config: LlmProviderConfig,
     image_path: &Path,
@@ -648,7 +661,7 @@ async fn recognize_vlm_only(
     audit_invoice_results(config, &candidates, audit).await
 }
 
-/// Send all candidate recognition results to LLM for comparison and best-pick.
+/// 将所有候选识别结果交由 LLM 比较，选出最佳结果并评估可信度。
 async fn audit_invoice_results(
     config: LlmProviderConfig,
     candidate_jsons: &[String],
@@ -658,7 +671,7 @@ async fn audit_invoice_results(
     let api_key = config.api_key.trim();
     let model = config.model.trim();
 
-    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(90).clamp(1, 300));
+    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(LLM_RECOGNITION_TIMEOUT_SECS).clamp(1, 300));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
 
     let candidates_formatted: Vec<serde_json::Value> = candidate_jsons
@@ -862,6 +875,7 @@ pub(crate) fn truncate(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
+/// LLM 请求审计记录，用于记录每次 API 调用的详细信息。
 pub struct LlmAuditRecord<'a> {
     pub started_at: chrono::DateTime<Utc>,
     pub operation: &'a str,
@@ -874,6 +888,7 @@ pub struct LlmAuditRecord<'a> {
     pub error: Option<String>,
 }
 
+/// 将 LLM 审计记录追加写入 JSONL 日志文件。
 pub fn write_llm_audit_record(audit: Option<&LlmAuditConfig>, record: LlmAuditRecord<'_>) {
     let Some(audit) = audit else {
         return;
@@ -913,6 +928,7 @@ fn write_llm_audit_record_inner(
     Ok(())
 }
 
+/// 将 HTTP 响应体字符串解析为 JSON 值，解析失败时包装为字符串值。
 pub fn body_to_value(body: &str) -> Value {
     serde_json::from_str(body).unwrap_or_else(|_| Value::String(body.to_owned()))
 }
@@ -1178,6 +1194,7 @@ mod tests {
     }
 }
 
+/// 使用 LLM 分析错误信息并给出简短的中文解决建议。
 pub async fn analyze_error_with_llm(
     config: LlmProviderConfig,
     error_message: &str,
@@ -1190,7 +1207,7 @@ pub async fn analyze_error_with_llm(
         return Err(LlmError::MissingBaseUrl);
     }
 
-    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(30).clamp(1, 60));
+    let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(LLM_DEFAULT_TIMEOUT_SECS).clamp(1, 60));
     let client = reqwest::Client::builder().timeout(timeout).build()?;
 
     let prompt = format!(

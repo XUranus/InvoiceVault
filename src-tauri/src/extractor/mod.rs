@@ -1,3 +1,8 @@
+//! 发票识别数据提取与持久化模块。
+//!
+//! 负责将 LLM 返回的发票 JSON 解析、校验后写入 SQLite，
+//! 并提供发票的搜索、详情、更新、删除、合并、标签管理等功能。
+
 use std::collections::HashMap;
 
 use chrono::NaiveDate;
@@ -13,6 +18,7 @@ pub use dashboard::{
 };
 pub use usage::{get_llm_usage, insert_usage_log, LlmUsageStats};
 
+/// 保存发票识别结果的请求参数。
 #[derive(Debug, Deserialize)]
 pub struct SaveInvoiceExtractionRequest {
     pub raw_file_id: i64,
@@ -23,6 +29,7 @@ pub struct SaveInvoiceExtractionRequest {
     pub response_json: String,
 }
 
+/// 发票列表摘要信息，用于搜索和列表展示。
 #[derive(Debug, Clone, Serialize)]
 pub struct InvoiceSummary {
     pub id: i64,
@@ -49,6 +56,7 @@ pub struct InvoiceSummary {
     pub badges: Vec<InvoiceBadgeSelection>,
 }
 
+/// 发票搜索条件参数，支持关键词、类型、日期、金额等多种过滤。
 #[derive(Debug, Deserialize)]
 pub struct InvoiceSearchParams {
     pub query: Option<String>,
@@ -70,6 +78,7 @@ pub struct InvoiceSearchParams {
     pub page_size: Option<i64>,
 }
 
+/// 发票搜索结果，包含分页信息。
 #[derive(Debug, Clone, Serialize)]
 pub struct InvoiceSearchResult {
     pub invoices: Vec<InvoiceSummary>,
@@ -79,6 +88,7 @@ pub struct InvoiceSearchResult {
     pub total_pages: i64,
 }
 
+/// 根据搜索条件查询发票列表，支持分页和排序。
 pub fn search_invoices(
     conn: &Connection,
     params: InvoiceSearchParams,
@@ -295,6 +305,7 @@ fn build_sort_clause(sort_by: Option<&str>, sort_order: Option<&str>) -> String 
     format!("ORDER BY {column} {direction}")
 }
 
+/// 发票完整详情，包含明细行、原始文件信息、提取模型信息和标签。
 #[derive(Debug, Clone, Serialize)]
 pub struct InvoiceDetail {
     pub id: i64,
@@ -333,18 +344,21 @@ pub struct InvoiceDetail {
     pub source_type: Option<String>,
 }
 
+/// 单个发票标签选择项，由分组名和值组成。
 #[derive(Debug, Clone, Serialize)]
 pub struct InvoiceBadgeSelection {
     pub group_name: String,
     pub value: String,
 }
 
+/// 标签分组配置，定义一个分组名称及其可选值列表。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BadgeGroupConfig {
     pub name: String,
     pub options: Vec<String>,
 }
 
+/// 标签总配置，包含所有标签分组。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BadgeConfig {
     pub groups: Vec<BadgeGroupConfig>,
@@ -371,6 +385,7 @@ impl Default for BadgeConfig {
     }
 }
 
+/// 发票明细行，表示发票中的单个商品或服务条目。
 #[derive(Debug, Clone, Serialize)]
 pub struct InvoiceItemRow {
     pub id: i64,
@@ -384,6 +399,7 @@ pub struct InvoiceItemRow {
     pub tax_amount: Option<String>,
 }
 
+/// 获取发票完整详情，包含明细行、原始文件信息、缩略图路径和标签。
 pub fn get_invoice_detail(
     conn: &Connection,
     thumbnails_dir: &std::path::Path,
@@ -532,6 +548,7 @@ pub fn get_invoice_detail(
     })
 }
 
+/// 查询指定发票的所有标签选择项。
 pub fn list_invoice_badges(
     conn: &Connection,
     invoice_id: i64,
@@ -555,6 +572,7 @@ pub fn list_invoice_badges(
     Ok(badges)
 }
 
+/// 设置发票标签；传入 `None` 值时删除该分组的标签。
 pub fn set_invoice_badge(
     conn: &mut Connection,
     invoice_id: i64,
@@ -598,6 +616,7 @@ pub fn set_invoice_badge(
     list_invoice_badges(conn, invoice_id)
 }
 
+/// 更新发票字段的请求参数，所有字段均为可选。
 #[derive(Debug, Deserialize)]
 pub struct UpdateInvoiceRequest {
     pub id: i64,
@@ -622,18 +641,21 @@ pub struct UpdateInvoiceRequest {
     pub extra_fields: Option<Option<Map<String, Value>>>,
 }
 
+/// 发票更新结果，包含更新后的摘要和可能的字段校验错误。
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateInvoiceResult {
     pub invoice: InvoiceSummary,
     pub errors: Vec<FieldError>,
 }
 
+/// 字段级校验错误，指示具体字段和错误原因。
 #[derive(Debug, Clone, Serialize)]
 pub struct FieldError {
     pub field: String,
     pub message: String,
 }
 
+/// 更新发票的字段信息，返回更新后的摘要及字段校验错误。
 pub fn update_invoice(
     conn: &mut Connection,
     request: UpdateInvoiceRequest,
@@ -740,12 +762,14 @@ fn validate_invoice_fields(
     errors
 }
 
+/// 批量更新发票明细行的请求参数。
 #[derive(Debug, Deserialize)]
 pub struct UpdateInvoiceItemsRequest {
     pub invoice_id: i64,
     pub items: Vec<InvoiceItemChange>,
 }
 
+/// 发票明细行变更操作，支持新增、更新和删除。
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action")]
 pub enum InvoiceItemChange {
@@ -776,6 +800,7 @@ pub enum InvoiceItemChange {
     Delete { id: i64 },
 }
 
+/// 应用明细行变更（新增/更新/删除），返回变更后的完整明细列表。
 pub fn update_invoice_items(
     conn: &mut Connection,
     request: UpdateInvoiceItemsRequest,
@@ -952,6 +977,7 @@ struct InvoiceItemExtraction {
     tax_amount: Option<String>,
 }
 
+/// 发票提取模块的错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum ExtractorError {
     #[error("raw file does not exist: {0}")]
@@ -974,6 +1000,7 @@ pub enum ExtractorError {
     MergeError(String),
 }
 
+/// 从明细行中提取商品名称，拼接为简短的内容摘要（最长 50 字符）。
 fn build_content_summary(items: &[InvoiceItemExtraction]) -> String {
     let names: Vec<&str> = items
         .iter()
@@ -995,6 +1022,7 @@ fn build_content_summary(items: &[InvoiceItemExtraction]) -> String {
     }
 }
 
+/// 保存一条发票识别结果，解析 JSON 并写入发票、明细行和提取记录。
 pub fn save_invoice_extraction(
     conn: &mut Connection,
     request: SaveInvoiceExtractionRequest,
@@ -1018,6 +1046,7 @@ pub fn save_invoice_extraction(
     load_invoice_summary(conn, invoice_id)
 }
 
+/// 列出最近 100 张发票的摘要信息。
 pub fn list_invoices(conn: &Connection) -> Result<Vec<InvoiceSummary>, ExtractorError> {
     let mut stmt = conn.prepare(
         "SELECT
@@ -1314,6 +1343,7 @@ fn row_to_invoice_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvoiceSu
     })
 }
 
+/// 将发票标记为已浏览，仅在首次浏览时更新时间戳。
 pub fn mark_invoice_viewed(conn: &Connection, invoice_id: i64) -> Result<bool, ExtractorError> {
     let changed = conn.execute(
         "UPDATE invoices
@@ -1325,6 +1355,7 @@ pub fn mark_invoice_viewed(conn: &Connection, invoice_id: i64) -> Result<bool, E
     Ok(changed > 0)
 }
 
+/// 统计未浏览的发票数量。
 pub fn count_unviewed_invoices(conn: &Connection) -> Result<i64, ExtractorError> {
     conn.query_row(
         "SELECT COUNT(*) FROM invoices WHERE viewed_at IS NULL",
@@ -1429,6 +1460,7 @@ where
     }
 }
 
+/// 将发票详情转换为用于向量嵌入的紧凑文本表示。
 pub fn invoice_to_embedding_text(invoice: &InvoiceDetail) -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -1467,6 +1499,7 @@ pub fn invoice_to_embedding_text(invoice: &InvoiceDetail) -> String {
 
 // ---- Batch operations ----
 
+/// 批量更新发票状态或分类的请求参数。
 #[derive(Debug, Deserialize)]
 pub struct BatchUpdateRequest {
     pub ids: Vec<i64>,
@@ -1474,6 +1507,7 @@ pub struct BatchUpdateRequest {
     pub category: Option<String>,
 }
 
+/// 批量更新发票的状态和/或分类，返回更新后的发票列表。
 pub fn batch_update_invoices(
     conn: &Connection,
     request: &BatchUpdateRequest,
@@ -1524,6 +1558,7 @@ pub fn batch_update_invoices(
     Ok(rows)
 }
 
+/// 批量删除发票及其关联的提取记录、去重候选等数据，并清理孤立的原始文件。
 pub fn batch_delete_invoices(conn: &Connection, ids: &[i64]) -> Result<usize, ExtractorError> {
     if ids.is_empty() {
         return Ok(0);
@@ -1610,6 +1645,7 @@ pub fn batch_delete_invoices(conn: &Connection, ids: &[i64]) -> Result<usize, Ex
 
 // ---- Invoice Merging ----
 
+/// 合并发票操作的结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct MergeInvoicesResult {
     pub merged_invoice: InvoiceSummary,
@@ -1617,6 +1653,7 @@ pub struct MergeInvoicesResult {
     pub total_items_merged: usize,
 }
 
+/// 将多张发票合并到目标发票，合并明细行和金额，删除来源发票。
 pub fn merge_invoices(
     conn: &mut Connection,
     target_invoice_id: i64,
@@ -1841,12 +1878,14 @@ fn parse_page_range(range: &str) -> Vec<usize> {
 
 // ---- Tag Options (lightweight) ----
 
+/// 标签选项，用于前端标签筛选下拉列表。
 #[derive(Debug, Clone, Serialize)]
 pub struct TagOption {
     pub label: String,
     pub count: i64,
 }
 
+/// 查询所有可用的标签选项（来自分类、类型、标签、文件类型等）。
 pub fn get_tag_options(conn: &Connection) -> Result<Vec<TagOption>, ExtractorError> {
     let mut stmt = conn.prepare(
         "SELECT label, SUM(cnt) as total FROM (

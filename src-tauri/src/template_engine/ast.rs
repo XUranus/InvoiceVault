@@ -10,11 +10,11 @@ pub struct CellAst {
     /// Cell type attribute: None=number, Some("s")=shared string,
     /// Some("inlineStr"), Some("b")=boolean, Some("str")=formula string
     pub cell_type: Option<String>,
-    /// The raw <v> value text (before dereferencing shared strings)
+    /// The raw `<v>` value text (before dereferencing shared strings)
     pub raw_value: Option<String>,
-    /// The raw cell XML <c ...>...</c> for style preservation
+    /// The raw cell XML `<c ...>...</c>` for style preservation
     pub raw_xml: String,
-    /// Style index (the "s" attribute on <c>)
+    /// Style index (the "s" attribute on `<c>`)
     pub style_index: Option<u32>,
 }
 
@@ -25,7 +25,7 @@ pub struct RowAst {
     pub row_num: u32,
     /// Cells sorted by column index
     pub cells: Vec<CellAst>,
-    /// The raw row opening tag: <row r="..." spans="..." ht="...">
+    /// The raw row opening tag: `<row r="..." spans="..." ht="...">`
     pub raw_xml_header: String,
 }
 
@@ -46,9 +46,9 @@ pub struct SheetAst {
     pub sheet_path: String, // e.g. "xl/worksheets/sheet1.xml"
     pub rows: Vec<RowAst>,
     pub merge_cells: Vec<MergeCell>,
-    /// Raw XML before <sheetData>
+    /// Raw XML before `<sheetData>`
     pub xml_before_sheet_data: String,
-    /// Raw XML after </sheetData>
+    /// Raw XML after `</sheetData>`
     pub xml_after_sheet_data: String,
     /// Full raw sheet XML
     pub full_xml: String,

@@ -1,3 +1,7 @@
+//! 数据库存储层：SQLite 连接管理与 schema 迁移。
+//!
+//! 负责数据库表结构的版本化迁移，确保每次启动时按序执行未应用的迁移脚本。
+
 use rusqlite::Connection;
 
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -7,12 +11,18 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (4, include_str!("../../migrations/0004_add_content_summary.sql")),
 ];
 
+/// 存储层错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
+    /// SQLite 数据库操作错误。
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
 }
 
+/// 执行数据库 schema 迁移。
+///
+/// 按版本号顺序依次执行尚未应用的迁移 SQL，并记录已应用版本。
+/// 幂等安全，可重复调用。
 pub fn run_migrations(conn: &mut Connection) -> Result<(), StorageError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (

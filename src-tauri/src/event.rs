@@ -1,3 +1,8 @@
+//! 事件通知模块：记录和管理应用内事件（导入、识别、重复检测等）。
+//!
+//! 提供事件的创建、查询、已读/未读状态管理，
+//! 以及各业务流程的事件记录辅助函数。
+
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
@@ -5,6 +10,7 @@ use serde::{Deserialize, Serialize};
 // Data types
 // ---------------------------------------------------------------------------
 
+/// 单条事件记录。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventRow {
     pub id: i64,
@@ -19,6 +25,7 @@ pub struct EventRow {
     pub created_at: String,
 }
 
+/// 事件列表分页查询结果。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventListResult {
     pub events: Vec<EventRow>,
@@ -29,6 +36,7 @@ pub struct EventListResult {
     pub total_pages: i64,
 }
 
+/// 事件模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum EventError {
     #[error("database error: {0}")]
@@ -39,6 +47,7 @@ pub enum EventError {
 // Events
 // ---------------------------------------------------------------------------
 
+/// 创建一条新事件记录。
 pub fn create_event(
     conn: &Connection,
     event_type: &str,
@@ -89,6 +98,7 @@ fn query_events(
     }
 }
 
+/// 分页查询事件列表，可按事件类型过滤。
 pub fn list_events(
     conn: &Connection,
     page: i64,
@@ -150,6 +160,7 @@ fn map_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
 // Read/unread state
 // ---------------------------------------------------------------------------
 
+/// 获取未读事件总数。
 pub fn get_unread_event_count(conn: &Connection) -> Result<i64, EventError> {
     let count: i64 =
         conn.query_row("SELECT COUNT(*) FROM events WHERE is_read = 0", [], |row| {
@@ -158,6 +169,7 @@ pub fn get_unread_event_count(conn: &Connection) -> Result<i64, EventError> {
     Ok(count)
 }
 
+/// 获取未读的识别失败事件数量。
 pub fn get_unread_failed_import_event_count(conn: &Connection) -> Result<i64, EventError> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM events WHERE is_read = 0 AND event_type = 'recognition' AND status = 'failed'",
@@ -167,16 +179,19 @@ pub fn get_unread_failed_import_event_count(conn: &Connection) -> Result<i64, Ev
     Ok(count)
 }
 
+/// 将指定事件标记为已读。
 pub fn mark_event_read(conn: &Connection, id: i64) -> Result<(), EventError> {
     conn.execute("UPDATE events SET is_read = 1 WHERE id = ?1", [id])?;
     Ok(())
 }
 
+/// 将所有未读事件标记为已读。
 pub fn mark_all_events_read(conn: &Connection) -> Result<(), EventError> {
     conn.execute("UPDATE events SET is_read = 1 WHERE is_read = 0", [])?;
     Ok(())
 }
 
+/// 删除所有事件记录。
 pub fn delete_all_events(conn: &Connection) -> Result<usize, EventError> {
     let count = conn.execute("DELETE FROM events", [])?;
     Ok(count)

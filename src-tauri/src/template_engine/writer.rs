@@ -157,7 +157,7 @@ fn update_dimension_ref(xml_before_sheet_data: &str, max_row: u32, max_col: usiz
     )
 }
 
-/// Render a single RowIR to <row>...</row> XML.
+/// Render a single RowIR to `<row>...</row>` XML.
 fn render_row_xml(row: &RowIR, strings: &mut SharedStringPool) -> String {
     // For static rows, use the preserved raw XML only if row number hasn't shifted.
     // Shifted rows must be rebuilt from cells because raw_row_xml contains the
@@ -195,7 +195,7 @@ fn render_row_xml(row: &RowIR, strings: &mut SharedStringPool) -> String {
     xml
 }
 
-/// Render a CellIR to <c>...</c> XML.
+/// Render a CellIR to `<c>...</c>` XML.
 fn render_cell_xml(cell: &CellIR, row_num: u32, strings: &mut SharedStringPool) -> String {
     if let Some(formula) = &cell.formula {
         let ref_str = format!("{}{}", col_index_to_letter(cell.col), row_num);

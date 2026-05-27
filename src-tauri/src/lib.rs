@@ -1,3 +1,18 @@
+//! # InvoiceVault
+//!
+//! 智能发票管理桌面应用，支持 OCR 识别、LLM 提取、语义搜索、
+//! Agent 对话和 Excel 模板导出。
+//!
+//! ## 架构概览
+//!
+//! - `AppState` — 应用全局状态，管理数据库、配置和各子系统
+//! - `commands` — Tauri 前端命令处理层（薄壳，解包参数后调用 AppState）
+//! - [`extractor`] — 发票数据提取与 CRUD
+//! - `llm` — LLM 客户端（OpenAI 兼容协议）
+//! - `agent` — Agent 会话、工具调用和任务管理
+//! - [`template_engine`] — Excel 模板导出引擎
+//! - [`storage`] — SQLite 数据库迁移
+
 mod agent;
 mod app_core;
 mod chroma;
@@ -22,6 +37,10 @@ mod watcher;
 
 use commands::*;
 use app_core::AppState;
+use app_core::constants::{
+    DIR_LOGS, DIR_MODELS, EMBEDDING_MODEL_DIR, EMBEDDING_ONNX_PATH,
+    SINGLE_INSTANCE_LOCK_FILE, SINGLE_INSTANCE_TCP_TIMEOUT_MS,
+};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -56,7 +75,6 @@ const TRAY_WORKBENCH_ID: &str = "tray-workbench";
 const TRAY_VERSION_ID: &str = "tray-version";
 const TRAY_QUIT_ID: &str = "tray-quit";
 const SINGLE_INSTANCE_BIND_ADDR: &str = "127.0.0.1:0";
-const SINGLE_INSTANCE_LOCK_FILE: &str = "invoicevault.lock";
 const SINGLE_INSTANCE_PING_MESSAGE: &[u8] = b"invoicevault:ping\n";
 const SINGLE_INSTANCE_SHOW_MESSAGE: &[u8] = b"invoicevault:show\n";
 const SINGLE_INSTANCE_OK_MESSAGE: &[u8] = b"invoicevault:ok\n";
@@ -144,6 +162,7 @@ impl Drop for SingleInstanceGuard {
     }
 }
 
+/// 启动 InvoiceVault 应用入口，初始化所有插件、状态和窗口。
 pub fn run() {
     let Some(mut single_instance_guard) = claim_single_instance() else {
         return;
@@ -175,7 +194,7 @@ pub fn run() {
         .setup(move |app| {
             // Set up logging directory and file-based tracing subscriber
             let app_data_dir = app.path().app_data_dir().expect("app data dir");
-            let log_dir = app_data_dir.join("logs");
+            let log_dir = app_data_dir.join(DIR_LOGS);
             std::fs::create_dir_all(&log_dir).expect("create log dir");
 
             let file_appender = tracing_appender::rolling::daily(&log_dir, "invoicevault");
@@ -281,8 +300,8 @@ pub fn run() {
                         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
                         .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
                         .unwrap_or(true);
-                    let model_dir = app_data_dir.join("models").join("bge-small-zh-v1.5");
-                    enabled && !model_dir.join("onnx").join("model_q4.onnx").exists()
+                    let model_dir = app_data_dir.join(DIR_MODELS).join(EMBEDDING_MODEL_DIR);
+                    enabled && !model_dir.join(EMBEDDING_ONNX_PATH).exists()
                 };
                 if needs_download {
                     tauri::async_runtime::spawn(async move {
@@ -634,12 +653,12 @@ fn read_single_instance_lock(path: &Path) -> Option<SocketAddr> {
 }
 
 fn notify_existing_instance(addr: SocketAddr) -> bool {
-    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(700)) {
+    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(SINGLE_INSTANCE_TCP_TIMEOUT_MS)) {
         Ok(stream) => stream,
         Err(_) => return false,
     };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(700)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(700)));
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(SINGLE_INSTANCE_TCP_TIMEOUT_MS)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(SINGLE_INSTANCE_TCP_TIMEOUT_MS)));
     if stream.write_all(SINGLE_INSTANCE_SHOW_MESSAGE).is_err() {
         return false;
     }

@@ -1,3 +1,8 @@
+//! MCP (Model Context Protocol) 服务端：通过 JSON-RPC 2.0 暴露发票管理工具。
+//!
+//! 实现 MCP 协议的 initialize、tools/list、tools/call 方法，
+//! 提供发票搜索、详情、导出、合并、诊断等工具供外部 AI 客户端调用。
+
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -6,6 +11,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::app_core::constants::DIR_LOGS;
 use crate::exporter;
 use crate::extractor;
 
@@ -684,7 +690,7 @@ fn execute_tool(
             let Some(output_path) = json_str(args, "output_path") else {
                 return error_text("缺少 output_path 参数".into());
             };
-            let logs_dir = app_data_dir.join("logs");
+            let logs_dir = app_data_dir.join(DIR_LOGS);
             let file = match std::fs::File::create(output_path) {
                 Ok(f) => f,
                 Err(e) => return error_text(format!("创建文件失败: {e}")),
@@ -882,6 +888,7 @@ fn handle_request(
 // Entry point
 // ---------------------------------------------------------------------------
 
+/// 启动 MCP 服务端，从 stdin 读取 JSON-RPC 请求并写入 stdout。
 pub fn run_server(conn: Connection, app_data_dir: PathBuf) {
     let stdin = io::stdin();
     let mut stdout = io::stdout();

@@ -1,3 +1,8 @@
+//! 文件导入模块：负责将本地文件导入系统并记录导入任务。
+//!
+//! 支持文件路径和 file:// URI，自动去重、计算哈希、存入原始文件存储区，
+//! 并记录每个导入任务的状态（导入中、已导入、重复、失败）。
+
 use std::{
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -9,11 +14,14 @@ use tracing::error;
 
 use crate::raw_store::{inspect_file, store_original_file, RawFileInput, RawStoreError};
 
+/// 文件导入请求参数。
 #[derive(Debug, Deserialize)]
 pub struct ImportRequest {
+    /// 待导入文件的路径列表。
     pub paths: Vec<String>,
 }
 
+/// 单个导入任务的摘要信息。
 #[derive(Debug, Clone, Serialize)]
 pub struct ImportJobSummary {
     pub id: i64,
@@ -32,6 +40,7 @@ pub struct ImportJobSummary {
     pub updated_at: String,
 }
 
+/// 导入任务分页查询结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct ImportJobListResult {
     pub jobs: Vec<ImportJobSummary>,
@@ -41,6 +50,7 @@ pub struct ImportJobListResult {
     pub total_pages: i64,
 }
 
+/// 文件导入模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
     #[error("no import paths provided")]
@@ -53,6 +63,10 @@ pub enum ImportError {
     MissingStoredMetadata,
 }
 
+/// 批量导入文件到系统。
+///
+/// 对每个文件路径执行检查、哈希计算和存储，自动跳过近期重复导入的文件。
+/// `source_type` 标记导入来源（如 "manual"、"watcher"、"email"）。
 pub fn import_files(
     conn: &mut Connection,
     raw_dir: &Path,
@@ -133,6 +147,7 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
+/// 分页查询导入任务列表。
 pub fn list_import_jobs(
     conn: &Connection,
     page: i64,
@@ -188,6 +203,7 @@ pub fn list_import_jobs(
     })
 }
 
+/// 删除指定导入任务记录。
 pub fn delete_import_job(conn: &Connection, job_id: i64) -> Result<(), ImportError> {
     conn.execute("DELETE FROM import_jobs WHERE id = ?1", [job_id])?;
     Ok(())
@@ -374,6 +390,7 @@ fn insert_import_job(
     Ok(conn.last_insert_rowid())
 }
 
+/// 更新导入任务的状态和错误信息。
 pub fn update_import_job_status(
     conn: &Connection,
     job_id: i64,
@@ -394,6 +411,7 @@ pub fn update_import_job_status(
     Ok(())
 }
 
+/// 根据原始文件 ID 批量更新关联导入任务的状态。
 pub fn update_import_job_status_by_raw_file(
     conn: &Connection,
     raw_file_id: i64,
@@ -412,6 +430,9 @@ pub fn update_import_job_status_by_raw_file(
     Ok(())
 }
 
+/// 恢复因应用异常中断而处于中间状态的导入任务。
+///
+/// 已关联发票的任务标记为"已导入"，其余标记为"失败"。
 pub fn recover_interrupted_import_jobs(conn: &Connection) -> Result<usize, ImportError> {
     let now = current_timestamp();
     let message = "上次运行中断，任务已停止。请重新导入或重新识别。";

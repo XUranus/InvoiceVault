@@ -1,8 +1,14 @@
+//! 发票去重模块：基于字段匹配和语义相似度检测重复发票。
+//!
+//! 通过发票代码+号码精确匹配、加权字段模糊匹配（号码、金额、日期、销方）
+//! 以及语义向量相似度三种策略检测重复，支持用户确认/忽略/保留等操作。
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use crate::chroma::SimilarResult;
 
+/// 去重检查结果，包含候选重复列表和是否命中精确重复。
 #[derive(Debug, Clone, Serialize)]
 pub struct DedupeCheckResult {
     pub invoice_id: i64,
@@ -10,6 +16,7 @@ pub struct DedupeCheckResult {
     pub has_exact_duplicate: bool,
 }
 
+/// 单条重复候选记录。
 #[derive(Debug, Clone, Serialize)]
 pub struct DedupeCandidate {
     pub id: i64,
@@ -23,6 +30,7 @@ pub struct DedupeCandidate {
     pub status: String,
 }
 
+/// 去重模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum DedupeError {
     #[error("database error: {0}")]
@@ -31,18 +39,23 @@ pub enum DedupeError {
     Extractor(#[from] crate::extractor::ExtractorError),
 }
 
+/// 解决重复发票的请求参数。
 #[derive(Debug, serde::Deserialize)]
 pub struct ResolveDuplicateRequest {
     pub dedupe_id: i64,
     pub action: String,
 }
 
+/// 解决重复发票操作的执行结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct ResolveDuplicateResult {
     pub action: String,
     pub deleted_invoice_id: Option<i64>,
 }
 
+/// 检查指定发票的重复情况，返回候选重复列表。
+///
+/// 先执行字段级重复检测，再查询已有候选结果。
 pub fn check_invoice_duplicates(
     conn: &Connection,
     invoice_id: i64,
@@ -84,6 +97,10 @@ pub fn check_invoice_duplicates(
     })
 }
 
+/// 执行重复发票解决操作。
+///
+/// 支持的操作：confirm（确认重复）、ignore（忽略）、
+/// keep_current（保留当前）、keep_other（保留对方）、keep_both（保留两者）。
 pub fn resolve_duplicate(
     conn: &Connection,
     request: ResolveDuplicateRequest,
@@ -224,6 +241,9 @@ fn levenshtein(a: &str, b: &str) -> usize {
     prev[n]
 }
 
+/// 基于字段规则检测并记录发票的重复候选。
+///
+/// 规则包括发票代码+号码精确匹配和加权字段模糊匹配。
 pub(crate) fn detect_field_duplicates(
     conn: &Connection,
     invoice_id: i64,
@@ -387,6 +407,9 @@ pub(crate) fn detect_field_duplicates(
     Ok(())
 }
 
+/// 基于语义向量相似度检测并记录发票的重复候选。
+///
+/// 仅当相似度 >= 0.98 时才标记为候选，避免同模板不同发票的误判。
 pub fn detect_semantic_duplicates(
     conn: &Connection,
     invoice_id: i64,

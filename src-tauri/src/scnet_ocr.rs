@@ -1,3 +1,7 @@
+//! SCNet OCR 集成模块：调用 SCNet 高精度 OCR 识别增值税发票。
+//!
+//! 提供发票图片识别、结果格式转换，以及 VLM 与 SCNet 结果的合并策略。
+
 use std::path::Path;
 use std::time::Duration;
 
@@ -5,12 +9,14 @@ use scnetocr::{InvoiceElements, OcrClient, OcrType};
 use serde_json::{json, Value};
 use tracing::{info, warn};
 
-/// Default SCNet OCR request timeout.
-const DEFAULT_SCNET_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::app_core::constants::SCNET_OCR_TIMEOUT_SECS;
 
-/// Call SCNet OCR to recognize a VAT invoice image.
-/// Returns the structured extraction JSON string in project-internal format.
-/// Returns None if no results found (not an invoice).
+/// SCNet OCR 默认请求超时时间。
+const DEFAULT_SCNET_TIMEOUT: Duration = Duration::from_secs(SCNET_OCR_TIMEOUT_SECS);
+
+/// 调用 SCNet OCR 识别增值税发票图片。
+///
+/// 返回项目内部格式的结构化 JSON 字符串，未识别为发票时返回 None。
 pub async fn recognize_with_scnet(
     api_key: &str,
     image_path: &Path,
@@ -125,9 +131,9 @@ fn normalize_date(date: Option<&str>) -> Option<String> {
     Some(s.to_string())
 }
 
-/// Merge VLM recognition result with SCNet OCR result.
-/// VLM is the base; SCNet high-precision fields override/complete VLM.
-/// Returns merged JSON string.
+/// 合并 VLM 和 SCNet OCR 的识别结果。
+///
+/// 以 VLM 结果为基础，SCNet 的高精度字段（发票代码、号码、金额等）覆盖/补充 VLM。
 pub fn merge_vlm_and_scnet(vlm_json: &str, scnet_json: &str) -> String {
     let mut vlm: Value = match serde_json::from_str(vlm_json) {
         Ok(v) => v,

@@ -1,3 +1,8 @@
+//! 文件夹监听模块：监控指定目录的新文件并自动导入识别。
+//!
+//! 通过 `notify` 库监听文件系统事件，新文件稳定后自动导入并触发 LLM 识别，
+//! 支持文件扩展名过滤、关键词匹配和文件年龄过滤。
+
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -10,6 +15,9 @@ use std::{
 
 use tracing::{error, info, warn};
 
+use crate::app_core::constants::{
+    SECONDS_PER_DAY, WATCHER_DEFAULT_STABLE_WAIT_MS, WATCHER_STABILITY_CHECK_INTERVAL_MS,
+};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -24,6 +32,7 @@ use crate::{
     storage::StorageError,
 };
 
+/// 监听模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum WatcherError {
     #[error("database error: {0}")]
@@ -38,6 +47,7 @@ pub enum WatcherError {
     NotFound(i64),
 }
 
+/// 监听目录配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatchDir {
     pub id: i64,
@@ -54,6 +64,7 @@ pub struct WatchDir {
     pub updated_at: String,
 }
 
+/// 监听目录的运行状态。
 #[derive(Debug, Clone, Serialize)]
 pub struct WatchDirStatus {
     #[serde(flatten)]
@@ -62,6 +73,7 @@ pub struct WatchDirStatus {
     pub error: Option<String>,
 }
 
+/// 添加监听目录的请求参数。
 #[derive(Debug, Clone, Deserialize)]
 pub struct AddWatchDirRequest {
     pub path: String,
@@ -72,6 +84,7 @@ pub struct AddWatchDirRequest {
     pub max_file_age_days: Option<i64>,
 }
 
+/// 更新监听目录配置的请求参数。
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpdateWatchDirRequest {
     pub path: Option<String>,
@@ -96,6 +109,7 @@ struct WatchHandle {
     stop_flag: Arc<AtomicBool>,
 }
 
+/// 监听目录管理器，管理所有监听线程的生命周期。
 pub struct WatcherManager {
     db: Arc<Mutex<Connection>>,
     raw_dir: PathBuf,
@@ -108,6 +122,7 @@ pub struct WatcherManager {
 }
 
 impl WatcherManager {
+    /// 创建新的监听管理器实例。
     pub fn new(
         db: Arc<Mutex<Connection>>,
         raw_dir: PathBuf,
@@ -129,6 +144,7 @@ impl WatcherManager {
         }
     }
 
+    /// 恢复所有已启用的监听目录（应用启动时调用）。
     pub fn resume_enabled(&self) -> Result<(), WatcherError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = db.prepare(
@@ -163,6 +179,7 @@ impl WatcherManager {
         Ok(())
     }
 
+    /// 添加新的监听目录并开始监听。
     pub fn add_watch_dir(
         &self,
         request: AddWatchDirRequest,
@@ -174,7 +191,7 @@ impl WatcherManager {
 
         let extensions = request.extensions.unwrap_or_default();
         let recursive = request.recursive.unwrap_or(true);
-        let stable_wait_ms = request.stable_wait_ms.unwrap_or(2000);
+        let stable_wait_ms = request.stable_wait_ms.unwrap_or(WATCHER_DEFAULT_STABLE_WAIT_MS as i64);
         let name_keywords = request.name_keywords.unwrap_or_default();
         let max_file_age_days = request.max_file_age_days.unwrap_or(0);
 
@@ -194,6 +211,7 @@ impl WatcherManager {
         self.get_status(id)
     }
 
+    /// 移除指定监听目录并停止监听。
     pub fn remove_watch_dir(&self, id: i64) -> Result<(), WatcherError> {
         self.stop_watching(id);
 
@@ -206,6 +224,7 @@ impl WatcherManager {
         Ok(())
     }
 
+    /// 列出所有监听目录及其运行状态。
     pub fn list_watch_dirs(&self) -> Result<Vec<WatchDirStatus>, WatcherError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = db.prepare(
@@ -249,6 +268,7 @@ impl WatcherManager {
         Ok(result)
     }
 
+    /// 更新指定监听目录的配置。
     pub fn update_watch_dir(
         &self,
         id: i64,
@@ -325,6 +345,7 @@ impl WatcherManager {
         self.get_status(id)
     }
 
+    /// 启用或禁用指定监听目录。
     pub fn toggle_watch_dir(&self, id: i64, enabled: bool) -> Result<WatchDirStatus, WatcherError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         db.execute(
@@ -531,7 +552,7 @@ fn watch_loop(
         .filter(|s| !s.is_empty())
         .collect();
 
-    let check_interval = Duration::from_millis(100);
+    let check_interval = Duration::from_millis(WATCHER_STABILITY_CHECK_INTERVAL_MS);
     let stable_duration = Duration::from_millis(stable_wait_ms);
     let mut pending_paths: HashSet<PathBuf> = HashSet::new();
     let mut last_event = Instant::now();
@@ -629,7 +650,7 @@ fn matches_filter(
         if let Ok(metadata) = std::fs::metadata(path) {
             if let Ok(modified) = metadata.modified() {
                 if let Ok(elapsed) = modified.elapsed() {
-                    let max_age = std::time::Duration::from_secs(max_age_days as u64 * 86400);
+                    let max_age = std::time::Duration::from_secs(max_age_days as u64 * SECONDS_PER_DAY);
                     if elapsed > max_age {
                         return false;
                     }
@@ -749,6 +770,9 @@ fn process_pending(
     }
 }
 
+/// 异步识别单个原始文件，支持 PDF 多页渲染。
+///
+/// 返回是否至少有一页识别成功。
 pub async fn recognize_raw_file_async(
     db: &Arc<Mutex<Connection>>,
     thumbnails_dir: &Path,

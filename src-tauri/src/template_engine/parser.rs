@@ -136,7 +136,7 @@ fn parse_sheet(name: &str, path: &str, xml: &str, shared_strings: &[String]) -> 
     }
 }
 
-/// Parse all <row> elements from sheet XML.
+/// Parse all `<row>` elements from sheet XML.
 fn parse_rows(xml: &str, shared_strings: &[String]) -> Vec<RowAst> {
     let mut rows = Vec::new();
     // Find <sheetData>...</sheetData> section
@@ -175,7 +175,7 @@ fn parse_rows(xml: &str, shared_strings: &[String]) -> Vec<RowAst> {
     rows
 }
 
-/// Parse all <c> elements from a row's content.
+/// Parse all `<c>` elements from a row's content.
 fn parse_cells(row_xml: &str, row_num: u32, shared_strings: &[String]) -> Vec<CellAst> {
     let mut cells = Vec::new();
 
@@ -367,7 +367,7 @@ fn extract_attr(segment: &str, attr_name: &str) -> Option<String> {
     None
 }
 
-/// Extract the text content of an XML tag like <v>...</v>.
+/// Extract the text content of an XML tag like `<v>...</v>`.
 fn extract_tag_value(xml: &str, tag: &str) -> Option<String> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");

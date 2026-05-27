@@ -1,3 +1,8 @@
+//! 邮件附件导入模块：通过 IMAP/POP3 协议拉取邮件附件并自动导入。
+//!
+//! 支持 IMAP（含 OAuth2）和 POP3 协议，按关键词过滤附件文件名，
+//! 自动下载 PDF/图片附件并触发发票识别流程。
+
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -31,6 +36,7 @@ impl imap::Authenticator for OAuth2Authenticator {
     }
 }
 
+/// 邮件模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum EmailError {
     #[error("database error: {0}")]
@@ -45,6 +51,7 @@ pub enum EmailError {
     NotFound(i64),
 }
 
+/// 邮件来源配置，包含服务器连接信息和同步参数。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailSource {
     pub id: i64,
@@ -70,6 +77,7 @@ pub struct EmailSource {
     pub updated_at: String,
 }
 
+/// 添加邮件来源的请求参数。
 #[derive(Debug, Clone, Deserialize)]
 pub struct AddEmailSourceRequest {
     pub name: Option<String>,
@@ -86,6 +94,7 @@ pub struct AddEmailSourceRequest {
     pub poll_interval_seconds: Option<i64>,
 }
 
+/// 更新邮件来源配置的请求参数。
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpdateEmailSourceRequest {
     pub name: Option<String>,
@@ -103,6 +112,7 @@ pub struct UpdateEmailSourceRequest {
     pub enabled: Option<bool>,
 }
 
+/// 邮件连接测试结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct EmailTestResult {
     pub success: bool,
@@ -110,6 +120,7 @@ pub struct EmailTestResult {
     pub folder_count: Option<i64>,
 }
 
+/// 邮件同步结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct EmailSyncResult {
     pub source_id: i64,
@@ -266,6 +277,7 @@ fn pop3_multiline_cmd(conn: &mut Pop3Stream, cmd: &str) -> Result<Vec<String>, E
 
 // ---
 
+/// 邮件管理器，负责邮件来源的 CRUD 和附件同步导入。
 pub struct EmailManager {
     db: Arc<Mutex<Connection>>,
     raw_dir: PathBuf,
@@ -275,6 +287,7 @@ pub struct EmailManager {
 }
 
 impl EmailManager {
+    /// 创建新的邮件管理器实例。
     pub fn new(
         db: Arc<Mutex<Connection>>,
         raw_dir: PathBuf,
@@ -293,6 +306,7 @@ impl EmailManager {
 
     // --- CRUD ---
 
+    /// 添加新的邮件来源。
     pub fn add_email_source(
         &self,
         request: AddEmailSourceRequest,
@@ -326,6 +340,7 @@ impl EmailManager {
         self.get_email_source(id)
     }
 
+    /// 更新指定邮件来源的配置。
     pub fn update_email_source(
         &self,
         id: i64,
@@ -390,6 +405,7 @@ impl EmailManager {
         self.get_email_source(id)
     }
 
+    /// 删除指定邮件来源。
     pub fn remove_email_source(&self, id: i64) -> Result<(), EmailError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let affected = db.execute("DELETE FROM email_sources WHERE id = ?1", [id])?;
@@ -400,6 +416,7 @@ impl EmailManager {
         Ok(())
     }
 
+    /// 列出所有邮件来源。
     pub fn list_email_sources(&self) -> Result<Vec<EmailSource>, EmailError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = db.prepare(
@@ -439,6 +456,7 @@ impl EmailManager {
         Ok(sources)
     }
 
+    /// 启用或禁用指定邮件来源。
     pub fn toggle_email_source(&self, id: i64, enabled: bool) -> Result<EmailSource, EmailError> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         db.execute(
@@ -488,6 +506,7 @@ impl EmailManager {
 
     // --- Test Connection ---
 
+    /// 测试邮件服务器连接是否可用。
     pub fn test_connection(
         &self,
         protocol: &str,
@@ -554,6 +573,7 @@ impl EmailManager {
 
     // --- Sync ---
 
+    /// 同步指定邮件来源，拉取新邮件附件并导入。
     pub fn sync_email_source(&self, id: i64) -> Result<EmailSyncResult, EmailError> {
         let source = self.get_email_source(id)?;
 
@@ -607,6 +627,7 @@ impl EmailManager {
         result
     }
 
+    /// 同步所有已启用的邮件来源。
     pub fn sync_all_enabled(&self) -> Result<Vec<EmailSyncResult>, EmailError> {
         let sources = self.list_email_sources()?;
         let mut results = Vec::new();

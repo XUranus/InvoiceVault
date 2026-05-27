@@ -1,8 +1,13 @@
+//! 仪表盘统计模块。
+//!
+//! 提供发票数据的聚合统计功能，包括总额、月度趋势、类型分布、状态分布和卖家排行等。
+
 use rusqlite::Connection;
 use serde::Serialize;
 
 use super::ExtractorError;
 
+/// 仪表盘聚合统计数据，包含总额、本月数据、趋势和各类分布。
 #[derive(Debug, Clone, Serialize)]
 pub struct DashboardStats {
     pub total_invoices: i64,
@@ -19,6 +24,7 @@ pub struct DashboardStats {
     pub top_sellers: Vec<TopSellerItem>,
 }
 
+/// 月度趋势数据点，表示某月的发票数量和金额。
 #[derive(Debug, Clone, Serialize)]
 pub struct MonthlyTrendPoint {
     pub month: String,
@@ -26,6 +32,7 @@ pub struct MonthlyTrendPoint {
     pub amount: f64,
 }
 
+/// 分类统计条目，用于按类型或状态分组展示。
 #[derive(Debug, Clone, Serialize)]
 pub struct BreakdownItem {
     pub label: String,
@@ -33,6 +40,7 @@ pub struct BreakdownItem {
     pub amount: f64,
 }
 
+/// 卖家排行条目，展示卖家名称、发票数量和金额。
 #[derive(Debug, Clone, Serialize)]
 pub struct TopSellerItem {
     pub seller_name: String,
@@ -75,6 +83,7 @@ fn build_issue_date_filter(
     (clause, params)
 }
 
+/// 获取仪表盘统计数据，支持可选的日期范围过滤。
 pub fn get_dashboard_stats(
     conn: &Connection,
     date_from: Option<&str>,

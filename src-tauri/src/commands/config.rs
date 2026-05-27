@@ -7,6 +7,9 @@ use tracing::debug;
 
 use crate::app_core::{AppState, CleanupStorageResult, ExportLogsResult, PriceConfig,
     RecognitionQueueStatus, RegenerateEmbeddingsResult};
+use crate::app_core::constants::{
+    DIR_MODELS, EMBEDDING_DOWNLOAD_TIMEOUT_SECS, EMBEDDING_MODEL_DIR, EMBEDDING_TEST_TIMEOUT_SECS,
+};
 use crate::chroma::ChromaConfig;
 use crate::diag;
 use crate::embedding::EmbeddingTestResult;
@@ -26,7 +29,7 @@ pub struct LocalEmbeddingStatus {
 }
 
 pub fn embedding_model_presence(app_data_dir: &Path) -> (bool, Option<String>) {
-    let model_dir = app_data_dir.join("models").join("bge-small-zh-v1.5");
+    let model_dir = app_data_dir.join(DIR_MODELS).join(EMBEDDING_MODEL_DIR);
     let present = model_dir.join("onnx").join("model_q4.onnx").exists()
         && model_dir.join("tokenizer.json").exists();
     (
@@ -123,7 +126,7 @@ pub async fn download_embedding_model(
 ) -> Result<LocalEmbeddingStatus, String> {
     let app_data_dir = state.app_data_dir().to_path_buf();
     let model_dir = tokio::time::timeout(
-        Duration::from_secs(120),
+        Duration::from_secs(EMBEDDING_DOWNLOAD_TIMEOUT_SECS),
         crate::embedding::ensure_model(&app_data_dir),
     )
     .await
@@ -203,7 +206,7 @@ pub fn test_chroma_connection(state: State<'_, AppState>) -> Result<bool, String
 #[tauri::command]
 pub async fn test_embedding_connection(app: AppHandle) -> Result<EmbeddingTestResult, String> {
     tokio::time::timeout(
-        Duration::from_secs(120),
+        Duration::from_secs(EMBEDDING_TEST_TIMEOUT_SECS),
         tauri::async_runtime::spawn_blocking(move || {
             let state = app.state::<AppState>();
             state

@@ -1,3 +1,8 @@
+//! 本地 Embedding 引擎模块：基于 ONNX Runtime 运行 BERT 模型生成文本向量。
+//!
+//! 支持模型自动下载、加载 ONNX 模型和 tokenizer，
+//! 提供文本向量化和连接测试功能。
+
 use std::{
     path::{Path, PathBuf},
     sync::OnceLock,
@@ -6,17 +11,17 @@ use std::{
 use serde::Serialize;
 use tracing::info;
 
-const MODEL_REPO: &str = "Xenova/bge-small-zh-v1.5";
-const ONNX_FILE: &str = "onnx/model_q4.onnx";
-const TOKENIZER_FILE: &str = "tokenizer.json";
-const MODEL_DIR_NAME: &str = "bge-small-zh-v1.5";
-const DIMENSIONS: usize = 384;
-const MAX_TOKEN_LENGTH: usize = 512;
+use crate::app_core::constants::{
+    EMBEDDING_DIMENSIONS as DIMENSIONS, EMBEDDING_MAX_TOKENS as MAX_TOKEN_LENGTH,
+    EMBEDDING_MODEL_DIR as MODEL_DIR_NAME, EMBEDDING_MODEL_REPO as MODEL_REPO,
+    EMBEDDING_ONNX_PATH as ONNX_FILE, EMBEDDING_TOKENIZER_FILE as TOKENIZER_FILE,
+};
 #[cfg(target_os = "windows")]
 const ONNX_RUNTIME_DLL: &str = "onnxruntime.dll";
 
 static ORT_INIT_RESULT: OnceLock<Result<(), String>> = OnceLock::new();
 
+/// Embedding 模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum EmbeddingError {
     #[error("embedding engine not loaded")]
@@ -29,6 +34,7 @@ pub enum EmbeddingError {
     Inference(String),
 }
 
+/// Embedding 推理结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct EmbeddingResult {
     pub embedding: Vec<f32>,
@@ -36,6 +42,7 @@ pub struct EmbeddingResult {
     pub total_tokens: i64,
 }
 
+/// Embedding 连接测试结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct EmbeddingTestResult {
     pub model: String,
@@ -43,6 +50,7 @@ pub struct EmbeddingTestResult {
     pub duration_ms: u64,
 }
 
+/// 本地 Embedding 引擎，封装 ONNX Runtime 会话和 tokenizer。
 pub struct LocalEmbeddingEngine {
     session: ort::session::Session,
     tokenizer: tokenizers::Tokenizer,
@@ -50,6 +58,7 @@ pub struct LocalEmbeddingEngine {
 }
 
 impl LocalEmbeddingEngine {
+    /// 从模型目录加载 ONNX 模型和 tokenizer。
     pub fn load(model_dir: &Path) -> Result<Self, EmbeddingError> {
         ensure_onnx_runtime_loaded().map_err(EmbeddingError::Load)?;
 
@@ -93,10 +102,12 @@ impl LocalEmbeddingEngine {
         })
     }
 
+    /// 返回模型文件所在目录。
     pub fn model_dir(&self) -> &Path {
         &self.model_dir
     }
 
+    /// 返回向量维度。
     pub fn dimensions(&self) -> usize {
         DIMENSIONS
     }
@@ -258,8 +269,8 @@ fn find_onnxruntime_lib(lib_name: &str) -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.exists())
 }
 
-/// Ensure model files exist. Downloads from HuggingFace if missing.
-/// Returns the path to the model directory.
+/// 确保 Embedding 模型文件存在，缺失时从 HuggingFace 自动下载。
+/// 返回模型目录路径。
 pub async fn ensure_model(app_data_dir: &Path) -> Result<PathBuf, EmbeddingError> {
     let model_dir = app_data_dir.join("models").join(MODEL_DIR_NAME);
     let onnx_path = model_dir.join(ONNX_FILE);
@@ -310,7 +321,7 @@ pub async fn ensure_model(app_data_dir: &Path) -> Result<PathBuf, EmbeddingError
     Ok(model_dir)
 }
 
-/// Generate an embedding vector for the given text using the local ONNX model.
+/// 使用本地 ONNX 模型为文本生成 embedding 向量。
 pub fn generate_embedding(
     engine: &mut LocalEmbeddingEngine,
     text: &str,
@@ -417,7 +428,7 @@ pub fn generate_embedding(
     })
 }
 
-/// Test the local embedding engine by running a sample inference.
+/// 测试本地 Embedding 引擎，执行一次样例推理。
 pub fn test_embedding_connection(
     engine: &mut LocalEmbeddingEngine,
 ) -> Result<EmbeddingTestResult, EmbeddingError> {

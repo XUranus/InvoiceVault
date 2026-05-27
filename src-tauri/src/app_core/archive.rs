@@ -1,3 +1,5 @@
+//! ZIP 归档工具函数，用于日志导出和数据备份。
+
 use std::{
     io::{Read, Write},
     path::Path,
@@ -13,6 +15,7 @@ fn io_err(e: std::io::Error) -> AppError {
     AppError::Io(e)
 }
 
+/// 将单个文件以流式方式写入 ZIP 归档。
 pub fn stream_file_to_zip(
     zip_writer: &mut zip::ZipWriter<std::fs::File>,
     zip_path: &str,
@@ -32,6 +35,7 @@ pub fn stream_file_to_zip(
     Ok(())
 }
 
+/// 递归将目录下所有文件添加到 ZIP 归档。
 pub fn add_dir_to_zip(
     zip_writer: &mut zip::ZipWriter<std::fs::File>,
     base: &Path,
@@ -41,6 +45,7 @@ pub fn add_dir_to_zip(
     add_dir_to_zip_inner(zip_writer, base, dir, options, &[])
 }
 
+/// 递归将目录添加到 ZIP 归档，可跳过指定子目录。
 pub fn add_dir_to_zip_with_skip(
     zip_writer: &mut zip::ZipWriter<std::fs::File>,
     base: &Path,

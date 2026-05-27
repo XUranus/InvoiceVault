@@ -1,15 +1,22 @@
+//! 诊断模块：验证 LLM 连接、发票识别准确度和 Embedding 引擎状态。
+//!
+//! 执行多步诊断（文本生成、图片识别、结果对比、Embedding），
+//! 通过 ground truth 比对评估识别质量并输出诊断报告。
+
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
+use crate::app_core::constants::DIAGNOSTIC_CONFIG_FILE;
 use crate::embedding::EmbeddingTestResult;
 use crate::llm::{
     recognize_invoice_with_retries, test_llm_connection as run_llm_connection_test, LlmAuditConfig,
     LlmProviderConfig,
 };
 
+/// 诊断用的发票标准答案字段。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroundTruth {
     pub invoice_type: Option<String>,
@@ -41,6 +48,7 @@ impl Default for GroundTruth {
     }
 }
 
+/// 诊断配置，包含测试图片路径和标准答案。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticConfig {
     pub test_image_path: String,
@@ -58,6 +66,7 @@ impl Default for DiagnosticConfig {
     }
 }
 
+/// 单个诊断步骤的结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct DiagnosticStep {
     pub name: String,
@@ -67,6 +76,7 @@ pub struct DiagnosticStep {
     pub details: Option<String>,
 }
 
+/// 完整诊断结果，包含各步骤和综合得分。
 #[derive(Debug, Clone, Serialize)]
 pub struct DiagnosticResult {
     pub steps: Vec<DiagnosticStep>,
@@ -77,7 +87,7 @@ pub struct DiagnosticResult {
 /// Embedded test image for diagnostics — avoids dependency on resource bundling
 const TEST_IMAGE_BYTES: &[u8] = include_bytes!("../../sample/fake-invoice-1.png");
 
-/// Write embedded sample files to app_data_dir/sample/ if not already present.
+/// 将内嵌的测试样例文件写入 app_data_dir/sample/（如不存在）。
 pub fn ensure_samples(app_data_dir: &Path) {
     let samples_dir = app_data_dir.join("sample");
     if let Err(e) = std::fs::create_dir_all(&samples_dir) {
@@ -94,11 +104,9 @@ pub fn ensure_samples(app_data_dir: &Path) {
     }
 }
 
-/// Load diagnostic config from app_data_dir.
-/// Rewrites test_image_path to absolute path under app_data_dir/sample/.
-/// If no config exists, creates one with embedded ground truth and image path.
+/// 加载诊断配置。若不存在则创建默认配置。
 pub fn load_config(app_data_dir: &Path) -> DiagnosticConfig {
-    let config_path = app_data_dir.join("diagnostic_config.json");
+    let config_path = app_data_dir.join(DIAGNOSTIC_CONFIG_FILE);
     let samples_dir = app_data_dir.join("sample");
 
     if let Ok(json) = std::fs::read_to_string(&config_path) {
@@ -139,12 +147,14 @@ pub fn load_config(app_data_dir: &Path) -> DiagnosticConfig {
     config
 }
 
+/// 保存诊断配置到磁盘。
 pub fn save_config(app_data_dir: &Path, config: &DiagnosticConfig) -> std::io::Result<()> {
-    let path = app_data_dir.join("diagnostic_config.json");
+    let path = app_data_dir.join(DIAGNOSTIC_CONFIG_FILE);
     let json = serde_json::to_string_pretty(config)?;
     std::fs::write(path, json)
 }
 
+/// 执行完整诊断流程：文本生成、图片识别、结果对比、Embedding 检测。
 pub async fn run_diagnostic(
     diag_config: &DiagnosticConfig,
     llm_config: &LlmProviderConfig,

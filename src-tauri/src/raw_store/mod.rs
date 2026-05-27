@@ -1,3 +1,8 @@
+//! 原始文件存储模块：负责文件检查、哈希计算和按日期归档存储。
+//!
+//! 支持文件完整性校验（SHA256/MD5）、扩展名验证，
+//! 按年月目录结构存储原始文件并处理文件名冲突。
+
 use std::{
     fs::{self, File},
     io::{self, BufReader, Read},
@@ -10,8 +15,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tracing::error;
 
-const ALLOWED_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg"];
+use crate::app_core::constants::ALLOWED_EXTENSIONS;
 
+/// 原始文件的元数据和存储信息。
 #[derive(Debug, Clone, Serialize)]
 pub struct RawFileInput {
     pub source_path: PathBuf,
@@ -25,6 +31,7 @@ pub struct RawFileInput {
     pub storage_path: Option<PathBuf>,
 }
 
+/// 原始文件存储模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum RawStoreError {
     #[error("source path does not exist: {0}")]
@@ -39,6 +46,7 @@ pub enum RawStoreError {
     Io(#[from] io::Error),
 }
 
+/// 检查源文件并计算哈希值，返回文件元数据。
 pub fn inspect_file(source_path: &Path) -> Result<RawFileInput, RawStoreError> {
     validate_source(source_path)?;
 
@@ -69,6 +77,7 @@ pub fn inspect_file(source_path: &Path) -> Result<RawFileInput, RawStoreError> {
     })
 }
 
+/// 将原始文件按年月目录归档存储，自动处理文件名冲突。
 pub fn store_original_file(
     raw_dir: &Path,
     mut raw_file: RawFileInput,

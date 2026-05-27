@@ -6,7 +6,7 @@ use super::strings::SharedStringPool;
 pub enum CellValue {
     /// String value — will be added to the shared string pool during write.
     String(String),
-    /// Numeric value — written directly as <v>N</v>.
+    /// Numeric value — written directly as `<v>N</v>`.
     Number(f64),
     /// Empty cell that keeps row/cell style but clears any template sample value.
     Blank,

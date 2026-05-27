@@ -1,3 +1,5 @@
+//! 应用路径管理，负责创建和维护各功能目录结构。
+
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -5,9 +7,11 @@ use std::{
 
 use serde::Serialize;
 
+use super::constants::DIR_LOGS;
 use super::AppError;
 use crate::process_utils::command_no_window;
 
+/// 应用运行所需的各类文件路径集合。
 #[derive(Debug, Clone, Serialize)]
 pub struct AppPaths {
     pub app_data_dir: PathBuf,
@@ -20,10 +24,11 @@ pub struct AppPaths {
     pub sessions_dir: PathBuf,
 }
 
+/// 根据应用数据目录创建所有必需的子目录并返回路径集合。
 pub fn create_app_paths(app_data_dir: &Path) -> Result<AppPaths, AppError> {
     let raw_dir = app_data_dir.join("raw");
     let thumbnails_dir = app_data_dir.join("thumbnails");
-    let logs_dir = app_data_dir.join("logs");
+    let logs_dir = app_data_dir.join(DIR_LOGS);
     let llm_audit_dir = app_data_dir.join("llm_audit");
     let agent_uploads_dir = app_data_dir.join("agent_uploads");
     let sessions_dir = app_data_dir.join("sessions");
@@ -46,6 +51,7 @@ pub fn create_app_paths(app_data_dir: &Path) -> Result<AppPaths, AppError> {
     })
 }
 
+/// 将路径转换为可显示的字符串。
 pub fn display_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -57,6 +63,7 @@ pub fn session_temp_dir(sessions_dir: &Path, session_uuid: &str) -> Result<PathB
     Ok(temp_dir)
 }
 
+/// 使用系统默认程序打开指定路径（文件或目录）。
 pub fn open_path_with_system(path: &Path) -> Result<(), AppError> {
     #[cfg(target_os = "windows")]
     let mut command = {

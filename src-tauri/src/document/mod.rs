@@ -1,3 +1,8 @@
+//! 文档处理模块：PDF 渲染、图片预处理和 EXIF 方向校正。
+//!
+//! 调用外部 `pdftoppm` 工具将 PDF 转为图片，
+//! 提供图片缩放、EXIF 旋转校正和 alpha 通道处理。
+
 use std::{
     fs,
     io::BufReader,
@@ -8,12 +13,14 @@ use std::{
 use image::{codecs::jpeg::JpegEncoder, DynamicImage, GenericImageView, ImageReader};
 use tracing::error;
 
+/// PDF 渲染后的单页结果。
 #[derive(Debug, Clone)]
 pub struct RenderedPdfPage {
     pub page_number: usize,
     pub image_path: PathBuf,
 }
 
+/// 预处理后的图片信息（规范化图片和缩略图路径）。
 #[derive(Debug, Clone)]
 pub struct PreparedImage {
     pub image_path: PathBuf,
@@ -21,6 +28,7 @@ pub struct PreparedImage {
     pub mime_type: String,
 }
 
+/// 文档处理模块错误类型。
 #[derive(Debug, thiserror::Error)]
 pub enum DocumentError {
     #[error("io error: {0}")]
@@ -35,6 +43,7 @@ pub enum DocumentError {
     NoRenderedPages,
 }
 
+/// 将 PDF 文件渲染为 JPEG 图片，返回各页图片路径。
 pub fn render_pdf_pages(
     pdf_path: &Path,
     cache_root: &Path,
@@ -92,6 +101,7 @@ pub fn render_pdf_pages(
         .collect())
 }
 
+/// 为识别流程预处理图片：缩放、EXIF 校正，生成规范化图片和缩略图。
 pub fn prepare_image_for_recognition(
     image_path: &Path,
     cache_root: &Path,
@@ -172,7 +182,7 @@ fn flatten_alpha(img: DynamicImage) -> DynamicImage {
     DynamicImage::ImageRgb8(rgb)
 }
 
-/// Resize, auto-orient, flatten alpha, and save as JPEG with the given quality.
+/// 缩放、EXIF 方向校正、alpha 合并后保存为 JPEG。
 pub fn resize_and_save(
     input_path: &Path,
     output_path: &Path,
