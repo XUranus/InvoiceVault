@@ -444,6 +444,8 @@ pub fn run() {
             window_minimize,
             window_toggle_maximize,
             window_close,
+            window_get_position,
+            window_set_position,
             app_health,
             get_app_version,
             frontend_heartbeat,

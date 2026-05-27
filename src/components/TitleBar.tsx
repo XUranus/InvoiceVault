@@ -6,14 +6,10 @@ const appIcon = new URL("../../src-tauri/icons/icon.png", import.meta.url).href;
 
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = React.useState(false);
-
-  const startDrag = React.useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return;
-      invoke("window_start_dragging").catch(() => {});
-    },
-    [],
-  );
+  const lastClickRef = React.useRef<number>(0);
+  const draggingRef = React.useRef(false);
+  const dragOriginRef = React.useRef({ x: 0, y: 0 });
+  const winPosRef = React.useRef({ x: 0, y: 0 });
 
   const toggleMaximize = React.useCallback(() => {
     invoke<boolean>("window_toggle_maximize")
@@ -21,12 +17,61 @@ export function TitleBar() {
       .catch(() => {});
   }, []);
 
+  React.useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const dx = e.screenX - dragOriginRef.current.x;
+      const dy = e.screenY - dragOriginRef.current.y;
+      invoke("window_set_position", {
+        x: winPosRef.current.x + dx,
+        y: winPosRef.current.y + dy,
+      }).catch(() => {});
+    };
+
+    const onUp = () => {
+      draggingRef.current = false;
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  const handleMouseDown = React.useCallback(
+    async (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      const now = Date.now();
+
+      // Double-click detected — toggle maximize instead of dragging
+      if (now - lastClickRef.current < 300) {
+        lastClickRef.current = 0;
+        toggleMaximize();
+        return;
+      }
+      lastClickRef.current = now;
+
+      // Start manual drag: record origin and window position
+      try {
+        const pos = await invoke<{ x: number; y: number }>("window_get_position");
+        winPosRef.current = pos;
+        dragOriginRef.current = { x: event.screenX, y: event.screenY };
+        draggingRef.current = true;
+      } catch {
+        // fallback to native drag
+        invoke("window_start_dragging").catch(() => {});
+      }
+    },
+    [toggleMaximize],
+  );
+
   return (
     <div className="titlebar">
       <div
         className="titlebar-drag-region"
-        onMouseDown={startDrag}
-        onDoubleClick={toggleMaximize}
+        onMouseDown={handleMouseDown}
       >
         <div className="titlebar-brand">
           <img src={appIcon} className="titlebar-icon" alt="" aria-hidden="true" />
