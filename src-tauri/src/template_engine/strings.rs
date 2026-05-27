@@ -51,7 +51,7 @@ impl SharedStringPool {
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="{count}" uniqueCount="{count}">"#
         );
         for s in &self.strings {
-            xml.push_str("<si><t>");
+            xml.push_str("<si><t xml:space=\"preserve\">");
             xml.push_str(&xml_escape(s));
             xml.push_str("</t></si>");
         }
@@ -93,8 +93,8 @@ mod tests {
     fn test_to_xml() {
         let pool = SharedStringPool::from_existing(vec!["hello".into(), "w<o>&rld".into()]);
         let xml = pool.to_xml();
-        assert!(xml.contains("<si><t>hello</t></si>"));
-        assert!(xml.contains("<si><t>w&lt;o&gt;&amp;rld</t></si>"));
+        assert!(xml.contains("<si><t xml:space=\"preserve\">hello</t></si>"));
+        assert!(xml.contains("<si><t xml:space=\"preserve\">w&lt;o&gt;&amp;rld</t></si>"));
         assert!(xml.contains(r#"count="2""#));
     }
 }

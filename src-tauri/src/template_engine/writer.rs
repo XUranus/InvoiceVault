@@ -179,7 +179,12 @@ fn render_row_xml(row: &RowIR, strings: &mut SharedStringPool) -> String {
     } else if let Some(ref raw) = row.raw_row_xml {
         // Shifted static row: extract original row header from raw XML and update row number
         if let Some(tag_end) = raw.find('>') {
-            replace_row_number(&raw[..tag_end + 1], row.row_num)
+            let header = &raw[..tag_end + 1];
+            if header.ends_with("/>") {
+                // Self-closing row tag — no cells, return as-is
+                return replace_row_number(header, row.row_num);
+            }
+            replace_row_number(header, row.row_num)
         } else {
             format!(r#"<row r="{}">"#, row.row_num)
         }
