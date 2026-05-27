@@ -30,8 +30,12 @@ use std::time::Duration;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, DragDropEvent, Emitter, Manager, WindowEvent,
+    AppHandle, Manager, WindowEvent,
 };
+#[cfg(target_os = "windows")]
+use tauri::WebviewWindow;
+#[cfg(not(target_os = "windows"))]
+use tauri::{DragDropEvent, Emitter};
 use tracing::{error, info, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,6 +76,53 @@ fn windows_webview_zoom_for_scale(scale_factor: f64) -> f64 {
     } else {
         0.86
     }
+}
+
+#[cfg(target_os = "windows")]
+fn configure_bundled_windows_dependencies(resource_dir: &Path) {
+    let deps_dir = [
+        resource_dir.join("win-x86_64"),
+        resource_dir.join("resources").join("win-x86_64"),
+    ]
+    .into_iter()
+    .find(|path| path.exists());
+    let Some(deps_dir) = deps_dir else {
+        return;
+    };
+
+    std::env::set_var("INVOICEVAULT_WIN_DEPS_DIR", &deps_dir);
+
+    let onnx_runtime_path = deps_dir.join("onnxruntime.dll");
+    if onnx_runtime_path.exists() {
+        std::env::set_var("ORT_DYLIB_PATH", &onnx_runtime_path);
+    }
+
+    let path_separator = ";";
+    let mut path_entries = vec![
+        deps_dir.clone(),
+        deps_dir.join("poppler").join("bin"),
+        deps_dir.join("poppler").join("Library").join("bin"),
+        deps_dir.join("poppler"),
+    ];
+    path_entries.retain(|path| path.exists());
+
+    if path_entries.is_empty() {
+        return;
+    }
+
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut merged_path = path_entries
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(path_separator);
+
+    if !current_path.is_empty() {
+        merged_path.push_str(path_separator);
+        merged_path.push_str(&current_path.to_string_lossy());
+    }
+
+    std::env::set_var("PATH", merged_path);
 }
 
 #[cfg(target_os = "windows")]
