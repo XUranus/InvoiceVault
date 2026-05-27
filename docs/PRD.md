@@ -17,12 +17,17 @@ InvoiceVault 是一个跨平台桌面端发票处理 Agent，用于导入、识�
 - 向量存储：ChromaDB
 - LLM：OpenAI-compatible Chat Completions / Responses 风格接口，优先支持视觉输入
 
-当前实现快照（2026-05-03）：
+当前实现快照（2026-05-27）：
 
 - 已完成 Tauri 2 + React + Rust 基础应用、SQLite 迁移（版本 9）、RAW 归档、手动导入、目录监听、图片/PDF 识别、列表详情、编辑、去重、Dashboard、CSV/Excel 导出、ChromaDB 语义搜索和语义去重。
 - 已完成 Agent 基础闭环：会话、消息、工具调用、查询、详情、统计、CSV/Excel 导出、字段更新确认和工具审计日志。
+- 已完成 Agent 流式输出（SSE streaming）和任务取消。
+- 已完成 Excel 模板导出引擎：支持 AST 模板解析、条件区域、循环区域、汇总公式和跨 Sheet 引用。
+- 已完成 SCNet 高精度 OCR 交叉验证：VLM 识别结果与 SCNet 结果自动合并。
+- 已完成 MCP Server：支持工具注册、资源管理和外部客户端调用。
 - 已完成事件/通知中心、日志导出、基础存储清理、自定义 Badge 标签、Linux/KDE 托盘和应用图标适配。
-- 仍待完成批量 PDF/图片按模板导出、Agent 流式输出和任务取消、编辑历史 UI、资源规模测试、加密选项和跨平台安装包验收。
+- 已完成跨平台构建：Windows、macOS、Linux x86_64、Linux aarch64 四平台 GitHub Actions CI/CD。
+- 仍待完成编辑历史 UI、资源规模测试、加密选项。
 
 ## 2. 可行性结论
 
@@ -462,7 +467,11 @@ RAW 文件策略：
 - `dedupe`：重复检测、多维相似度评分、候选管理。
 - `chroma`：ChromaDB 适配器和可替换向量存储接口。
 - `embedding`：OpenAI-compatible embedding 配置、连接测试和文本向量生成。
-- `agent`：工具注册、任务规划、执行确认、审计日志。
+- `agent`：工具注册、任务规划、执行确认、审计日志、流式输出。
+- `template_engine`：Excel 模板导出引擎，支持 AST 模板解析、条件区域、循环区域、汇总公式。
+- `mcp`：MCP Server，支持工具注册、资源管理和外部客户端调用。
+- `scnet_ocr`：SCNet 高精度 OCR 集成，支持增值税发票识别和 VLM 结果合并。
+- `email_manager`：邮件发送管理，支持发票邮件通知。
 - `exporter`：Excel/CSV 导出，后续扩展 PDF/图片批量导出。
 - `event`：事件、通知和后台操作记录。
 
@@ -762,6 +771,9 @@ Agent 只能调用应用内部注册工具。工具定义必须包含：
 - 语义重复检测。
 - Dashboard。
 - Agent 聊天窗口基础工具。
+- Agent 流式输出（SSE streaming）和任务取消。
+- SCNet 高精度 OCR 交叉验证。
+- MCP Server（工具注册、资源管理）。
 - 批量 PDF 导出。
 - 编辑历史和审计日志。
 
@@ -771,7 +783,9 @@ Agent 只能调用应用内部注册工具。工具定义必须包含：
 - 更细粒度统计图表。
 - 本地 OCR 或本地 embedding 可选支持。
 - 存储清理和归档策略。
-- 插件化导出模板。
+- Excel 模板导出引擎（AST 模板解析、条件区域、循环区域、汇总公式）。
+- 编辑历史 UI。
+- 资源规模测试和性能优化。
 
 ## 14. 开放问题
 

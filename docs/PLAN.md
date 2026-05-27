@@ -30,21 +30,33 @@ InvoiceVault/
     Cargo.toml
     tauri.conf.json
     src/
-      main.rs
-      app_core/
-      storage/
-      raw_store/
-      importer/
-      watcher/
-      document/
-      llm/
-      extractor/
-      dedupe/
-      chroma/
-      embedding/
-      agent/
-      exporter/
-      event.rs
+      lib.rs                 # crate root, run(), setup_tray(), single-instance
+      main.rs                # binary entry point
+      bin/mcp_server.rs      # standalone MCP server binary
+      commands/              # Tauri command handlers (106 commands, 13 domain files)
+      │  mod.rs, window.rs, invoice.rs, export.rs, import.rs,
+      │  watcher.rs, email.rs, agent.rs, event.rs, config.rs,
+      │  recognize.rs, semantic.rs, util.rs
+      app_core/              # AppState, config, paths, archive, constants
+      agent/                 # Agent tool registration, task/artifact management
+      chroma/                # ChromaDB HTTP client
+      dedupe/                # duplicate detection engine
+      diag.rs                # end-to-end diagnostic tooling
+      document/              # PDF rendering, image normalization
+      email_manager.rs       # IMAP/POP3 email integration
+      embedding/             # local ONNX embedding (BGE model)
+      event.rs               # event/notification recording
+      exporter/              # CSV/Excel/PDF export
+      extractor/             # LLM invoice extraction, CRUD, dashboard, usage
+      importer/              # import job queue, file hash dedup
+      llm/                   # OpenAI-compatible LLM client
+      mcp/                   # MCP JSON-RPC server
+      process_utils.rs       # process utilities
+      raw_store/             # raw file storage, thumbnails
+      scnet_ocr.rs           # SCNet OCR integration
+      storage/               # SQLite migrations
+      template_engine/       # Excel template export engine (10 files)
+      watcher/               # directory watcher with debounce
     migrations/
   tests/
   TODO.md
@@ -202,7 +214,7 @@ InvoiceVault/
 
 目标：提供统计视图和常用导出能力。
 
-状态：部分完成。Dashboard、CSV 导出和 Excel 导出已实现；按模板批量导出 PDF/图片、导出失败清单和更完整的导出任务日志仍待补齐。
+状态：基础闭环完成。Dashboard、CSV 导出和 Excel 导出已实现；模板引擎（`template_engine/`）已完成 parser、region、binder、cloner、writer 等核心模块，支持按 Excel 模板批量导出。导出失败清单和更完整的导出任务日志仍待补齐。
 
 任务：
 
@@ -223,7 +235,7 @@ InvoiceVault/
 
 目标：通过自然语言执行查询、统计和导出任务。
 
-状态：已完成基础闭环。当前已支持 Agent 会话和消息表、工具调用 schema、查询、详情、Dashboard 统计、CSV/Excel 导出、字段更新、确认面板和工具审计日志；流式输出、任务取消、图表生成、批量 PDF/图片导出和更丰富的工具集仍待补齐。
+状态：已完成基础闭环。当前已支持 Agent 会话和消息表、工具调用 schema、查询、详情、Dashboard 统计、CSV/Excel 导出、字段更新、确认面板和工具审计日志；流式输出（`send_agent_message_stream`、`confirm_agent_action_stream`）已实现。MCP Server 已作为独立二进制（`bin/mcp_server.rs`）完整实现，通过 stdio JSON-RPC 暴露 11 个工具。任务取消、图表生成、批量 PDF/图片导出和更丰富的工具集仍待补齐。
 
 任务：
 

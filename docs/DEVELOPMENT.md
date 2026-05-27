@@ -5,7 +5,7 @@
 当前已完成 M8 基础闭环，正在进入批量导出、资源控制和打包验收阶段：
 
 - 前端使用 Vite + React + TypeScript，侧边栏导航多页面布局。
-- 桌面端使用 Tauri 2 + Rust，后端按导入、识别、存储、去重、导出、Agent、事件通知、ChromaDB 和 embedding 等模块拆分。
+- 桌面端使用 Tauri 2 + Rust，后端按导入、识别、存储、去重、导出、Agent、事件通知、ChromaDB、embedding 和模板引擎等模块拆分。106 个 Tauri command 按领域拆分为 `commands/` 下 13 个文件（`mod.rs`、`window.rs`、`invoice.rs`、`export.rs`、`import.rs`、`watcher.rs`、`email.rs`、`agent.rs`、`event.rs`、`config.rs`、`recognize.rs`、`semantic.rs`、`util.rs`）。
 - 后端启动时创建应用数据目录、RAW 目录、缩略图目录和 SQLite 数据库。
 - SQLite 使用内置迁移，当前迁移版本为 `9`。
 - 前端通过 Tauri command `app_health` 读取基础设施状态。
@@ -26,6 +26,8 @@
 - ChromaDB 向量索引：外部 ChromaDB HTTP sidecar，VectorStore 抽象接口。支持发票文本 embedding 写入、语义相似度去重（0.85/0.92 两档阈值）、自然语言语义搜索。Embedding 通过 OpenAI-compatible `/embeddings` 端点生成。
 - Agent 聊天窗口：支持会话创建/删除、历史消息、OpenAI-compatible tool calling、查询发票、读取详情、读取 Dashboard 统计、CSV/Excel 导出和字段更新。
 - Agent 写操作确认：导出和字段更新需要 UI 确认；工具调用结果写入 `audit_logs`，导出操作也会记录事件。
+- Agent 流式输出：`send_agent_message_stream` 和 `confirm_agent_action_stream` 支持实时流式返回 Agent 回复。
+- Excel 模板导出：`template_engine/` 模块（10 个文件）支持按 Excel 模板批量导出，包含模板解析（parser）、区域映射（region）、数据绑定（binder）、工作表克隆（cloner）和写入（writer）等核心能力。
 - MCP Server：独立二进制 `invoicevault-mcp`，通过 MCP 协议（stdio JSON-RPC）向 Claude Code / Codex 暴露 11 个工具，直接读写 SQLite 数据库，无需启动桌面应用。详见 [MCP 文档](MCP.md)。
 - 事件和通知中心：导入、识别、导出、配置变化、清理等后台行为可记录为事件或通知。
 - 设置页已覆盖 LLM、Embedding、ChromaDB、识别并发、监听目录、外部依赖检查、日志导出、存储清理和自定义 Badge 配置。
@@ -121,8 +123,7 @@ npm run tauri dev
 
 当前主要待补齐能力：
 
-- 批量 PDF/图片按模板导出。
-- Agent 流式输出、任务取消、更多工具和确认状态持久化。
+- Agent 任务取消、更多工具和确认状态持久化。
 - 编辑历史 UI 和审计日志查询 UI。
 - 资源占用测试、缓存策略和跨平台打包验收。
 
