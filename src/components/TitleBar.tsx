@@ -7,9 +7,8 @@ const appIcon = new URL("../../src-tauri/icons/icon.png", import.meta.url).href;
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = React.useState(false);
   const lastClickRef = React.useRef<number>(0);
-  const draggingRef = React.useRef(false);
-  const dragOriginRef = React.useRef({ x: 0, y: 0 });
-  const winPosRef = React.useRef({ x: 0, y: 0 });
+  const dragTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const buttonHeldRef = React.useRef(false);
 
   const toggleMaximize = React.useCallback(() => {
     invoke<boolean>("window_toggle_maximize")
@@ -17,54 +16,45 @@ export function TitleBar() {
       .catch(() => {});
   }, []);
 
-  React.useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!draggingRef.current) return;
-      const dx = e.screenX - dragOriginRef.current.x;
-      const dy = e.screenY - dragOriginRef.current.y;
-      invoke("window_set_position", {
-        x: winPosRef.current.x + dx,
-        y: winPosRef.current.y + dy,
-      }).catch(() => {});
-    };
-
-    const onUp = () => {
-      draggingRef.current = false;
-    };
-
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, []);
-
   const handleMouseDown = React.useCallback(
-    async (event: React.MouseEvent<HTMLDivElement>) => {
+    (event: React.MouseEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
       const now = Date.now();
 
-      // Double-click detected — toggle maximize instead of dragging
+      // Double-click — toggle maximize
       if (now - lastClickRef.current < 300) {
         lastClickRef.current = 0;
+        if (dragTimerRef.current) {
+          clearTimeout(dragTimerRef.current);
+          dragTimerRef.current = null;
+        }
         toggleMaximize();
         return;
       }
       lastClickRef.current = now;
 
-      // Start manual drag: record origin and window position
-      const mouseX = event.screenX;
-      const mouseY = event.screenY;
-      try {
-        const pos = await invoke<{ x: number; y: number }>("window_get_position");
-        winPosRef.current = pos;
-        dragOriginRef.current = { x: mouseX, y: mouseY };
-        draggingRef.current = true;
-      } catch {
-        // fallback to native drag
-        invoke("window_start_dragging").catch(() => {});
-      }
+      // Defer native drag by 350ms (exceeds 300ms double-click window).
+      // If the user releases the mouse before the timer fires, the mouseup
+      // listener cancels the timer so the drag never starts.
+      buttonHeldRef.current = true;
+
+      dragTimerRef.current = setTimeout(() => {
+        dragTimerRef.current = null;
+        if (buttonHeldRef.current) {
+          invoke("window_start_dragging").catch(() => {});
+        }
+      }, 350);
+
+      // Cancel pending drag if the mouse is released before the timer fires
+      const onUp = () => {
+        buttonHeldRef.current = false;
+        if (dragTimerRef.current) {
+          clearTimeout(dragTimerRef.current);
+          dragTimerRef.current = null;
+        }
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mouseup", onUp);
     },
     [toggleMaximize],
   );
