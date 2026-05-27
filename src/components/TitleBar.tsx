@@ -54,10 +54,12 @@ export function TitleBar() {
       lastClickRef.current = now;
 
       // Start manual drag: record origin and window position
+      const mouseX = event.screenX;
+      const mouseY = event.screenY;
       try {
         const pos = await invoke<{ x: number; y: number }>("window_get_position");
         winPosRef.current = pos;
-        dragOriginRef.current = { x: event.screenX, y: event.screenY };
+        dragOriginRef.current = { x: mouseX, y: mouseY };
         draggingRef.current = true;
       } catch {
         // fallback to native drag
