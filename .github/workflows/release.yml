@@ -25,6 +25,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Inject version from tag
+        shell: bash
+        run: |
+          if [[ "${{ inputs.version }}" != "" ]]; then
+            VER="${{ inputs.version }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            VER="${TAG#v}"
+          fi
+          echo "Building version: $VER"
+          sed -i "s/\"version\": \"0.1.0\"/\"version\": \"${VER}\"/" src-tauri/tauri.conf.json
+          sed -i "s/^version = \"0.1.0\"/version = \"${VER}\"/" src-tauri/Cargo.toml
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -79,6 +92,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Inject version from tag
+        shell: bash
+        run: |
+          if [[ "${{ inputs.version }}" != "" ]]; then
+            VER="${{ inputs.version }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            VER="${TAG#v}"
+          fi
+          echo "Building version: $VER"
+          sed -i '' "s/\"version\": \"0.1.0\"/\"version\": \"${VER}\"/" src-tauri/tauri.conf.json
+          sed -i '' "s/^version = \"0.1.0\"/version = \"${VER}\"/" src-tauri/Cargo.toml
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -120,6 +146,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Inject version from tag
+        shell: bash
+        run: |
+          if [[ "${{ inputs.version }}" != "" ]]; then
+            VER="${{ inputs.version }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            VER="${TAG#v}"
+          fi
+          echo "Building version: $VER"
+          sed -i "s/\"version\": \"0.1.0\"/\"version\": \"${VER}\"/" src-tauri/tauri.conf.json
+          sed -i "s/^version = \"0.1.0\"/version = \"${VER}\"/" src-tauri/Cargo.toml
 
       - name: Install Linux dependencies
         run: |
@@ -192,6 +231,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Inject version from tag
+        shell: bash
+        run: |
+          if [[ "${{ inputs.version }}" != "" ]]; then
+            VER="${{ inputs.version }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            VER="${TAG#v}"
+          fi
+          echo "Building version: $VER"
+          sed -i "s/\"version\": \"0.1.0\"/\"version\": \"${VER}\"/" src-tauri/tauri.conf.json
+          sed -i "s/^version = \"0.1.0\"/version = \"${VER}\"/" src-tauri/Cargo.toml
 
       - name: Install Linux dependencies
         run: |
