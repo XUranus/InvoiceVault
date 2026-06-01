@@ -413,7 +413,7 @@ pub fn set_log_level(state: State<'_, AppState>, level: String) -> Result<(), St
 
     // Persist to disk
     let app_data_dir = state.app_data_dir();
-    write_config(
+    let _ = write_config(
         app_data_dir,
         "log_config.json",
         &serde_json::json!({ "level": &level }),
