@@ -37,7 +37,7 @@ export function AdvancedPage() {
     setLogLevelMessage(null);
     try {
       await setLogLevel(newLevel);
-      setLogLevelMessage("日志级别已更新，重启后仍然生效");
+      setLogLevelMessage("已保存，重启应用后生效");
     } catch (e) {
       setLogLevelMessage(`设置失败: ${e}`);
     } finally {

@@ -411,7 +411,7 @@ pub fn set_log_level(state: State<'_, AppState>, level: String) -> Result<(), St
         ));
     }
 
-    // Persist to disk
+    // Persist to disk — takes effect on next app start
     let app_data_dir = state.app_data_dir();
     let _ = write_config(
         app_data_dir,
@@ -419,9 +419,6 @@ pub fn set_log_level(state: State<'_, AppState>, level: String) -> Result<(), St
         &serde_json::json!({ "level": &level }),
     );
 
-    // Apply at runtime
-    crate::apply_log_level(&level)?;
-
-    info!("log level changed to: {}", level);
+    info!("log level changed to: {} (restart to apply)", level);
     Ok(())
 }
