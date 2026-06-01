@@ -2650,6 +2650,47 @@ fn make_tool_executor(
                 },
             }
         }
+        "validate_xlsx" => {
+            let Some(file_path) = args.get("file_path").and_then(|v| v.as_str()) else {
+                return ToolExecResult::Error {
+                    message: "缺少 file_path 参数".to_owned(),
+                };
+            };
+            match crate::template_engine::validate_xlsx(file_path) {
+                Ok(report) if report.valid => ToolExecResult::Success {
+                    content: serde_json::json!({
+                        "valid": true,
+                        "message": "XLSX XML 验证通过，所有 XML 文件结构合法"
+                    })
+                    .to_string(),
+                },
+                Ok(report) => {
+                    let error_details: Vec<serde_json::Value> = report
+                        .errors
+                        .iter()
+                        .map(|e| {
+                            serde_json::json!({
+                                "file": e.file,
+                                "line": e.line,
+                                "column": e.column,
+                                "message": e.message,
+                            })
+                        })
+                        .collect();
+                    ToolExecResult::Success {
+                        content: serde_json::json!({
+                            "valid": false,
+                            "errors": error_details,
+                            "message": format!("XLSX XML 验证失败，发现 {} 个错误", report.errors.len()),
+                        })
+                        .to_string(),
+                    }
+                }
+                Err(e) => ToolExecResult::Error {
+                    message: format!("验证过程出错: {}", e),
+                },
+            }
+        }
         "generate_template_plan" => {
             let Some(attachment_id) = args.get("attachment_id").and_then(|v| v.as_i64()) else {
                 return ToolExecResult::Error {

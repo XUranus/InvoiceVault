@@ -653,3 +653,122 @@ fn trace_export_error(
         message: format!("template_path={template_path}, output_path={output_path}, error={error}"),
     }
 }
+
+/// XLSX validation report.
+#[derive(Debug, serde::Serialize)]
+pub struct XlsxValidationReport {
+    pub valid: bool,
+    pub errors: Vec<XlsxValidationError>,
+}
+
+/// A single validation error with location information.
+#[derive(Debug, serde::Serialize)]
+pub struct XlsxValidationError {
+    pub file: String,
+    pub line: u64,
+    pub column: u64,
+    pub message: String,
+}
+
+/// Validate all XML files inside an XLSX archive for well-formedness.
+///
+/// Checks every `.xml` entry in the ZIP for:
+/// - XML parsing errors (mismatched tags, unclosed elements, invalid characters)
+/// - Row/cell tag nesting issues in sheet XMLs
+///
+/// Returns a report with `valid = true` if all XML is well-formed.
+pub fn validate_xlsx(path: &str) -> Result<XlsxValidationReport, TemplateError> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let file = std::fs::File::open(path).map_err(|e| TemplateError::Io(e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| TemplateError::Zip(e.to_string()))?;
+
+    let mut errors: Vec<XlsxValidationError> = Vec::new();
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| TemplateError::Zip(e.to_string()))?;
+        let name = entry.name().to_owned();
+
+        // Only validate XML files
+        if !name.ends_with(".xml") {
+            continue;
+        }
+
+        let mut content = String::new();
+        use std::io::Read;
+        entry
+            .read_to_string(&mut content)
+            .map_err(|e| TemplateError::Io(e))?;
+
+        // Track open tags for nesting validation
+        let mut tag_stack: Vec<String> = Vec::new();
+        let mut reader = Reader::from_str(&content);
+        reader.config_mut().trim_text(false);
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(e)) => {
+                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    tag_stack.push(tag_name);
+                }
+                Ok(Event::End(e)) => {
+                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    match tag_stack.pop() {
+                        Some(ref open) if *open == tag_name => {}
+                        Some(open) => {
+                            errors.push(XlsxValidationError {
+                                file: name.clone(),
+                                line: reader.buffer_position(),
+                                column: 0,
+                                message: format!(
+                                    "标签不匹配: 开始标签 <{}>, 结束标签 </{}>",
+                                    open, tag_name
+                                ),
+                            });
+                        }
+                        None => {
+                            errors.push(XlsxValidationError {
+                                file: name.clone(),
+                                line: reader.buffer_position(),
+                                column: 0,
+                                message: format!("多余的结束标签 </{}>", tag_name),
+                            });
+                        }
+                    }
+                }
+                Ok(Event::Empty(_)) => {
+                    // Self-closing tag — no nesting issue
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    errors.push(XlsxValidationError {
+                        file: name.clone(),
+                        line: reader.buffer_position(),
+                        column: 0,
+                        message: format!("XML 解析错误: {}", e),
+                    });
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        // Check for unclosed tags
+        for unclosed in &tag_stack {
+            errors.push(XlsxValidationError {
+                file: name.clone(),
+                line: reader.buffer_position(),
+                column: 0,
+                message: format!("未闭合的标签 <{}>", unclosed),
+            });
+        }
+    }
+
+    Ok(XlsxValidationReport {
+        valid: errors.is_empty(),
+        errors,
+    })
+}

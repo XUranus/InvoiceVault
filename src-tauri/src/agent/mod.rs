@@ -212,6 +212,19 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
             requires_confirmation: false,
         },
         ToolDefinition {
+            name: "validate_xlsx",
+            description: "验证 Excel (XLSX) 文件的 XML 结构是否合法。在导出 Excel 后调用此工具检查文件完整性，如果验证失败返回详细错误信息（文件名、行号、错误描述）。只读操作。",
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "要验证的 XLSX 文件绝对路径"}
+                },
+                "required": ["file_path"]
+            }),
+            is_read_only: true,
+            requires_confirmation: false,
+        },
+        ToolDefinition {
             name: "update_invoice",
             description: "更新发票的字段信息。修改前需要用户确认。",
             parameters: serde_json::json!({
