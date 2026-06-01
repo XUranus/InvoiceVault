@@ -17,8 +17,8 @@
         "title": "InvoiceVault",
         "width": 1260,
         "height": 860,
-        "minWidth": 1060,
-        "minHeight": 760,
+        "minWidth": 1280,
+        "minHeight": 960,
         "dragDropEnabled": true,
         "transparent": false,
         "decorations": false
@@ -50,6 +50,7 @@
       "nsis": {
         "installMode": "currentUser",
         "displayLanguageSelector": true,
+        "language": "ChineseSimplified",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "installerHooks": "windows/nsis-hooks.nsh"
