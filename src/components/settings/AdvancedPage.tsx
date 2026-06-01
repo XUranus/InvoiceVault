@@ -1,4 +1,5 @@
 import React from "react";
+import { Trash2 } from "lucide-react";
 import type {
   ExternalDependencyStatus,
   BadgeConfig,
@@ -330,13 +331,13 @@ export function AdvancedPage() {
                   />
                 </label>
                 <button
-                  className="btn-danger btn-small badge-group-remove"
+                  className="btn-icon-danger badge-group-remove"
                   type="button"
                   onClick={() => removeBadgeGroup(groupIndex)}
                   aria-label={`删除分组 ${group.name || groupIndex + 1}`}
                   title="删除分组"
                 >
-                  删除
+                  <Trash2 size={16} />
                 </button>
               </div>
               <div className="badge-option-editor">
