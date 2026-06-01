@@ -47,7 +47,6 @@ tokio = { version = "1", features = ["sync", "time", "rt", "fs"] }
 notify = { version = "8", features = ["macos_kqueue"] }
 thiserror = "2.0.17"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-quick-xml = "0.36"
 tracing = "0.1.41"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "registry"] }

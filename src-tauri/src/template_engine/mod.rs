@@ -672,15 +672,13 @@ pub struct XlsxValidationError {
 
 /// Validate all XML files inside an XLSX archive for well-formedness.
 ///
-/// Checks every `.xml` entry in the ZIP for:
-/// - XML parsing errors (mismatched tags, unclosed elements, invalid characters)
-/// - Row/cell tag nesting issues in sheet XMLs
+/// Checks every `.xml` entry in the ZIP for tag nesting issues:
+/// - Mismatched open/close tags
+/// - Extra closing tags
+/// - Unclosed tags
 ///
 /// Returns a report with `valid = true` if all XML is well-formed.
 pub fn validate_xlsx(path: &str) -> Result<XlsxValidationReport, TemplateError> {
-    use quick_xml::events::Event;
-    use quick_xml::Reader;
-
     let file = std::fs::File::open(path).map_err(|e| TemplateError::Io(e))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| TemplateError::Zip(e.to_string()))?;
 
@@ -692,7 +690,6 @@ pub fn validate_xlsx(path: &str) -> Result<XlsxValidationReport, TemplateError> 
             .map_err(|e| TemplateError::Zip(e.to_string()))?;
         let name = entry.name().to_owned();
 
-        // Only validate XML files
         if !name.ends_with(".xml") {
             continue;
         }
@@ -703,72 +700,95 @@ pub fn validate_xlsx(path: &str) -> Result<XlsxValidationReport, TemplateError> 
             .read_to_string(&mut content)
             .map_err(|e| TemplateError::Io(e))?;
 
-        // Track open tags for nesting validation
-        let mut tag_stack: Vec<String> = Vec::new();
-        let mut reader = Reader::from_str(&content);
-        reader.config_mut().trim_text(false);
-
-        loop {
-            match reader.read_event() {
-                Ok(Event::Start(e)) => {
-                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                    tag_stack.push(tag_name);
-                }
-                Ok(Event::End(e)) => {
-                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                    match tag_stack.pop() {
-                        Some(ref open) if *open == tag_name => {}
-                        Some(open) => {
-                            errors.push(XlsxValidationError {
-                                file: name.clone(),
-                                line: reader.buffer_position(),
-                                column: 0,
-                                message: format!(
-                                    "标签不匹配: 开始标签 <{}>, 结束标签 </{}>",
-                                    open, tag_name
-                                ),
-                            });
-                        }
-                        None => {
-                            errors.push(XlsxValidationError {
-                                file: name.clone(),
-                                line: reader.buffer_position(),
-                                column: 0,
-                                message: format!("多余的结束标签 </{}>", tag_name),
-                            });
-                        }
-                    }
-                }
-                Ok(Event::Empty(_)) => {
-                    // Self-closing tag — no nesting issue
-                }
-                Ok(Event::Eof) => break,
-                Err(e) => {
-                    errors.push(XlsxValidationError {
-                        file: name.clone(),
-                        line: reader.buffer_position(),
-                        column: 0,
-                        message: format!("XML 解析错误: {}", e),
-                    });
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        // Check for unclosed tags
-        for unclosed in &tag_stack {
-            errors.push(XlsxValidationError {
-                file: name.clone(),
-                line: reader.buffer_position(),
-                column: 0,
-                message: format!("未闭合的标签 <{}>", unclosed),
-            });
-        }
+        validate_xml_nesting(&name, &content, &mut errors);
     }
 
     Ok(XlsxValidationReport {
         valid: errors.is_empty(),
         errors,
     })
+}
+
+/// Simple XML tag-nesting validator using string scanning.
+/// Tracks `<tag>`, `</tag>`, and `<tag/>` to detect mismatches.
+fn validate_xml_nesting(file_name: &str, xml: &str, errors: &mut Vec<XlsxValidationError>) {
+    let bytes = xml.as_bytes();
+    let len = bytes.len();
+    let mut tag_stack: Vec<String> = Vec::new();
+    let mut line: u64 = 1;
+    let mut i = 0;
+
+    while i < len {
+        if bytes[i] == b'\n' {
+            line += 1;
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+
+        // Found '<', extract the tag
+        let Some(tag_end) = xml[i..].find('>') else {
+            errors.push(XlsxValidationError {
+                file: file_name.to_owned(),
+                line,
+                column: 0,
+                message: "未闭合的 '<'".to_owned(),
+            });
+            break;
+        };
+        let tag_content = &xml[i + 1..i + tag_end]; // between < and >
+
+        if tag_content.starts_with('!') || tag_content.starts_with('?') {
+            // Comment or processing instruction — skip
+            i = i + tag_end + 1;
+            continue;
+        }
+
+        if tag_content.starts_with('/') {
+            // Closing tag: </tag_name>
+            let tag_name = tag_content[1..].split_whitespace().next().unwrap_or("");
+            match tag_stack.pop() {
+                Some(ref open) if open == tag_name => {}
+                Some(open) => {
+                    errors.push(XlsxValidationError {
+                        file: file_name.to_owned(),
+                        line,
+                        column: 0,
+                        message: format!("标签不匹配: 开始标签 <{}>, 结束标签 </{}>", open, tag_name),
+                    });
+                }
+                None => {
+                    errors.push(XlsxValidationError {
+                        file: file_name.to_owned(),
+                        line,
+                        column: 0,
+                        message: format!("多余的结束标签 </{}>", tag_name),
+                    });
+                }
+            }
+        } else if tag_content.ends_with('/') {
+            // Self-closing tag: <tag_name ... /> — no nesting
+        } else {
+            // Opening tag: <tag_name ...>
+            let tag_name = tag_content.split_whitespace().next().unwrap_or("");
+            if !tag_name.is_empty() {
+                tag_stack.push(tag_name.to_owned());
+            }
+        }
+
+        i = i + tag_end + 1;
+    }
+
+    for unclosed in &tag_stack {
+        errors.push(XlsxValidationError {
+            file: file_name.to_owned(),
+            line,
+            column: 0,
+            message: format!("未闭合的标签 <{}>", unclosed),
+        });
+    }
 }
