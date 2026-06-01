@@ -1,16 +1,10 @@
 import React from "react";
-import { Trash2 } from "lucide-react";
-import type {
-  ExternalDependencyStatus,
-  BadgeConfig,
-} from "../../types";
+import type { ExternalDependencyStatus } from "../../types";
 import {
   exportLogs,
   exportBackup,
   cleanupStorage,
   checkExternalDependencies,
-  getBadgeConfig,
-  setBadgeConfig,
   getLogLevel,
   setLogLevel,
 } from "../../api";
@@ -27,12 +21,6 @@ export function AdvancedPage() {
   const [checkingDependencies, setCheckingDependencies] = React.useState(false);
   const [depsExpanded, setDepsExpanded] = React.useState(false);
   const depsCheckedRef = React.useRef(false);
-
-  // --- Badge Config ---
-  const [badgeConfig, setBadgeConfigState] = React.useState<BadgeConfig>({ groups: [] });
-  const [badgeOptionDrafts, setBadgeOptionDrafts] = React.useState<Record<number, string>>({});
-  const [savingBadgeConfig, setSavingBadgeConfig] = React.useState(false);
-  const [badgeConfigMessage, setBadgeConfigMessage] = React.useState<string | null>(null);
 
   // --- Log Level ---
   const [logLevel, setLogLevelState] = React.useState<string>("info");
@@ -75,16 +63,6 @@ export function AdvancedPage() {
   const [dbPathCopied, setDbPathCopied] = React.useState(false);
 
   // Load on mount
-  React.useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      getBadgeConfig().catch(() => null),
-    ]).then(([badge]) => {
-      if (cancelled) return;
-      if (badge) setBadgeConfigState(badge);
-    });
-    return () => { cancelled = true; };
-  }, []);
 
   const refreshExternalDependencies = React.useCallback(async () => {
     setCheckingDependencies(true);
@@ -166,105 +144,6 @@ export function AdvancedPage() {
     }
   };
 
-  // --- Badge handlers ---
-  const updateBadgeGroupName = (index: number, name: string) => {
-    setBadgeConfigState((prev) => ({
-      groups: prev.groups.map((group, idx) =>
-        idx === index ? { ...group, name } : group,
-      ),
-    }));
-    setBadgeConfigMessage(null);
-  };
-
-  const updateBadgeOptionDraft = (groupIndex: number, value: string) => {
-    setBadgeOptionDrafts((prev) => ({ ...prev, [groupIndex]: value }));
-    setBadgeConfigMessage(null);
-  };
-
-  const addBadgeGroup = () => {
-    setBadgeConfigState((prev) => ({
-      groups: [...prev.groups, { name: "", options: [] }],
-    }));
-    setBadgeConfigMessage(null);
-  };
-
-  const removeBadgeGroup = (index: number) => {
-    setBadgeConfigState((prev) => ({
-      groups: prev.groups.filter((_, idx) => idx !== index),
-    }));
-    setBadgeOptionDrafts((prev) => {
-      const next: Record<number, string> = {};
-      Object.entries(prev).forEach(([key, value]) => {
-        const draftIndex = Number(key);
-        if (draftIndex < index) {
-          next[draftIndex] = value;
-        } else if (draftIndex > index) {
-          next[draftIndex - 1] = value;
-        }
-      });
-      return next;
-    });
-    setBadgeConfigMessage(null);
-  };
-
-  const addBadgeOption = (groupIndex: number, rawValue: string) => {
-    const value = rawValue.trim();
-    if (!value) return;
-    const group = badgeConfig.groups[groupIndex];
-    if (group?.options.some((option) => option.trim() === value)) {
-      setBadgeConfigMessage("Badge 已存在");
-      return;
-    }
-    setBadgeConfigState((prev) => ({
-      groups: prev.groups.map((group, idx) =>
-        idx === groupIndex ? { ...group, options: [...group.options, value] } : group,
-      ),
-    }));
-    setBadgeOptionDrafts((prev) => ({ ...prev, [groupIndex]: "" }));
-    setBadgeConfigMessage(null);
-  };
-
-  const removeBadgeOption = (groupIndex: number, optionIndex: number) => {
-    setBadgeConfigState((prev) => ({
-      groups: prev.groups.map((group, idx) =>
-        idx === groupIndex
-          ? { ...group, options: group.options.filter((_, optIdx) => optIdx !== optionIndex) }
-          : group,
-      ),
-    }));
-    setBadgeConfigMessage(null);
-  };
-
-  const handleBadgeOptionKeyDown = (
-    event: React.KeyboardEvent<HTMLInputElement>,
-    groupIndex: number,
-  ) => {
-    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    addBadgeOption(groupIndex, badgeOptionDrafts[groupIndex] ?? "");
-  };
-
-  const saveBadgeConfig = async () => {
-    setSavingBadgeConfig(true);
-    setBadgeConfigMessage(null);
-    const normalizedBadgeConfig: BadgeConfig = {
-      groups: badgeConfig.groups.map((group) => ({
-        name: group.name.trim(),
-        options: group.options.map((option) => option.trim()).filter(Boolean),
-      })),
-    };
-    try {
-      await setBadgeConfig(normalizedBadgeConfig);
-      const latest = await getBadgeConfig();
-      setBadgeConfigState(latest);
-      setBadgeConfigMessage("已保存 Badge 配置");
-    } catch (err) {
-      setBadgeConfigMessage(String(err));
-    } finally {
-      setSavingBadgeConfig(false);
-    }
-  };
-
   // --- Utility ---
   const openFolder = async (path: string) => {
     try {
@@ -312,100 +191,6 @@ export function AdvancedPage() {
 
   return (
     <>
-      {/* Badge Config */}
-      <div className="section badge-config-section">
-        <div className="section-header">
-          <h3>自定义 Badge</h3>
-          <button
-            className="btn-small"
-            type="button"
-            onClick={addBadgeGroup}
-          >
-            添加分组
-          </button>
-        </div>
-        <p className="section-desc">
-          配置后可在发票详情页为单张发票选择标签。每个分组一张发票只能选择一个值。
-        </p>
-
-        <div className="badge-config-list">
-          {badgeConfig.groups.map((group, groupIndex) => (
-            <div className="badge-config-card" key={groupIndex}>
-              <div className="badge-config-card-header">
-                <label className="form-field">
-                  <span>分组名称</span>
-                  <input
-                    value={group.name}
-                    onChange={(e) => updateBadgeGroupName(groupIndex, e.target.value)}
-                    placeholder="例如：电商"
-                  />
-                </label>
-                <button
-                  className="btn-icon-danger badge-group-remove"
-                  type="button"
-                  onClick={() => removeBadgeGroup(groupIndex)}
-                  aria-label={`删除分组 ${group.name || groupIndex + 1}`}
-                  title="删除分组"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-              <div className="badge-option-editor">
-                <div className="badge-option-input-row">
-                  <input
-                    className="badge-option-input"
-                    value={badgeOptionDrafts[groupIndex] ?? ""}
-                    onChange={(e) => updateBadgeOptionDraft(groupIndex, e.target.value)}
-                    onKeyDown={(e) => handleBadgeOptionKeyDown(e, groupIndex)}
-                    placeholder="输入 Badge 名称，按 Enter 添加"
-                  />
-                </div>
-                <div className="badge-chip-list">
-                  {group.options.map((option, optionIndex) => {
-                    const label = option.trim();
-                    if (!label) return null;
-                    return (
-                      <span className="badge-chip" key={`${label}-${optionIndex}`}>
-                        <span className="badge-chip-label">{label}</span>
-                        <button
-                          className="badge-chip-remove"
-                          type="button"
-                          aria-label={`删除 ${label}`}
-                          title="删除"
-                          onClick={() => removeBadgeOption(groupIndex, optionIndex)}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    );
-                  })}
-                  {group.options.every((option) => !option.trim()) ? (
-                    <span className="muted badge-chip-empty">暂无 Badge</span>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          ))}
-          {badgeConfig.groups.length === 0 ? (
-            <p className="muted">暂未配置 Badge 分组。</p>
-          ) : null}
-        </div>
-
-        <div className="badge-config-actions">
-          <button
-            className="btn-primary"
-            type="button"
-            onClick={saveBadgeConfig}
-            disabled={savingBadgeConfig}
-          >
-            {savingBadgeConfig ? "保存中..." : "保存 Badge 配置"}
-          </button>
-          {badgeConfigMessage ? (
-            <span className="badge-config-message">{badgeConfigMessage}</span>
-          ) : null}
-        </div>
-      </div>
-
       {/* Log Level */}
       <div className="section">
         <h3>日志级别</h3>

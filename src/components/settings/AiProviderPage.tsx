@@ -4,6 +4,7 @@ import type {
   LlmConnectionTestResult,
   LocalEmbeddingStatus,
   EmbeddingTestResult,
+  PriceConfig,
 } from "../../types";
 import {
   testLlmConnection,
@@ -14,6 +15,8 @@ import {
   testEmbeddingConnection,
   regenerateAllEmbeddings,
   setLlmAuditEnabled as apiSetLlmAuditEnabled,
+  getPriceConfig,
+  setPriceConfig as apiSetPriceConfig,
 } from "../../api";
 import { useLlmStore } from "../../stores/llmStore";
 import { LlmDiagnosticDialog } from "../LlmDiagnosticDialog";
@@ -81,6 +84,14 @@ export function AiProviderPage() {
   const [isRegeneratingEmb, setIsRegeneratingEmb] = React.useState(false);
   const [embRegenMsg, setEmbRegenMsg] = React.useState<string | null>(null);
 
+  // --- Price Config ---
+  const [priceConfig, setPriceConfigState] = React.useState<PriceConfig>({
+    llm_input_price_per_1k: 0.0008,
+    llm_output_price_per_1k: 0.002,
+    embedding_input_price_per_1k: 0.0007,
+    embedding_output_price_per_1k: 0.0007,
+  });
+
   // --- Loading ---
   const [loading, setLoading] = React.useState(true);
 
@@ -91,7 +102,7 @@ export function AiProviderPage() {
   // --- Diagnostic ---
   const [showDiagnostic, setShowDiagnostic] = React.useState(false);
 
-  // Load embedding status on mount
+  // Load embedding status and price config on mount
   React.useEffect(() => {
     let cancelled = false;
     const timeout = new Promise<null>((_, reject) =>
@@ -108,6 +119,11 @@ export function AiProviderPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    getPriceConfig()
+      .then((price) => {
+        if (!cancelled && price) setPriceConfigState(price);
+      })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -519,6 +535,80 @@ export function AiProviderPage() {
         <button className="btn-primary" onClick={() => setShowDiagnostic(true)}>
           运行诊断测试
         </button>
+      </div>
+
+      {/* Price Config */}
+      <div className="section">
+        <h3>LLM 价格配置</h3>
+        <p className="section-desc">
+          配置每千 token 的价格（¥），用于仪表盘用量费用预估。修改后失焦自动保存。
+        </p>
+        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <label className="form-field">
+            <span>LLM 输入 (¥/千token)</span>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={priceConfig.llm_input_price_per_1k}
+              onChange={(e) =>
+                setPriceConfigState((prev) => ({
+                  ...prev,
+                  llm_input_price_per_1k: Number(e.target.value) || 0,
+                }))
+              }
+              onBlur={() => apiSetPriceConfig(priceConfig)}
+            />
+          </label>
+          <label className="form-field">
+            <span>LLM 输出 (¥/千token)</span>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={priceConfig.llm_output_price_per_1k}
+              onChange={(e) =>
+                setPriceConfigState((prev) => ({
+                  ...prev,
+                  llm_output_price_per_1k: Number(e.target.value) || 0,
+                }))
+              }
+              onBlur={() => apiSetPriceConfig(priceConfig)}
+            />
+          </label>
+          <label className="form-field">
+            <span>Embedding 输入 (¥/千token)</span>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={priceConfig.embedding_input_price_per_1k}
+              onChange={(e) =>
+                setPriceConfigState((prev) => ({
+                  ...prev,
+                  embedding_input_price_per_1k: Number(e.target.value) || 0,
+                }))
+              }
+              onBlur={() => apiSetPriceConfig(priceConfig)}
+            />
+          </label>
+          <label className="form-field">
+            <span>Embedding 输出 (¥/千token)</span>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={priceConfig.embedding_output_price_per_1k}
+              onChange={(e) =>
+                setPriceConfigState((prev) => ({
+                  ...prev,
+                  embedding_output_price_per_1k: Number(e.target.value) || 0,
+                }))
+              }
+              onBlur={() => apiSetPriceConfig(priceConfig)}
+            />
+          </label>
+        </div>
       </div>
 
       <LlmDiagnosticDialog
