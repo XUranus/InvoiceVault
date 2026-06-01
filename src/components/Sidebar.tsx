@@ -15,9 +15,9 @@ import { useAppStore } from "../stores/appStore";
 const appIcon = new URL("../../src-tauri/icons/icon.png", import.meta.url).href;
 
 const TOP_NAV_ITEMS: { path: string; label: string; icon: LucideIcon }[] = [
-  { path: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
+  { path: "/dashboard", label: "总览", icon: LayoutDashboard },
   { path: "/import", label: "导入", icon: Upload },
-  { path: "/invoices", label: "发票库", icon: ReceiptText },
+  { path: "/invoices", label: "库", icon: ReceiptText },
   { path: "/agent", label: "Agent", icon: Bot },
   { path: "/events", label: "事件", icon: Activity },
 ];
@@ -53,7 +53,7 @@ export function Sidebar() {
           alt=""
           aria-hidden="true"
         />
-        <h1 className="sidebar-logo">InvoiceVault</h1>
+        <h1 className="sidebar-logo">票夹</h1>
         <p className="sidebar-subtitle">发票处理工作台</p>
       </div>
 

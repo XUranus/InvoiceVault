@@ -388,10 +388,10 @@ export function InvoicesPage() {
       ) : null}
 
       <div className="page-header">
-        <h2 className="page-title">发票库</h2>
+        <h2 className="page-title">库</h2>
         <div className="page-header-actions">
           <span className="count-badge">{totalCount} 张</span>
-          <div className="view-toggle" aria-label="发票库视图切换">
+          <div className="view-toggle" aria-label="库视图切换">
             <button
               className={`view-toggle-btn ${viewMode === "cards" ? "active" : ""}`}
               onClick={() => handleViewModeChange("cards")}

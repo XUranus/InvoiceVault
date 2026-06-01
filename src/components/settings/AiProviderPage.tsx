@@ -541,7 +541,7 @@ export function AiProviderPage() {
       <div className="section">
         <h3>LLM 价格配置</h3>
         <p className="section-desc">
-          配置每千 token 的价格（¥），用于仪表盘用量费用预估。修改后失焦自动保存。
+          配置每千 token 的价格（¥），用于总览页用量费用预估。修改后失焦自动保存。
         </p>
         <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <label className="form-field">

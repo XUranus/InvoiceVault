@@ -64,15 +64,20 @@ function formatAmount(value: number): string {
 }
 
 function formatJobTime(value: string): string {
-  const date = new Date(value);
+  // Handle raw millisecond timestamps (e.g. "1779805560269")
+  const ts = Number(value);
+  const date = Number.isFinite(ts) && ts > 1e12 ? new Date(ts) : new Date(value);
   if (!Number.isNaN(date.getTime())) {
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 0) return "刚刚";
     const diffMin = Math.floor(diffMs / 60000);
     if (diffMin < 1) return "刚刚";
     if (diffMin < 60) return `${diffMin} 分钟前`;
     const diffHr = Math.floor(diffMin / 60);
     if (diffHr < 24) return `${diffHr} 小时前`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 30) return `${diffDay} 天前`;
     return date.toLocaleDateString();
   }
   return value;
@@ -220,7 +225,7 @@ export function DashboardPage() {
       {/* Header */}
       <div className="dashboard-header">
         <div className="dashboard-header-top">
-          <h2 className="page-title">仪表盘</h2>
+          <h2 className="page-title">总览</h2>
           <div className="date-range-bar">
             {DATE_OPTIONS.map((opt) => (
               <button

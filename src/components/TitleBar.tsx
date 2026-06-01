@@ -67,7 +67,7 @@ export function TitleBar() {
       >
         <div className="titlebar-brand">
           <img src={appIcon} className="titlebar-icon" alt="" aria-hidden="true" />
-          <span className="titlebar-title">InvoiceVault</span>
+          <span className="titlebar-title">票夹</span>
         </div>
       </div>
       <div className="titlebar-controls">
