@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "票夹",
+  "productName": "InvoiceVault",
   "version": "0.1.0",
   "identifier": "com.invoicevault.desktop",
   "build": {
@@ -14,7 +14,7 @@
       {
         "create": false,
         "label": "main",
-        "title": "票夹",
+        "title": "票匣",
         "width": 1260,
         "height": 860,
         "minWidth": 1280,
