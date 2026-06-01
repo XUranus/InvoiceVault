@@ -283,13 +283,8 @@ export function AdvancedPage() {
     openFolder(parent || path);
   };
 
-  const openExternalLink = async (url: string) => {
-    try {
-      const { open } = await import("@tauri-apps/plugin-shell");
-      await open(url);
-    } catch {
-      // ignore if shell plugin not available
-    }
+  const openExternalLink = (url: string) => {
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const copyDeveloperEmail = async () => {
