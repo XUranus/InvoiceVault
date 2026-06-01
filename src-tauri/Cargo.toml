@@ -50,7 +50,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.37"
 tracing = "0.1.41"
 tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "registry"] }
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "load-dynamic", "tls-rustls", "api-24"] }
 ndarray = { version = "0.17", features = ["std"] }
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }

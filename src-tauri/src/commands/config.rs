@@ -3,10 +3,11 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::app_core::{AppState, CleanupStorageResult, ExportLogsResult, PriceConfig,
     RecognitionQueueStatus, RegenerateEmbeddingsResult};
+use crate::app_core::config::{load_config_raw, write_config};
 use crate::app_core::constants::{
     DIR_MODELS, EMBEDDING_DOWNLOAD_TIMEOUT_SECS, EMBEDDING_MODEL_DIR, EMBEDDING_TEST_TIMEOUT_SECS,
 };
@@ -387,4 +388,40 @@ pub async fn run_llm_diagnostic(state: State<'_, AppState>) -> Result<diag::Diag
         audit_config.as_ref(),
     )
     .await)
+}
+
+#[tauri::command]
+pub fn get_log_level(state: State<'_, AppState>) -> Result<String, String> {
+    let app_data_dir = state.app_data_dir();
+    let level = load_config_raw::<serde_json::Value>(app_data_dir, "log_config.json")
+        .and_then(|v| v.get("level").and_then(|v| v.as_str().map(|s| s.to_owned())))
+        .unwrap_or_else(|| "info".to_owned());
+    Ok(level)
+}
+
+#[tauri::command]
+pub fn set_log_level(state: State<'_, AppState>, level: String) -> Result<(), String> {
+    // Validate level string
+    let valid_levels = ["trace", "debug", "info", "warn", "error"];
+    if !valid_levels.contains(&level.as_str()) {
+        return Err(format!(
+            "无效的日志级别: '{}'，可选值: {}",
+            level,
+            valid_levels.join(", ")
+        ));
+    }
+
+    // Persist to disk
+    let app_data_dir = state.app_data_dir();
+    write_config(
+        app_data_dir,
+        "log_config.json",
+        &serde_json::json!({ "level": &level }),
+    );
+
+    // Apply at runtime
+    crate::apply_log_level(&level)?;
+
+    info!("log level changed to: {}", level);
+    Ok(())
 }

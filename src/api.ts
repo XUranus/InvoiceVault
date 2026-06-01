@@ -651,6 +651,14 @@ export async function runLlmDiagnostic(): Promise<DiagnosticResult> {
   return invoke<DiagnosticResult>("run_llm_diagnostic");
 }
 
+export async function getLogLevel(): Promise<string> {
+  return invoke<string>("get_log_level");
+}
+
+export async function setLogLevel(level: string): Promise<void> {
+  return invoke<void>("set_log_level", { level });
+}
+
 export async function frontendHeartbeat(seq: number): Promise<void> {
   return invoke<void>("frontend_heartbeat", { seq });
 }

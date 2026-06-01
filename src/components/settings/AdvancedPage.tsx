@@ -10,6 +10,8 @@ import {
   checkExternalDependencies,
   getBadgeConfig,
   setBadgeConfig,
+  getLogLevel,
+  setLogLevel,
 } from "../../api";
 import type { ExportLogsResult, CleanupStorageResult } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -30,6 +32,29 @@ export function AdvancedPage() {
   const [badgeOptionDrafts, setBadgeOptionDrafts] = React.useState<Record<number, string>>({});
   const [savingBadgeConfig, setSavingBadgeConfig] = React.useState(false);
   const [badgeConfigMessage, setBadgeConfigMessage] = React.useState<string | null>(null);
+
+  // --- Log Level ---
+  const [logLevel, setLogLevelState] = React.useState<string>("info");
+  const [logLevelSaving, setLogLevelSaving] = React.useState(false);
+  const [logLevelMessage, setLogLevelMessage] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    getLogLevel().then(setLogLevelState).catch(() => {});
+  }, []);
+
+  const handleLogLevelChange = React.useCallback(async (newLevel: string) => {
+    setLogLevelState(newLevel);
+    setLogLevelSaving(true);
+    setLogLevelMessage(null);
+    try {
+      await setLogLevel(newLevel);
+      setLogLevelMessage("日志级别已更新，重启后仍然生效");
+    } catch (e) {
+      setLogLevelMessage(`设置失败: ${e}`);
+    } finally {
+      setLogLevelSaving(false);
+    }
+  }, []);
 
   // --- Data Management ---
   const [exporting, setExporting] = React.useState(false);
@@ -367,6 +392,37 @@ export function AdvancedPage() {
           {badgeConfigMessage ? (
             <span className="badge-config-message">{badgeConfigMessage}</span>
           ) : null}
+        </div>
+      </div>
+
+      {/* Log Level */}
+      <div className="section">
+        <h3>日志级别</h3>
+        <p className="section-desc" style={{ marginBottom: 12 }}>
+          设置应用日志的详细程度。修改后立即生效，重启应用后仍然保留。
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <select
+            value={logLevel}
+            onChange={(e) => handleLogLevelChange(e.target.value)}
+            disabled={logLevelSaving}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--color-border)",
+              background: "var(--color-bg)",
+              color: "var(--color-text)",
+              fontSize: 13,
+            }}
+          >
+            <option value="error">error — 仅错误</option>
+            <option value="warn">warn — 警告和错误</option>
+            <option value="info">info — 常规信息（默认）</option>
+            <option value="debug">debug — 调试信息</option>
+            <option value="trace">trace — 全部追踪</option>
+          </select>
+          {logLevelSaving ? <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>保存中...</span> : null}
+          {logLevelMessage ? <span style={{ fontSize: 12, color: "var(--color-success)" }}>{logLevelMessage}</span> : null}
         </div>
       </div>
 

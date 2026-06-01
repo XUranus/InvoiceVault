@@ -56,6 +56,26 @@ use tauri::WebviewWindow;
 #[cfg(not(target_os = "windows"))]
 use tauri::{DragDropEvent, Emitter};
 use tracing::{error, info, warn};
+use tracing_subscriber::prelude::*;
+
+/// Global reload handle for runtime log level changes.
+static LOG_RELOAD_HANDLE: std::sync::OnceLock<
+    tracing_subscriber::reload::Handle<
+        tracing_subscriber::EnvFilter,
+        tracing_subscriber::Registry,
+    >,
+> = std::sync::OnceLock::new();
+
+/// Apply a new log level at runtime by reloading the tracing filter.
+pub fn apply_log_level(level: &str) -> Result<(), String> {
+    let filter = tracing_subscriber::EnvFilter::try_new(format!("invoicevault={}", level))
+        .map_err(|e| format!("invalid log level '{}': {}", level, e))?;
+    LOG_RELOAD_HANDLE
+        .get()
+        .ok_or("log reload handle not initialized".to_owned())?
+        .reload(filter)
+        .map_err(|e| format!("failed to reload log filter: {}", e))
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WindowSizeState {
@@ -200,14 +220,33 @@ pub fn run() {
             let file_appender = tracing_appender::rolling::daily(&log_dir, "invoicevault");
             let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-            let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "invoicevault=info".into());
+            // Read persisted log level, fallback to info
+            let persisted_level = crate::app_core::config::load_config_raw::<serde_json::Value>(
+                &app_data_dir,
+                "log_config.json",
+            )
+            .and_then(|v| v.get("level").and_then(|v| v.as_str().map(|s| s.to_owned())))
+            .unwrap_or_else(|| "info".to_owned());
 
-            tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .with_writer(non_blocking)
-                .with_ansi(false)
+            let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| format!("invoicevault={}", persisted_level).into());
+
+            let (filter_layer, reload_handle) =
+                tracing_subscriber::reload::Layer::new(env_filter);
+
+            tracing_subscriber::registry()
+                .with(filter_layer)
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(non_blocking)
+                        .with_ansi(false),
+                )
                 .init();
+
+            // Store reload handle globally for runtime log level changes
+            LOG_RELOAD_HANDLE
+                .set(reload_handle)
+                .unwrap_or_else(|_| tracing::warn!("log reload handle already set"));
 
             // Keep the guard alive — when dropped it flushes remaining logs
             // Leak it so it lives for the lifetime of the app
@@ -547,7 +586,9 @@ pub fn run() {
             check_external_dependencies,
             get_diagnostic_config,
             set_diagnostic_config,
-            run_llm_diagnostic
+            run_llm_diagnostic,
+            get_log_level,
+            set_log_level
         ])
         .run(tauri::generate_context!())
         .expect("failed to run InvoiceVault");

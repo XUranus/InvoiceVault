@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 mod archive;
 pub mod constants;
-mod config;
+pub mod config;
 mod fs_utils;
 mod paths;
 mod template_adapter;
