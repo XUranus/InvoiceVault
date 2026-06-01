@@ -2943,7 +2943,8 @@ textarea:focus {
   color: var(--color-text-secondary);
 }
 
-.form-field input {
+.form-field input,
+.form-field select {
   width: 100%;
   min-height: 38px;
   border: 1px solid var(--color-border);

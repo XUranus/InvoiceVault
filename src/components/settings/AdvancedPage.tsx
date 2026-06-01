@@ -398,32 +398,28 @@ export function AdvancedPage() {
       {/* Log Level */}
       <div className="section">
         <h3>日志级别</h3>
-        <p className="section-desc" style={{ marginBottom: 12 }}>
-          设置应用日志的详细程度。修改后立即生效，重启应用后仍然保留。
-        </p>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <label className="form-field" style={{ maxWidth: 360 }}>
+          <span>详细程度</span>
           <select
             value={logLevel}
             onChange={(e) => handleLogLevelChange(e.target.value)}
             disabled={logLevelSaving}
             style={{
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid var(--color-border)",
-              background: "var(--color-bg)",
-              color: "var(--color-text)",
-              fontSize: 13,
+              textTransform: "uppercase",
             }}
           >
-            <option value="error">error — 仅错误</option>
-            <option value="warn">warn — 警告和错误</option>
-            <option value="info">info — 常规信息（默认）</option>
-            <option value="debug">debug — 调试信息</option>
-            <option value="trace">trace — 全部追踪</option>
+            <option value="error">ERROR — 仅错误</option>
+            <option value="warn">WARN — 警告和错误</option>
+            <option value="info">INFO — 常规信息（默认）</option>
+            <option value="debug">DEBUG — 调试信息</option>
+            <option value="trace">TRACE — 全部追踪</option>
           </select>
-          {logLevelSaving ? <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>保存中...</span> : null}
-          {logLevelMessage ? <span style={{ fontSize: 12, color: "var(--color-success)" }}>{logLevelMessage}</span> : null}
-        </div>
+          {logLevelSaving || logLevelMessage ? (
+            <span style={{ fontSize: 12, color: logLevelSaving ? "var(--color-text-secondary)" : "var(--color-success)", fontWeight: 400 }}>
+              {logLevelSaving ? "保存中..." : logLevelMessage}
+            </span>
+          ) : null}
+        </label>
       </div>
 
       {/* External Dependencies */}
