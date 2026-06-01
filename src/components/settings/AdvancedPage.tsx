@@ -71,6 +71,8 @@ export function AdvancedPage() {
 
   // --- System ---
   const [developerCopied, setDeveloperCopied] = React.useState(false);
+  const [dataDirCopied, setDataDirCopied] = React.useState(false);
+  const [dbPathCopied, setDbPathCopied] = React.useState(false);
 
   // Load on mount
   React.useEffect(() => {
@@ -295,6 +297,19 @@ export function AdvancedPage() {
       await navigator.clipboard.writeText("xuranus42@qq.com");
       setDeveloperCopied(true);
       window.setTimeout(() => setDeveloperCopied(false), 1600);
+    } catch {
+      // ignore if clipboard is unavailable
+    }
+  };
+
+  const copyToClipboard = async (
+    text: string,
+    setCopied: (v: boolean) => void,
+  ) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
     } catch {
       // ignore if clipboard is unavailable
     }
@@ -595,22 +610,24 @@ export function AdvancedPage() {
               <button
                 className="path-link path-button"
                 type="button"
-                onClick={() => openFolder(health.app_data_dir)}
-                title="点击打开文件夹"
+                onClick={() => copyToClipboard(health.app_data_dir, setDataDirCopied)}
+                title="点击复制路径"
               >
                 {health.app_data_dir}
               </button>
+              {dataDirCopied ? <span className="copy-hint">已复制</span> : null}
             </dd>
             <dt>数据库</dt>
             <dd>
               <button
                 className="path-link path-button"
                 type="button"
-                onClick={() => openParentFolder(health.database_path)}
-                title="点击打开所在目录"
+                onClick={() => copyToClipboard(health.database_path, setDbPathCopied)}
+                title="点击复制路径"
               >
                 {health.database_path}
               </button>
+              {dbPathCopied ? <span className="copy-hint">已复制</span> : null}
             </dd>
             <dt>迁移版本</dt>
             <dd>{health.migration_version}</dd>
