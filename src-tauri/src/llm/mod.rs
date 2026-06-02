@@ -1078,6 +1078,8 @@ mod tests {
                 model: "model".to_owned(),
                 timeout_seconds: Some(1),
                 scnet_ocr_api_key: None,
+                recognition_max_tokens: None,
+                agent_max_tokens: None,
             },
             None,
         )
@@ -1158,6 +1160,8 @@ mod tests {
                 model: std::env::var("RECEIPTIER_LLM_MODEL").expect("RECEIPTIER_LLM_MODEL"),
                 timeout_seconds: Some(30),
                 scnet_ocr_api_key: None,
+                recognition_max_tokens: None,
+                agent_max_tokens: None,
             },
             None,
         )
@@ -1182,6 +1186,8 @@ mod tests {
                 model: std::env::var("RECEIPTIER_LLM_MODEL").expect("RECEIPTIER_LLM_MODEL"),
                 timeout_seconds: Some(120),
                 scnet_ocr_api_key: None,
+                recognition_max_tokens: None,
+                agent_max_tokens: None,
             },
             &sample_path,
             "image/jpeg",

@@ -283,10 +283,12 @@ fn build_static_row(row: &RowAst) -> RowIR {
 
     // Build raw_row_xml from header + cells
     let mut raw = row.raw_xml_header.clone();
-    for cell in &row.cells {
-        raw.push_str(&cell.raw_xml);
+    if !raw.ends_with("/>") {
+        for cell in &row.cells {
+            raw.push_str(&cell.raw_xml);
+        }
+        raw.push_str("</row>");
     }
-    raw.push_str("</row>");
 
     RowIR {
         row_num: row.row_num,
