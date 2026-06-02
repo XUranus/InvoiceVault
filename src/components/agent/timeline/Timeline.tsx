@@ -91,36 +91,7 @@ export function Timeline({ messages }: TimelineProps) {
 
         {/* Error display */}
         {streamState && streamState.phase === "error" && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="relative pl-10 pb-4"
-          >
-            <div
-              className="absolute left-[11px] top-[8px] w-[10px] h-[10px] rounded-full border-2"
-              style={{
-                borderColor: "var(--color-error)",
-                backgroundColor: "var(--color-error-bg)",
-              }}
-            />
-            <div
-              className="rounded-lg px-4 py-3"
-              style={{
-                backgroundColor: "var(--color-error-bg)",
-                border: "1px solid var(--color-error)",
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <AlertCircle
-                  className="w-4 h-4 shrink-0"
-                  style={{ color: "var(--color-error)" }}
-                />
-                <span className="text-sm" style={{ color: "var(--color-error)" }}>
-                  {streamState.errorMessage || "执行出错，请重试"}
-                </span>
-              </div>
-            </div>
-          </motion.div>
+          <AgentErrorCard message={streamState.errorMessage} />
         )}
       </div>
     </div>
@@ -211,4 +182,93 @@ function StreamIndicator({
   }
 
   return null;
+}
+
+function AgentErrorCard({ message }: { message: string | null }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const raw = message || "执行出错，请重试";
+
+  // Extract HTTP status code if present
+  const httpMatch = raw.match(/HTTP\s+(\d{3})/);
+  const status = httpMatch ? httpMatch[1] : null;
+
+  // User-friendly summary
+  let summary = "请求失败";
+  if (status === "429") summary = "请求过于频繁（速率限制）";
+  else if (status === "401") summary = "API Key 无效或已过期";
+  else if (status === "403") summary = "访问被拒绝，请检查 API Key 权限";
+  else if (status === "404") summary = "API 地址不存在，请检查 Base URL";
+  else if (status && Number(status) >= 500) summary = `LLM 服务异常 (HTTP ${status})`;
+  else if (raw.includes("timed out") || raw.includes("timeout")) summary = "请求超时，请检查网络或增大超时时间";
+  else if (raw.includes("dns error") || raw.includes("resolve")) summary = "DNS 解析失败，请检查网络";
+  else if (raw.includes("connect") && raw.includes("error")) summary = "连接失败，请检查网络或 API 地址";
+  else if (raw.includes("sending request")) summary = "网络请求失败，请检查网络连接";
+  else summary = raw.slice(0, 80);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="relative pl-10 pb-4"
+    >
+      <div
+        className="absolute left-[11px] top-[8px] w-[10px] h-[10px] rounded-full border-2"
+        style={{
+          borderColor: "var(--color-error)",
+          backgroundColor: "var(--color-error-bg)",
+        }}
+      />
+      <div
+        className="rounded-lg px-4 py-3"
+        style={{
+          backgroundColor: "var(--color-error-bg)",
+          border: "1px solid var(--color-error)",
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <AlertCircle
+            className="w-4 h-4 shrink-0"
+            style={{ color: "var(--color-error)" }}
+          />
+          <span className="text-sm" style={{ color: "var(--color-error)" }}>
+            {summary}
+          </span>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            style={{
+              marginLeft: "auto",
+              fontSize: 12,
+              color: "var(--color-text-muted)",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              textDecoration: "underline",
+            }}
+          >
+            {expanded ? "收起" : "详情"}
+          </button>
+        </div>
+        {expanded && (
+          <pre
+            style={{
+              marginTop: 8,
+              padding: 8,
+              borderRadius: 6,
+              fontSize: 12,
+              lineHeight: 1.5,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+              background: "var(--color-bg)",
+              color: "var(--color-text-secondary)",
+              maxHeight: 200,
+              overflow: "auto",
+            }}
+          >
+            {raw}
+          </pre>
+        )}
+      </div>
+    </motion.div>
+  );
 }

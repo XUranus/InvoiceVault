@@ -1229,6 +1229,20 @@ pub fn get_session(conn: &Connection, session_id: i64) -> Result<AgentSession, A
 // LLM chat with tools
 // ---------------------------------------------------------------------------
 
+/// Maximum number of retries for transient LLM request failures.
+const LLM_REQUEST_MAX_RETRIES: u32 = 3;
+
+/// Check if an error is retryable (network errors, 429, 5xx).
+fn is_retryable_error(err: &AgentError) -> bool {
+    match err {
+        AgentError::Request(_) => true,
+        AgentError::Llm(LlmError::ProviderStatus { status, .. }) => {
+            *status == 429 || *status >= 500
+        }
+        _ => false,
+    }
+}
+
 async fn send_chat_request(
     messages: Vec<LlmMessage>,
     config: &LlmProviderConfig,
@@ -1286,6 +1300,7 @@ async fn send_chat_request(
     {
         Ok(response) => response,
         Err(err) => {
+            error!("Agent: LLM request failed: {err}");
             write_llm_audit_record(
                 audit,
                 LlmAuditRecord {
@@ -1309,7 +1324,7 @@ async fn send_chat_request(
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         error!(
-            "Agent: LLM HTTP {status}: {}",
+            "Agent: LLM HTTP {status_code}: {}",
             crate::llm::truncate(&body, 200)
         );
         write_llm_audit_record(
@@ -1416,6 +1431,7 @@ async fn send_chat_request_stream(
     {
         Ok(response) => response,
         Err(err) => {
+            error!("Agent stream: LLM request failed: {err}");
             write_llm_audit_record(
                 audit,
                 LlmAuditRecord {
@@ -1439,7 +1455,7 @@ async fn send_chat_request_stream(
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         error!(
-            "Agent stream: LLM HTTP {status}: {}",
+            "Agent stream: LLM HTTP {status_code}: {}",
             crate::llm::truncate(&body, 200)
         );
         write_llm_audit_record(
@@ -2012,11 +2028,34 @@ async fn run_agent_loop_from_inner(
 ) -> Result<AgentResponse, AgentError> {
     let mut new_messages: Vec<AgentMessageRow> = Vec::new();
     for _iteration in 0..AGENT_MAX_ITERATIONS {
-        let response = match &stream_sink {
-            Some(sink) => {
-                send_chat_request_stream(llm_messages.clone(), config, sink, audit).await?
+        // Retry LLM request on transient failures (network errors, 429, 5xx)
+        let response = 'retry: {
+            for attempt in 0..=LLM_REQUEST_MAX_RETRIES {
+                if attempt > 0 {
+                    let delay = Duration::from_secs(attempt as u64 * 2);
+                    warn!(
+                        "Agent: retrying LLM request (attempt {}/{}) after {}s",
+                        attempt, LLM_REQUEST_MAX_RETRIES, delay.as_secs()
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+                let result = match &stream_sink {
+                    Some(sink) => send_chat_request_stream(llm_messages.clone(), config, sink, audit).await,
+                    None => send_chat_request(llm_messages.clone(), config, audit).await,
+                };
+                match result {
+                    Ok(r) => break 'retry r,
+                    Err(e) if is_retryable_error(&e) && attempt < LLM_REQUEST_MAX_RETRIES => {
+                        warn!("Agent: retryable error: {e}");
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Agent: LLM request failed after {attempt} retries: {e}");
+                        return Err(e);
+                    }
+                }
             }
-            None => send_chat_request(llm_messages.clone(), config, audit).await?,
+            unreachable!()
         };
         let choice = response
             .choices
