@@ -53,7 +53,7 @@ export function Sidebar() {
           alt=""
           aria-hidden="true"
         />
-        <h1 className="sidebar-logo">票夹</h1>
+        <h1 className="sidebar-logo">票匣</h1>
         <p className="sidebar-subtitle">发票处理工作台</p>
       </div>
 

@@ -23,11 +23,11 @@ export function OnboardingDialog() {
       >
         <div className="onboarding-header">
           <Sparkles size={28} className="onboarding-logo" />
-          <h2 className="modal-title">欢迎使用 票夹</h2>
+          <h2 className="modal-title">欢迎使用 票匣</h2>
         </div>
 
         <p className="modal-message">
-          票夹是一款智能发票管理工具，可以帮助您自动识别、归档和分析发票数据。
+          票匣是一款智能发票管理工具，可以帮助您自动识别、归档和分析发票数据。
         </p>
 
         <ul className="onboarding-features">

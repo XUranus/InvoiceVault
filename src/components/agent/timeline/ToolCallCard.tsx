@@ -47,6 +47,7 @@ export function ToolCallCard({ toolCall, message }: ToolCallCardProps) {
       generate_template_plan : "生成模板计划",
       export_invoices_with_template: "按模板导出",
       export_pdf_report: "导出PDF报表",
+      validate_xlsx : "验证XLSX文件",
 
       // 发票编辑
       update_invoice: "更新发票信息",
