@@ -50,6 +50,7 @@
       "nsis": {
         "installMode": "currentUser",
         "displayLanguageSelector": true,
+        "languages": ["SimpChinese"],
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "installerHooks": "windows/nsis-hooks.nsh"
