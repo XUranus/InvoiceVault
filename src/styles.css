@@ -2760,6 +2760,10 @@ textarea:focus {
   line-height: 1.2;
 }
 
+.settings-page .form-grid {
+  max-width: 520px;
+}
+
 .settings-page .section > .btn-primary,
 .settings-page .section > .btn-danger,
 .settings-page .section-sub > .btn-primary,

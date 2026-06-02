@@ -151,6 +151,11 @@ export function ChatInput() {
           <Send className="w-4 h-4" />
         </motion.button>
       </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+        <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+          Enter 发送 · Shift+Enter 换行
+        </span>
+      </div>
     </div>
   );
 }

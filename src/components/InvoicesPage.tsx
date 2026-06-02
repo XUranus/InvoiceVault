@@ -552,6 +552,13 @@ export function InvoicesPage() {
           <FileText size={48} className="empty-icon" />
           <p>暂无发票记录</p>
           <span className="muted">导入发票文件并点击"识别"后，结构化数据将出现在这里</span>
+          <button
+            className="btn-primary"
+            style={{ marginTop: 16 }}
+            onClick={() => navigate("/import")}
+          >
+            导入发票
+          </button>
         </div>
       ) : viewMode === "table" ? (
         <InvoiceTableView

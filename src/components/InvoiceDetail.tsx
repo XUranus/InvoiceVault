@@ -32,6 +32,34 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
   const [savingItems, setSavingItems] = React.useState(false);
   const [badgeConfig, setBadgeConfig] = React.useState<BadgeConfig>({ groups: [] });
   const [savingBadge, setSavingBadge] = React.useState<string | null>(null);
+
+  // Resizable split pane
+  const [splitRatio, setSplitRatio] = React.useState(() => {
+    const saved = localStorage.getItem("detailSplitRatio");
+    return saved ? Number(saved) : 42;
+  });
+  const splitRef = React.useRef<HTMLDivElement>(null);
+  const draggingRef = React.useRef(false);
+
+  const handleSplitMouseDown = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    const onMove = (ev: MouseEvent) => {
+      if (!draggingRef.current || !splitRef.current) return;
+      const rect = splitRef.current.getBoundingClientRect();
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      const clamped = Math.max(20, Math.min(80, pct));
+      setSplitRatio(clamped);
+    };
+    const onUp = () => {
+      draggingRef.current = false;
+      localStorage.setItem("detailSplitRatio", String(splitRatio));
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [splitRatio]);
   const formRef = React.useRef<{ save: () => void; saving: boolean } | null>(null);
   const [formSaving, setFormSaving] = React.useState(false);
 
@@ -221,7 +249,11 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
         </div>
       </div>
 
-      <div className="detail-split">
+      <div
+        ref={splitRef}
+        className="detail-split"
+        style={{ gridTemplateColumns: `${splitRatio}% 4px minmax(0, 1fr)` }}
+      >
         <aside className="detail-preview-pane">
           {previewSrc ? (
             <div className="thumbnail-preview">
@@ -248,6 +280,19 @@ export function InvoiceDetail({ invoiceId, onBack, onError }: Props) {
             </div>
           )}
         </aside>
+
+        <div
+          className="detail-split-handle"
+          onMouseDown={handleSplitMouseDown}
+          style={{
+            cursor: "col-resize",
+            background: "var(--color-border)",
+            borderRadius: 2,
+            alignSelf: "stretch",
+            justifySelf: "center",
+            width: 4,
+          }}
+        />
 
         <div className="detail-content-pane">
           <DuplicateWarning
