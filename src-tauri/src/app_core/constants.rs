@@ -86,10 +86,10 @@ pub const LLM_VLM_CONFIDENCE_THRESHOLD: f64 = 0.5;
 pub const LLM_VLM_TEMPERATURES: [f32; 3] = [0.0, 0.3, 0.5];
 
 /// Max tokens for invoice recognition responses.
-pub const LLM_RECOGNITION_MAX_TOKENS: u16 = 4096;
+pub const LLM_RECOGNITION_MAX_TOKENS: u16 = 16384;
 
 /// Max tokens for the Agent system prompt path.
-pub const AGENT_MAX_TOKENS: u16 = 2000;
+pub const AGENT_MAX_TOKENS: u16 = 8192;
 
 // ---------------------------------------------------------------------------
 // Agent

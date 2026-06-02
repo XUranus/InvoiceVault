@@ -724,7 +724,7 @@ async fn audit_invoice_results(
             content: &prompt,
         }],
         temperature: 0.0,
-        max_tokens: 1024,
+        max_tokens: 4096,
     };
     let endpoint = format!("{base_url}/chat/completions");
 
