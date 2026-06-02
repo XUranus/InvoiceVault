@@ -213,7 +213,7 @@ pub fn agent_tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "validate_xlsx",
-            description: "验证 Excel (XLSX) 文件的 XML 结构是否合法。在导出 Excel 后调用此工具检查文件完整性，如果验证失败返回详细错误信息（文件名、行号、错误描述）。只读操作。",
+            description: "验证 Excel (XLSX) 文件的 XML 结构是否合法。导出 Excel 后必须调用此工具验证。如果验证失败（返回 Error），必须分析错误原因、修复问题后重新导出并再次验证，直到验证通过。只读操作。",
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -779,7 +779,8 @@ const SYSTEM_PROMPT: &str = r#"你是 InvoiceVault 发票处理助手，只能�
 - 工具返回什么数据就如实汇报，不要虚构或编造数据
 - 如果用户请求超出你的工具能力范围，如实说明并给出建议
 - 回答使用中文，简洁清晰
-- 涉及金额时保留两位小数"#;
+- 涉及金额时保留两位小数
+- Excel 模板导出后必须调用 validate_xlsx 验证文件。如果验证失败，必须分析错误、修复问题、重新导出并再次验证，直到通过"#;
 
 // ---------------------------------------------------------------------------
 // Database operations

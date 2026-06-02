@@ -2658,32 +2658,21 @@ fn make_tool_executor(
             };
             match crate::template_engine::validate_xlsx(file_path) {
                 Ok(report) if report.valid => ToolExecResult::Success {
-                    content: serde_json::json!({
-                        "valid": true,
-                        "message": "XLSX XML 验证通过，所有 XML 文件结构合法"
-                    })
-                    .to_string(),
+                    content: "XLSX XML 验证通过，所有 XML 文件结构合法".to_owned(),
                 },
                 Ok(report) => {
-                    let error_details: Vec<serde_json::Value> = report
+                    let error_lines: Vec<String> = report
                         .errors
                         .iter()
-                        .map(|e| {
-                            serde_json::json!({
-                                "file": e.file,
-                                "line": e.line,
-                                "column": e.column,
-                                "message": e.message,
-                            })
-                        })
+                        .map(|e| format!("[{}] {}: {}", e.file, e.line, e.message))
                         .collect();
-                    ToolExecResult::Success {
-                        content: serde_json::json!({
-                            "valid": false,
-                            "errors": error_details,
-                            "message": format!("XLSX XML 验证失败，发现 {} 个错误", report.errors.len()),
-                        })
-                        .to_string(),
+                    ToolExecResult::Error {
+                        message: format!(
+                            "XLSX XML 验证失败，发现 {} 个错误：\n{}\n\
+                             请分析错误原因，修复模板引擎的 XML 生成逻辑后重新导出并验证。",
+                            report.errors.len(),
+                            error_lines.join("\n"),
+                        ),
                     }
                 }
                 Err(e) => ToolExecResult::Error {
