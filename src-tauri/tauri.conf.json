@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "InvoiceVault",
+  "productName": "票匣",
   "version": "0.1.0",
   "identifier": "com.invoicevault.desktop",
   "build": {
