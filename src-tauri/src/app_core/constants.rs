@@ -127,21 +127,20 @@ pub const SECONDS_PER_DAY: u64 = 86400;
 // Status constants — use these instead of raw string literals
 // ---------------------------------------------------------------------------
 
-// Import job statuses
-pub const STATUS_IMPORTED: &str = "imported";
-pub const STATUS_FAILED: &str = "failed";
-pub const STATUS_RECOGNIZING: &str = "recognizing";
-pub const STATUS_COMPLETED: &str = "completed";
-pub const STATUS_PENDING: &str = "pending";
-
-// Invoice statuses
-pub const STATUS_CONFIRMED: &str = "confirmed";
-pub const STATUS_ARCHIVED: &str = "archived";
-
-// Duplicate statuses
-pub const STATUS_UNIQUE: &str = "unique";
-pub const STATUS_EXACT_DUPLICATE: &str = "exact_duplicate";
-pub const STATUS_PROBABLE_DUPLICATE: &str = "probable_duplicate";
-pub const STATUS_POSSIBLE_DUPLICATE: &str = "possible_duplicate";
-pub const STATUS_NOT_DUPLICATE: &str = "not_duplicate";
+/// Import job statuses.
+#[allow(dead_code)]
+pub mod status {
+    pub const IMPORTED: &str = "imported";
+    pub const FAILED: &str = "failed";
+    pub const RECOGNIZING: &str = "recognizing";
+    pub const COMPLETED: &str = "completed";
+    pub const PENDING: &str = "pending";
+    pub const CONFIRMED: &str = "confirmed";
+    pub const ARCHIVED: &str = "archived";
+    pub const UNIQUE: &str = "unique";
+    pub const EXACT_DUPLICATE: &str = "exact_duplicate";
+    pub const PROBABLE_DUPLICATE: &str = "probable_duplicate";
+    pub const POSSIBLE_DUPLICATE: &str = "possible_duplicate";
+    pub const NOT_DUPLICATE: &str = "not_duplicate";
+}
 pub const ALLOWED_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg"];
