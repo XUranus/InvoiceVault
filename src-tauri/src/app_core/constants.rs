@@ -122,4 +122,26 @@ pub const SECONDS_PER_DAY: u64 = 86400;
 // ---------------------------------------------------------------------------
 
 /// Accepted file extensions for invoice import.
+
+// ---------------------------------------------------------------------------
+// Status constants — use these instead of raw string literals
+// ---------------------------------------------------------------------------
+
+// Import job statuses
+pub const STATUS_IMPORTED: &str = "imported";
+pub const STATUS_FAILED: &str = "failed";
+pub const STATUS_RECOGNIZING: &str = "recognizing";
+pub const STATUS_COMPLETED: &str = "completed";
+pub const STATUS_PENDING: &str = "pending";
+
+// Invoice statuses
+pub const STATUS_CONFIRMED: &str = "confirmed";
+pub const STATUS_ARCHIVED: &str = "archived";
+
+// Duplicate statuses
+pub const STATUS_UNIQUE: &str = "unique";
+pub const STATUS_EXACT_DUPLICATE: &str = "exact_duplicate";
+pub const STATUS_PROBABLE_DUPLICATE: &str = "probable_duplicate";
+pub const STATUS_POSSIBLE_DUPLICATE: &str = "possible_duplicate";
+pub const STATUS_NOT_DUPLICATE: &str = "not_duplicate";
 pub const ALLOWED_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg"];

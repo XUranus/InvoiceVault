@@ -688,48 +688,12 @@ impl AppState {
                     if chroma_enabled && embedding_on {
                         if let Some(ref mut engine) = *embedding_engine.lock().unwrap_or_else(|e| e.into_inner()) {
                             let thumb_dir = thumbnails_dir.clone();
-                            // Re-acquire lock briefly to fetch detail for embedding text
                             let detail = {
                                 let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                                 get_invoice_detail(&conn, &thumb_dir, invoice_id).ok()
                             };
                             if let Some(detail) = detail {
-                                let text = invoice_to_embedding_text(&detail);
-                                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                    generate_embedding(engine, &text)
-                                }));
-                                if let Ok(Ok(result)) = result {
-                                    let embedding = result.embedding;
-                                    let prompt_tokens = result.prompt_tokens;
-                                    let total_tokens = result.total_tokens;
-                                    let db_for_emb = Arc::clone(&db);
-                                    tauri::async_runtime::spawn(async move {
-                                        if let Ok(conn) = db_for_emb.lock() {
-                                            if let Err(e) = chroma::upsert_embedding(&conn, invoice_id, &embedding, &text) {
-                                                warn!("Failed to upsert embedding for invoice {invoice_id}: {e}");
-                                            }
-                                            if let Err(e) = conn.execute(
-                                                "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
-                                                [invoice_id],
-                                            ) {
-                                                warn!("Failed to mark invoice {invoice_id} as having embedding: {e}");
-                                            }
-                                            if let Ok(similar) = chroma::query_similar(&conn, &embedding, 5) {
-                                                if let Err(e) = crate::dedupe::detect_semantic_duplicates(
-                                                    &conn, invoice_id, &similar,
-                                                ) {
-                                                    warn!("Failed to detect semantic duplicates for invoice {invoice_id}: {e}");
-                                                }
-                                            }
-                                            if let Err(e) = crate::extractor::insert_usage_log(
-                                                &conn, "embedding", EMBEDDING_MODEL_NAME,
-                                                prompt_tokens, total_tokens.saturating_sub(prompt_tokens), total_tokens,
-                                            ) {
-                                                warn!("Failed to insert embedding usage log: {e}");
-                                            }
-                                        }
-                                    });
-                                }
+                                spawn_embedding_for_invoice(Arc::clone(&db), engine, invoice_id, &detail);
                             }
                         }
                     }
@@ -884,50 +848,7 @@ impl AppState {
                 let invoice_id = invoice.id;
                 let detail = get_invoice_detail(&db, &thumb_dir, invoice_id).ok();
                 if let Some(detail) = detail {
-                    let text = invoice_to_embedding_text(&detail);
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        generate_embedding(engine, &text)
-                    }));
-                    if let Ok(Ok(result)) = result {
-                        let embedding = result.embedding;
-                        let prompt_tokens = result.prompt_tokens;
-                        let total_tokens = result.total_tokens;
-                        let db_arc = Arc::clone(&self.db);
-                        tauri::async_runtime::spawn(async move {
-                            if let Ok(db) = db_arc.lock() {
-                                if let Err(e) =
-                                    chroma::upsert_embedding(&db, invoice_id, &embedding, &text)
-                                {
-                                    warn!(
-                                        "Failed to upsert embedding for invoice {invoice_id}: {e}"
-                                    );
-                                }
-                                if let Err(e) = db.execute(
-                                    "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
-                                    [invoice_id],
-                                ) {
-                                    warn!("Failed to mark invoice {invoice_id} as having embedding: {e}");
-                                }
-                                if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
-                                    if let Err(e) = crate::dedupe::detect_semantic_duplicates(
-                                        &db, invoice_id, &similar,
-                                    ) {
-                                        warn!("Failed to detect semantic duplicates for invoice {invoice_id}: {e}");
-                                    }
-                                }
-                                if let Err(e) = crate::extractor::insert_usage_log(
-                                    &db,
-                                    "embedding",
-                                    EMBEDDING_MODEL_NAME,
-                                    prompt_tokens,
-                                    total_tokens.saturating_sub(prompt_tokens),
-                                    total_tokens,
-                                ) {
-                                    warn!("Failed to insert embedding usage log: {e}");
-                                }
-                            }
-                        });
-                    }
+                    spawn_embedding_for_invoice(Arc::clone(&self.db), engine, invoice_id, &detail);
                 }
             }
         }
@@ -1033,50 +954,7 @@ impl AppState {
                 let invoice_id = result.invoice.id;
                 let detail = get_invoice_detail(&db, &thumb_dir, invoice_id).ok();
                 if let Some(detail) = detail {
-                    let text = invoice_to_embedding_text(&detail);
-                    let emb_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        generate_embedding(engine, &text)
-                    }));
-                    if let Ok(Ok(emb_result)) = emb_result {
-                        let embedding = emb_result.embedding;
-                        let prompt_tokens = emb_result.prompt_tokens;
-                        let total_tokens = emb_result.total_tokens;
-                        let db_arc = Arc::clone(&self.db);
-                        tauri::async_runtime::spawn(async move {
-                            if let Ok(db) = db_arc.lock() {
-                                if let Err(e) =
-                                    chroma::upsert_embedding(&db, invoice_id, &embedding, &text)
-                                {
-                                    warn!(
-                                        "Failed to upsert embedding for invoice {invoice_id}: {e}"
-                                    );
-                                }
-                                if let Err(e) = db.execute(
-                                    "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
-                                    [invoice_id],
-                                ) {
-                                    warn!("Failed to mark invoice {invoice_id} as having embedding: {e}");
-                                }
-                                if let Ok(similar) = chroma::query_similar(&db, &embedding, 5) {
-                                    if let Err(e) = crate::dedupe::detect_semantic_duplicates(
-                                        &db, invoice_id, &similar,
-                                    ) {
-                                        warn!("Failed to detect semantic duplicates for invoice {invoice_id}: {e}");
-                                    }
-                                }
-                                if let Err(e) = crate::extractor::insert_usage_log(
-                                    &db,
-                                    "embedding",
-                                    EMBEDDING_MODEL_NAME,
-                                    prompt_tokens,
-                                    total_tokens.saturating_sub(prompt_tokens),
-                                    total_tokens,
-                                ) {
-                                    warn!("Failed to insert embedding usage log: {e}");
-                                }
-                            }
-                        });
-                    }
+                    spawn_embedding_for_invoice(Arc::clone(&self.db), engine, invoice_id, &detail);
                 }
             }
         }
@@ -2438,6 +2316,82 @@ impl AppState {
     }
 }
 
+/// Generate embedding for an invoice and persist the result.
+///
+/// This is the shared logic used by recognition, save, update, and regeneration paths.
+/// It handles: embedding generation → ChromaDB upsert → mark invoice → semantic dedupe → usage log.
+/// Runs asynchronously via `tauri::async_runtime::spawn`.
+fn spawn_embedding_for_invoice(
+    db: Arc<Mutex<Connection>>,
+    engine: &mut crate::embedding::LocalEmbeddingEngine,
+    invoice_id: i64,
+    detail: &crate::extractor::InvoiceDetail,
+) {
+    let text = crate::extractor::invoice_to_embedding_text(detail);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        generate_embedding(engine, &text)
+    }));
+    let Ok(Ok(result)) = result else { return };
+    let embedding = result.embedding;
+    let prompt_tokens = result.prompt_tokens;
+    let total_tokens = result.total_tokens;
+    tauri::async_runtime::spawn(async move {
+        let Ok(conn) = db.lock() else { return };
+        if let Err(e) = chroma::upsert_embedding(&conn, invoice_id, &embedding, &text) {
+            warn!("Failed to upsert embedding for invoice {invoice_id}: {e}");
+        }
+        if let Err(e) = conn.execute(
+            "UPDATE invoices SET has_embedding = 1 WHERE id = ?1",
+            [invoice_id],
+        ) {
+            warn!("Failed to mark invoice {invoice_id} as having embedding: {e}");
+        }
+        if let Ok(similar) = chroma::query_similar(&conn, &embedding, 5) {
+            if let Err(e) = crate::dedupe::detect_semantic_duplicates(&conn, invoice_id, &similar) {
+                warn!("Failed to detect semantic duplicates for invoice {invoice_id}: {e}");
+            }
+        }
+        if let Err(e) = crate::extractor::insert_usage_log(
+            &conn,
+            "embedding",
+            EMBEDDING_MODEL_NAME,
+            prompt_tokens,
+            total_tokens.saturating_sub(prompt_tokens),
+            total_tokens,
+        ) {
+            warn!("Failed to insert embedding usage log: {e}");
+        }
+    });
+}
+
+/// Validate that a file path is safe for agent tool access.
+/// Returns Ok(()) if the path is within the app data directory or a temp directory.
+/// Rejects paths with ".." components to prevent traversal.
+fn validate_agent_path(path: &str, app_data_dir: &std::path::Path) -> Result<(), String> {
+    let p = std::path::Path::new(path);
+    // Reject obvious traversal attempts
+    if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("路径不允许包含 ..".to_owned());
+    }
+    // Allow paths within app data directory
+    if p.starts_with(app_data_dir) {
+        return Ok(());
+    }
+    // Allow temp directory
+    if let Some(tmp) = std::env::temp_dir().to_str() {
+        if path.starts_with(tmp) {
+            return Ok(());
+        }
+    }
+    // Allow desktop (common export destination)
+    if let Some(desktop) = dirs::desktop_dir() {
+        if p.starts_with(&desktop) {
+            return Ok(());
+        }
+    }
+    Err(format!("路径不在允许的目录中: {}", path))
+}
+
 fn make_tool_executor(
     thumbnails_dir: std::path::PathBuf,
     app_data_dir: std::path::PathBuf,
@@ -2656,6 +2610,9 @@ fn make_tool_executor(
                     message: "缺少 file_path 参数".to_owned(),
                 };
             };
+            if let Err(e) = validate_agent_path(file_path, &app_data_dir) {
+                return ToolExecResult::Error { message: e };
+            }
             match crate::template_engine::validate_xlsx(file_path) {
                 Ok(report) if report.valid => ToolExecResult::Success {
                     content: "XLSX XML 验证通过，所有 XML 文件结构合法".to_owned(),
@@ -2857,6 +2814,9 @@ fn make_tool_executor(
                 );
                 desktop.join(filename).to_string_lossy().into_owned()
             } else if let Some(p) = args.get("output_path").and_then(|v| v.as_str()) {
+                if let Err(e) = validate_agent_path(p, &app_data_dir) {
+                    return ToolExecResult::Error { message: e };
+                }
                 p.to_owned()
             } else {
                 return ToolExecResult::Error {
@@ -3094,6 +3054,9 @@ fn make_tool_executor(
                 );
                 desktop.join(filename).to_string_lossy().into_owned()
             } else if let Some(p) = args.get("output_path").and_then(|v| v.as_str()) {
+                if let Err(e) = validate_agent_path(p, &app_data_dir) {
+                    return ToolExecResult::Error { message: e };
+                }
                 p.to_owned()
             } else {
                 return ToolExecResult::Error {

@@ -60,6 +60,7 @@ pub struct EmailSource {
     pub imap_host: String,
     pub imap_port: i64,
     pub username: String,
+    #[serde(skip_serializing)]
     pub password: String,
     pub auth_method: String,
     pub use_ssl: bool,
@@ -534,7 +535,8 @@ impl EmailManager {
             });
         }
 
-        let client = ClientBuilder::new(host, port as u16)
+        let port_u16 = u16::try_from(port).map_err(|_| EmailError::Imap(format!("端口号无效: {port}")))?;
+        let client = ClientBuilder::new(host, port_u16)
             .connect()
             .map_err(|e| EmailError::Imap(format!("connect: {e}")))?;
 
@@ -645,7 +647,8 @@ impl EmailManager {
     }
 
     fn do_sync(&self, source: &EmailSource) -> Result<EmailSyncResult, EmailError> {
-        let client = ClientBuilder::new(&source.imap_host, source.imap_port as u16)
+        let port_u16 = u16::try_from(source.imap_port).map_err(|_| EmailError::Imap(format!("端口号无效: {}", source.imap_port)))?;
+        let client = ClientBuilder::new(&source.imap_host, port_u16)
             .connect()
             .map_err(|e| EmailError::Imap(format!("connect: {e}")))?;
 
