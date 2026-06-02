@@ -158,6 +158,12 @@ export function AiProviderPage() {
         api_key: llm.config.apiKey,
         model: llm.config.model,
         scnet_ocr_api_key: scnetApiKey || undefined,
+        recognition_max_tokens: llm.config.recognitionMaxTokens
+          ? Number(llm.config.recognitionMaxTokens) || undefined
+          : undefined,
+        agent_max_tokens: llm.config.agentMaxTokens
+          ? Number(llm.config.agentMaxTokens) || undefined
+          : undefined,
       });
       resetLlm(llm.config);
       setLlmSaveMsg("已保存 LLM 配置");
@@ -328,6 +334,33 @@ export function AiProviderPage() {
                 {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+          </label>
+        </div>
+
+        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 4 }}>
+          <label className="form-field">
+            <span>识别最大输出 tokens</span>
+            <input
+              type="number"
+              step="1024"
+              min="1024"
+              max="131072"
+              value={llm.config.recognitionMaxTokens}
+              onChange={(e) => setLlmField("recognitionMaxTokens", e.target.value)}
+              placeholder="16384"
+            />
+          </label>
+          <label className="form-field">
+            <span>Agent 最大输出 tokens</span>
+            <input
+              type="number"
+              step="1024"
+              min="1024"
+              max="131072"
+              value={llm.config.agentMaxTokens}
+              onChange={(e) => setLlmField("agentMaxTokens", e.target.value)}
+              placeholder="8192"
+            />
           </label>
         </div>
 

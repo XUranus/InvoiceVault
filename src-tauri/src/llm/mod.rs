@@ -33,6 +33,12 @@ pub struct LlmProviderConfig {
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub scnet_ocr_api_key: Option<String>,
+    /// Max output tokens for invoice recognition (default from constants).
+    #[serde(default)]
+    pub recognition_max_tokens: Option<u16>,
+    /// Max output tokens for agent responses (default from constants).
+    #[serde(default)]
+    pub agent_max_tokens: Option<u16>,
 }
 
 /// LLM 审计日志配置，指定日志输出目录。
@@ -376,7 +382,7 @@ pub async fn recognize_invoice_image(
             ],
         }],
         temperature,
-        max_tokens: LLM_RECOGNITION_MAX_TOKENS,
+        max_tokens: config.recognition_max_tokens.unwrap_or(LLM_RECOGNITION_MAX_TOKENS),
     };
     let endpoint = format!("{base_url}/chat/completions");
     let request_json = serde_json::to_value(&request)?;

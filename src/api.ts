@@ -561,6 +561,8 @@ export async function setLlmConfig(config: {
   api_key: string;
   model: string;
   scnet_ocr_api_key?: string;
+  recognition_max_tokens?: number;
+  agent_max_tokens?: number;
 }): Promise<void> {
   return invoke<void>("set_llm_config", { config });
 }
@@ -571,6 +573,8 @@ export type LlmConfigResponse = {
   model: string;
   timeout_seconds?: number;
   scnet_ocr_api_key?: string;
+  recognition_max_tokens?: number;
+  agent_max_tokens?: number;
 } | null;
 
 export async function getLlmConfig(): Promise<LlmConfigResponse> {

@@ -1285,7 +1285,7 @@ async fn send_chat_request(
         tools,
         tool_choice: "auto",
         temperature: 0.0,
-        max_tokens: AGENT_MAX_TOKENS,
+        max_tokens: config.agent_max_tokens.unwrap_or(AGENT_MAX_TOKENS),
         stream: None,
     };
     let endpoint = format!("{base_url}/chat/completions");
@@ -1410,7 +1410,7 @@ async fn send_chat_request_stream(
         tools,
         tool_choice: "auto",
         temperature: 0.0,
-        max_tokens: AGENT_MAX_TOKENS,
+        max_tokens: config.agent_max_tokens.unwrap_or(AGENT_MAX_TOKENS),
         stream: Some(true),
     };
     let endpoint = format!("{base_url}/chat/completions");

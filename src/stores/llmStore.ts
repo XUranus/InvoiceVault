@@ -8,6 +8,8 @@ type ProviderConfig = {
   baseUrl: string;
   model: string;
   apiKey: string;
+  recognitionMaxTokens: string;
+  agentMaxTokens: string;
 };
 
 type PanelState = {
@@ -35,6 +37,8 @@ const defaultProvider: ProviderConfig = {
   baseUrl: "",
   model: "",
   apiKey: "",
+  recognitionMaxTokens: "",
+  agentMaxTokens: "",
 };
 
 function makePanel(config: ProviderConfig): PanelState {
@@ -76,6 +80,8 @@ export const useLlmStore = create<LlmStore>((set) => ({
           baseUrl: llmCfg?.base_url ?? defaultProvider.baseUrl,
           model: llmCfg?.model ?? defaultProvider.model,
           apiKey: llmCfg?.api_key ?? defaultProvider.apiKey,
+          recognitionMaxTokens: llmCfg?.recognition_max_tokens?.toString() ?? "",
+          agentMaxTokens: llmCfg?.agent_max_tokens?.toString() ?? "",
         }),
         scnetApiKey: llmCfg?.scnet_ocr_api_key ?? "",
         auditEnabled: audit !== false,
