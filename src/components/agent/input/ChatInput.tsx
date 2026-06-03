@@ -89,6 +89,7 @@ export function ChatInput() {
         <button
           onClick={handleAttachFile}
           disabled={isAttaching}
+          aria-label="添加附件"
           className="p-1.5 rounded-lg transition-colors"
           style={{
             color: isAttaching ? "var(--color-text-muted)" : "var(--color-text-secondary)",
@@ -130,6 +131,7 @@ export function ChatInput() {
         <motion.button
           onClick={handleSend}
           disabled={!message.trim() || isStreaming || activeSessionId === null}
+          aria-label="发送消息"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           className="p-1.5 rounded-lg transition-colors"

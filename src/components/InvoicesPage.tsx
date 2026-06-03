@@ -383,7 +383,7 @@ export function InvoicesPage() {
       {localError ? (
         <div className="alert alert-error" style={{ marginBottom: 12 }}>
           {localError}
-          <button className="alert-dismiss" onClick={() => setLocalError(null)}>×</button>
+          <button className="alert-dismiss" onClick={() => setLocalError(null)} aria-label="关闭提示">×</button>
         </div>
       ) : null}
 

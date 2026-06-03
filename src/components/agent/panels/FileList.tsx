@@ -151,6 +151,7 @@ export function FileList({ artifacts, onSelect }: FileListProps) {
             </button>
             <button
               onClick={(e) => handleDelete(artifact, e)}
+              aria-label={`删除 ${artifact.title}`}
               className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors"
               style={{
                 backgroundColor: "var(--color-error-bg)",

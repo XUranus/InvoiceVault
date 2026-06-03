@@ -330,6 +330,7 @@ export function AiProviderPage() {
                 type="button"
                 onClick={() => setShowApiKey((v) => !v)}
                 title={showApiKey ? "隐藏" : "显示"}
+                aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
               >
                 {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
@@ -426,6 +427,7 @@ export function AiProviderPage() {
                 type="button"
                 onClick={() => setShowScnetKey((v) => !v)}
                 title={showScnetKey ? "隐藏" : "显示"}
+                aria-label={showScnetKey ? "隐藏 SCNet API Key" : "显示 SCNet API Key"}
               >
                 {showScnetKey ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>

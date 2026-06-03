@@ -75,7 +75,8 @@ export function TitleBar() {
           className="titlebar-btn"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={() => invoke("window_minimize").catch(() => {})}
-          title="Minimize"
+          title="最小化"
+          aria-label="最小化窗口"
         >
           <Minus size={16} />
         </button>
@@ -83,7 +84,8 @@ export function TitleBar() {
           className="titlebar-btn"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={toggleMaximize}
-          title={isMaximized ? "Restore" : "Maximize"}
+          title={isMaximized ? "还原" : "最大化"}
+          aria-label={isMaximized ? "还原窗口" : "最大化窗口"}
         >
           {isMaximized ? <Copy size={14} /> : <Square size={14} />}
         </button>
@@ -91,7 +93,8 @@ export function TitleBar() {
           className="titlebar-btn titlebar-btn-close"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={() => invoke("window_close").catch(() => {})}
-          title="Close"
+          title="关闭"
+          aria-label="关闭窗口"
         >
           <X size={16} />
         </button>

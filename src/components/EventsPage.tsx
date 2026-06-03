@@ -205,7 +205,7 @@ export function EventsPage() {
       {eventError ? (
         <div className="alert alert-warn">
           {eventError}
-          <button className="alert-dismiss" onClick={() => setEventError(null)}>×</button>
+          <button className="alert-dismiss" onClick={() => setEventError(null)} aria-label="关闭提示">×</button>
         </div>
       ) : null}
 

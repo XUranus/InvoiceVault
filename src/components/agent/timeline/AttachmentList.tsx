@@ -37,6 +37,7 @@ export function AttachmentList({ attachments, onRemove }: AttachmentListProps) {
           {onRemove && (
             <button
               onClick={() => onRemove(attachment.id)}
+              aria-label={`移除附件 ${attachment.original_name}`}
               className="ml-1 hover:opacity-70 transition-opacity"
             >
               <X

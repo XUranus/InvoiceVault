@@ -142,7 +142,7 @@ export function InvoiceEditForm({ detail, onSaved, onError, onStateChange }: Pro
                   onChange={(e) => setExtraField(key, e.target.value)}
                   style={{ flex: 1 }}
                 />
-                <button type="button" onClick={() => setExtraField(key, "")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--danger)", fontSize: "1rem" }}>×</button>
+                <button type="button" onClick={() => setExtraField(key, "")} aria-label={`删除字段 ${key}`} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--danger)", fontSize: "1rem" }}>×</button>
               </div>
             ))}
             <button type="button" onClick={addExtraField} style={{ background: "none", border: "1px dashed var(--border)", borderRadius: "4px", padding: "4px 8px", cursor: "pointer", fontSize: "0.8rem", color: "var(--text-secondary)", alignSelf: "flex-start" }}>

@@ -104,6 +104,7 @@ export function SessionSidebar() {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={createNewSession}
+          aria-label="新建会话"
           className="p-1.5 rounded-md hover:opacity-80 transition-opacity"
           style={{
             backgroundColor: "var(--color-primary-bg)",
@@ -158,6 +159,7 @@ export function SessionSidebar() {
                         e.stopPropagation();
                         deleteSession(session.id);
                       }}
+                      aria-label={`删除会话 ${session.title || session.id}`}
                       className="opacity-0 group-hover:opacity-100 p-1 rounded hover:opacity-80 transition-opacity"
                       style={{ color: "var(--color-error-text)" }}
                     >

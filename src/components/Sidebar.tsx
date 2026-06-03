@@ -108,6 +108,7 @@ export function Sidebar() {
           className="sidebar-toggle-btn"
           onClick={toggleSidebar}
           title={collapsed ? "展开侧边栏" : "收起侧边栏"}
+          aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
         >
           {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
