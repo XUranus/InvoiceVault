@@ -82,7 +82,6 @@ export function ImportPage() {
       return ext && ["pdf", "png", "jpg", "jpeg"].includes(ext);
     });
     if (files.length === 0) return;
-    console.log("[drag-drop] DOM drop, files:", files.map((f) => f.name));
     setIsImporting(true);
     setOptimisticJobs(files.map((f) => createOptimisticJob(f.name, 0)));
     try {
@@ -90,7 +89,6 @@ export function ImportPage() {
       for (const file of files) {
         const buf = await file.arrayBuffer();
         const data = Array.from(new Uint8Array(buf));
-        console.log("[drag-drop] importing DOM file:", file.name, "size:", data.length);
         const jobs = await importDroppedFile(file.name, data);
         allJobs.push(...jobs);
       }
@@ -117,13 +115,11 @@ export function ImportPage() {
     if (!el) return;
     const onDragEnter = (e: DragEvent) => {
       if (e.dataTransfer?.types.includes("Files")) {
-        console.log("[drag-drop] DOM dragenter on drop area");
         setIsDraggingFiles(true);
       }
     };
     const onDragLeave = (e: DragEvent) => {
       if (!el.contains(e.relatedTarget as Node | null)) {
-        console.log("[drag-drop] DOM dragleave on drop area");
         setIsDraggingFiles(false);
       }
     };

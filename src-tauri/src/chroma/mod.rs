@@ -106,9 +106,7 @@ pub fn query_similar(
 }
 
 fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
-    let bytes: &[u8] =
-        unsafe { std::slice::from_raw_parts(embedding.as_ptr() as *const u8, embedding.len() * 4) };
-    bytes.to_vec()
+    embedding.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 
 fn blob_to_embedding(blob: &[u8]) -> Vec<f32> {

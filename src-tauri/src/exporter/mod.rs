@@ -558,8 +558,9 @@ fn export_xlsx(
 
     // Write headers
     for (col, col_def) in columns.iter().enumerate() {
+        let col_u16 = u16::try_from(col).map_err(|_| ExportError::Xlsx(format!("列索引溢出: {col}")))?;
         sheet
-            .write_string_with_format(0, col as u16, col_def.label, &header_format)
+            .write_string_with_format(0, col_u16, col_def.label, &header_format)
             .map_err(|e| ExportError::Xlsx(e.to_string()))?;
     }
 
@@ -567,7 +568,7 @@ fn export_xlsx(
     for (row_idx, row) in rows.iter().enumerate() {
         let r = (row_idx + 1) as u32;
         for (col, col_def) in columns.iter().enumerate() {
-            let c = col as u16;
+            let c = u16::try_from(col).map_err(|_| ExportError::Xlsx(format!("列索引溢出: {col}")))?;
             if col_def.numeric {
                 if let Some(num) = row.number_by_key(col_def.key) {
                     sheet
@@ -600,8 +601,9 @@ fn export_xlsx(
             }
         }
         let width = (max_width + 2.0).min(50.0).max(8.0);
+        let col_u16 = u16::try_from(col).map_err(|_| ExportError::Xlsx(format!("列索引溢出: {col}")))?;
         sheet
-            .set_column_width(col as u16, width)
+            .set_column_width(col_u16, width)
             .map_err(|e| ExportError::Xlsx(e.to_string()))?;
     }
 

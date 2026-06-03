@@ -2378,10 +2378,8 @@ fn validate_agent_path(path: &str, app_data_dir: &std::path::Path) -> Result<(),
         return Ok(());
     }
     // Allow temp directory
-    if let Some(tmp) = std::env::temp_dir().to_str() {
-        if path.starts_with(tmp) {
-            return Ok(());
-        }
+    if p.starts_with(std::env::temp_dir()) {
+        return Ok(());
     }
     // Allow desktop (common export destination)
     if let Some(desktop) = dirs::desktop_dir() {
