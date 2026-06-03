@@ -63,6 +63,7 @@ struct WindowSizeState {
     height: f64,
 }
 
+#[cfg(not(target_os = "windows"))]
 #[derive(Debug, Clone, Serialize)]
 struct NativeDragStateEvent {
     dragging: bool,

@@ -429,6 +429,7 @@ impl AppState {
     }
 
     /// 存储拖拽到窗口的文件路径，供前端轮询获取。
+    #[cfg(not(target_os = "windows"))]
     pub fn push_dropped_files(&self, paths: Vec<String>) {
         let mut guard = self
             .pending_dropped_files
