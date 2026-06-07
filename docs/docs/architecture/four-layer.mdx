@@ -1,0 +1,442 @@
+---
+title: 四层架构详解
+sidebar_position: 2
+description: 各层的技术实现、模块组成和命令流转机制
+---
+
+# 四层架构详解
+
+本章深入讲解票匣四层架构中每一层的技术实现细节，以及命令如何从前端流转到后端。
+
+## 命令流转：从前端到后端
+
+当用户在界面上执行操作时，数据经过以下路径：
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant Component as React 组件
+    participant API as api.ts
+    participant Tauri as Tauri Runtime
+    participant Command as Command 函数
+    participant State as AppState
+    participant Module as 业务模块
+    participant Infra as 基础设施
+
+    User->>Component: 点击按钮 / 输入
+    Component->>API: 调用封装函数
+    API->>Tauri: invoke("command_name", {args})
+    Tauri->>Command: 调用 #[tauri::command] 函数
+    Command->>State: state.method(args)
+    State->>Module: 调用子模块方法
+    Module->>Infra: 读写数据库 / 调用 API
+    Infra-->>Module: 返回结果
+    Module-->>State: 返回 Result
+    State-->>Command: 返回 Result
+    Command-->>Tauri: 返回 Result<T, String>
+    Tauri-->>API: JSON 响应
+    API-->>Component: 更新状态
+    Component-->>User: 更新 UI
+```
+
+### 具体示例：导入文件
+
+以下展示了从用户拖拽文件到发票识别完成的完整调用链：
+
+```mermaid
+graph TD
+    subgraph 前端层
+        A["ImportPanel.tsx<br/>用户拖拽文件"]
+        B["api.ts<br/>invoke('import_files', {request})"]
+    end
+
+    subgraph 命令层
+        C["commands/import.rs<br/>import_files()"]
+    end
+
+    subgraph 核心业务层
+        D["AppState::import_files()"]
+        E["AppState::import_files_inner()"]
+        F["importer::import_files()"]
+        G["raw_store::inspect_file()"]
+        H["raw_store::store_original_file()"]
+        I["AppState::spawn_recognition_task()"]
+    end
+
+    subgraph 基础设施层
+        J["SQLite: import_jobs + raw_files"]
+        K["文件系统: raw/年/月/"]
+        L["LLM API: /chat/completions"]
+        M["SQLite: invoices"]
+    end
+
+    A --> B
+    B --> C
+    C -->|"获取 state = app.state()"| D
+    D -->|"路径去重 guard"| E
+    E --> F
+    F --> G
+    G -->|"SHA256 哈希"| F
+    F --> H
+    H -->|"归档到年月目录"| K
+    F -->|"写入导入任务"| J
+    E -->|"异步 spawn"| I
+    I -->|"调用 llm::recognize_invoice_with_retries()"| L
+    L -->|"返回识别 JSON"| I
+    I -->|"save_invoice_extraction()"| M
+
+    style 前端层 fill:#e1f5fe
+    style 命令层 fill:#fff3e0
+    style 核心业务层 fill:#fce4ec
+    style 基础设施层 fill:#e8f5e9
+```
+
+## 薄壳命令模式
+
+票匣的命令层遵循**薄壳（Thin Shell）模式**，每个命令函数只做三件事：
+
+1. **解包参数**：从 Tauri 运行时接收序列化的参数
+2. **委托调用**：获取 `AppState` 引用并调用对应方法
+3. **映射错误**：将 `Result<T, AppError>` 转为 `Result<T, String>`
+
+```mermaid
+graph LR
+    subgraph 命令函数
+        direction LR
+        Unwrap["解包参数"] --> Delegate["委托调用"]
+        Delegate --> MapErr["映射错误"]
+    end
+
+    style Unwrap fill:#e1f5fe
+    style Delegate fill:#fff3e0
+    style MapErr fill:#fce4ec
+```
+
+### 示例对比
+
+**薄壳命令函数（commands/invoice.rs）：**
+
+```rust
+#[tauri::command]
+pub fn search_invoices(
+    state: State<'_, AppState>,
+    params: InvoiceSearchParams,
+) -> Result<InvoiceSearchResult, String> {
+    state.search_invoices(params)
+        .map_err(|err| err.to_string())
+}
+```
+
+**AppState 方法（app_core/mod.rs）：**
+
+```rust
+impl AppState {
+    pub fn search_invoices(
+        &self,
+        params: InvoiceSearchParams,
+    ) -> Result<InvoiceSearchResult, AppError> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(search_invoices(&db, params)?)
+    }
+}
+```
+
+命令函数只有 4 行代码，不包含任何业务逻辑。所有搜索条件的处理、SQL 查询的构建都在 `extractor::search_invoices()` 中完成。
+
+### 同步与异步命令
+
+命令层的函数有两种模式：
+
+| 模式 | Tauri 标记 | 适用场景 | 示例 |
+|------|-----------|---------|------|
+| 同步 | `#[tauri::command]` | 快速操作，不涉及网络请求 | 配置读写、数据库查询 |
+| 异步 | `#[tauri::command] + async` | 涉及 I/O 等待的操作 | LLM 调用、文件选择对话框 |
+
+异步命令有两种处理方式：
+
+```mermaid
+graph TD
+    AsyncCmd["异步命令"]
+    AsyncCmd -->|"CPU 密集型"| Spawn["spawn_blocking()"]
+    AsyncCmd -->|"I/O 密集型"| Direct["直接 await"]
+
+    Spawn -->|"在阻塞线程池执行"| Result["返回结果"]
+    Direct -->|"在异步运行时执行"| Result
+
+    style Spawn fill:#fff3e0
+    style Direct fill:#e1f5fe
+```
+
+- **`spawn_blocking`**：用于 CPU 密集型操作（如文件导入、数据库查询），避免阻塞异步运行时
+- **直接 await**：用于真正的异步 I/O（如 LLM API 调用、文件选择对话框）
+
+## 前端层详解
+
+### 技术栈
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| React | 19 | UI 框架 |
+| TypeScript | 5.9 | 类型安全 |
+| Vite | 7 | 构建工具和开发服务器 |
+| Tailwind CSS | 4 | 原子化样式 |
+| Zustand | 5 | 轻量级状态管理 |
+| React Router | 7 | 页面路由 |
+| Recharts | 3 | 图表组件 |
+| Lucide React | 1 | 图标库 |
+| Framer Motion | 12 | 动画 |
+| Radix UI | - | 无障碍 UI 原语（Dialog、Tabs、Tooltip 等） |
+
+### 状态管理
+
+前端使用 Zustand 进行状态管理，分为三个 Store：
+
+```mermaid
+graph TD
+    subgraph appStore["appStore"]
+        Invoices["发票列表"]
+        Search["搜索条件"]
+        Dashboard["仪表盘数据"]
+        Events["事件列表"]
+    end
+
+    subgraph llmStore["llmStore"]
+        Config["LLM 配置"]
+        Status["连接状态"]
+    end
+
+    subgraph refreshStore["refreshStore"]
+        Trigger["刷新触发器"]
+        Version["版本号"]
+    end
+
+    style appStore fill:#e1f5fe
+    style llmStore fill:#fff3e0
+    style refreshStore fill:#e8f5e9
+```
+
+### Tauri 命令调用
+
+前端通过 `api.ts` 封装所有 Tauri 命令调用：
+
+```typescript
+// api.ts 中的封装模式
+import { invoke } from '@tauri-apps/api/core';
+
+export async function importFiles(paths: string[]): Promise<ImportJobSummary[]> {
+    return invoke('import_files', { request: { paths } });
+}
+
+export async function searchInvoices(params: InvoiceSearchParams): Promise<InvoiceSearchResult> {
+    return invoke('search_invoices', { params });
+}
+```
+
+## 命令层详解
+
+### 模块组织
+
+命令层的 13 个文件按功能领域划分，通过 `mod.rs` 的 `pub use` 统一导出：
+
+```rust
+// commands/mod.rs
+mod agent;
+mod config;
+mod email;
+mod event;
+mod export;
+mod import;
+mod invoice;
+mod recognize;
+mod semantic;
+mod util;
+mod watcher;
+mod window;
+
+pub use agent::*;
+pub use config::*;
+// ... 所有模块 re-export
+```
+
+在 `lib.rs` 中，所有命令通过 `use commands::*` 引入，然后在 `tauri::generate_handler![]` 宏中注册：
+
+```rust
+.invoke_handler(tauri::generate_handler![
+    import_files,
+    list_invoices,
+    search_invoices,
+    // ... 107 个命令
+])
+```
+
+### 错误处理模式
+
+所有命令函数统一使用 `.map_err(|err| err.to_string())` 将内部错误转为字符串返回给前端：
+
+```mermaid
+graph LR
+    AppError["AppError (枚举)"] -->|"to_string()"| String["String"]
+    String -->|"前端"| ErrorUI["显示错误提示"]
+
+    subgraph AppError["AppError 枚举"]
+        IO["Io"]
+        Storage["Storage"]
+        Import["Import"]
+        Extractor["Extractor"]
+        Dedupe["Dedupe"]
+        Export["Export"]
+        Document["Document"]
+        Watcher["Watcher"]
+        Email["Email"]
+        Chroma["Chroma"]
+        Embedding["Embedding"]
+        Agent["Agent"]
+        Event["Event"]
+    end
+
+    style AppError fill:#fce4ec
+```
+
+`AppError` 使用 `thiserror` 宏定义，每个子模块的错误类型都实现了自动转换：
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum AppError {
+    #[error("storage error: {0}")]
+    Storage(#[from] StorageError),
+    #[error("import error: {0}")]
+    Import(#[from] ImportError),
+    // ... 13 个错误变体
+}
+```
+
+## 核心业务层详解
+
+### 模块依赖关系
+
+```mermaid
+graph TD
+    AppState --> Extractor
+    AppState --> Importer
+    AppState --> Dedupe
+    AppState --> Exporter
+    AppState --> AgentMod["Agent"]
+    AppState --> LLMMod["LLM"]
+    AppState --> Watcher
+    AppState --> EmailM["Email Manager"]
+    AppState --> Event
+    AppState --> Document
+
+    Extractor -.->|"LLM 识别后保存"| LLMMod
+    AgentMod -.->|"工具调用"| Extractor
+    AgentMod -.->|"导出工具"| Exporter
+    Watcher -.->|"自动导入"| Importer
+    Watcher -.->|"自动识别"| LLMMod
+    Dedupe -.->|"查询向量"| Chroma["chroma/"]
+    Extractor -.->|"生成 Embedding"| Embedding["embedding/"]
+    Importer -.->|"归档文件"| RawStore["raw_store/"]
+    Document -.->|"调用 pdftoppm"| External["外部工具"]
+
+    style AppState fill:#e1f5fe
+    style External fill:#fff9c4
+```
+
+### AppState 的角色
+
+`AppState` 不仅是状态容器，更是业务逻辑的**统一门面（Facade）**。它：
+
+1. 持有所有子系统的引用（数据库、配置、管理器、缓存）
+2. 暴露所有业务操作的公共方法
+3. 协调跨模块的操作（如导入后自动识别、更新后重新去重）
+4. 管理缓存失效策略
+
+详见[状态管理](./state-management.mdx)章节。
+
+## 基础设施层详解
+
+### 数据库 Schema
+
+票匣使用 SQLite，当前有 4 个迁移版本。主要表结构：
+
+```mermaid
+erDiagram
+    raw_files ||--o{ invoices : "1:N"
+    raw_files ||--o{ import_jobs : "1:N"
+    raw_files ||--o{ extraction_runs : "1:N"
+    invoices ||--o{ invoice_items : "1:N"
+    invoices ||--o| invoice_embeddings : "1:1"
+    invoices ||--o{ dedupe_candidates : "1:N"
+    invoices ||--o{ invoice_badges : "1:N"
+    agent_sessions ||--o{ agent_messages : "1:N"
+    agent_sessions ||--o{ agent_attachments : "1:N"
+    agent_sessions ||--o{ agent_artifacts : "1:N"
+    agent_sessions ||--o{ agent_tasks : "1:N"
+    watch_dirs ||--o{ watch_dir_log : "1:N"
+
+    raw_files {
+        integer id PK
+        string original_name
+        string storage_path
+        string sha256
+        string mime_type
+        integer byte_size
+    }
+
+    invoices {
+        integer id PK
+        integer raw_file_id FK
+        string invoice_type
+        string invoice_number
+        string seller_name
+        string buyer_name
+        string total_amount
+        string status
+        string duplicate_status
+    }
+
+    invoice_embeddings {
+        integer invoice_id PK
+        blob embedding
+        string text_content
+    }
+```
+
+### 向量存储
+
+向量存储直接使用 SQLite 的 `invoice_embeddings` 表，而非外部向量数据库：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `invoice_id` | INTEGER | 关联发票 ID |
+| `embedding` | BLOB | 384 维 float32 向量，以二进制存储 |
+| `text_content` | TEXT | 用于生成 Embedding 的文本 |
+
+相似度查询通过 Rust 代码实现余弦相似度计算，遍历所有向量与查询向量比较。
+
+### 外部工具依赖
+
+票匣依赖两个外部命令行工具：
+
+```mermaid
+graph LR
+    subgraph 票匣
+        Document["document/ 模块"]
+    end
+
+    subgraph 外部工具
+        Poppler["pdftoppm<br/>(Poppler)"]
+        IM["magick<br/>(ImageMagick)"]
+    end
+
+    Document -->|"PDF 转图片"| Poppler
+    Document -->|"图片标准化"| IM
+    Poppler -->|"PPM 图片"| Document
+    IM -->|"标准化图片"| Document
+
+    style 外部工具 fill:#fff9c4
+```
+
+- **pdftoppm**：将 PDF 文件逐页渲染为 PPM 格式图片，再转为 JPEG
+- **magick (ImageMagick)**：图片格式标准化、EXIF 方向校正、缩放
+
+票匣在 Windows 安装包中内置了这两个工具的预编译二进制，Linux 上需用户自行安装。

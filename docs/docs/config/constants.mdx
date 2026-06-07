@@ -1,0 +1,146 @@
+---
+title: 常量与状态码
+sidebar_position: 4
+description: 应用全局常量定义，包括目录、模型参数、超时、限制等
+---
+
+# 常量与状态码
+
+InvoiceVault 在 `src-tauri/src/app_core/constants.rs` 中集中定义了所有应用级常量，便于统一调优和维护。
+
+## 目录与文件名
+
+以下常量定义了相对于 `app_data_dir` 的目录和文件名：
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `DIR_LOGS` | `"logs"` | 日志文件目录 |
+| `DIR_MODELS` | `"models"` | Embedding 模型存储目录 |
+| `DIAGNOSTIC_CONFIG_FILE` | `"diagnostic_config.json"` | 诊断配置文件 |
+| `SINGLE_INSTANCE_LOCK_FILE` | `"invoicevault.lock"` | 单实例锁文件 |
+
+## Embedding 模型参数
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `EMBEDDING_MODEL_REPO` | `"Xenova/bge-small-zh-v1.5"` | HuggingFace 模型仓库 |
+| `EMBEDDING_MODEL_DIR` | `"bge-small-zh-v1.5"` | 模型在 `models/` 下的目录名 |
+| `EMBEDDING_ONNX_PATH` | `"onnx/model_q4.onnx"` | 量化 ONNX 模型文件路径 |
+| `EMBEDDING_TOKENIZER_FILE` | `"tokenizer.json"` | Tokenizer 文件名 |
+| `EMBEDDING_DIMENSIONS` | `384` | 向量维度 |
+| `EMBEDDING_MAX_TOKENS` | `512` | 最大输入 Token 数 |
+
+## 超时设置
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `LLM_DEFAULT_TIMEOUT_SECS` | `30` | LLM 默认请求超时（秒） |
+| `LLM_RECOGNITION_TIMEOUT_SECS` | `90` | 发票识别请求超时（秒） |
+| `LLM_CONNECT_TEST_TIMEOUT_SECS` | `30` | LLM 连接测试超时（秒） |
+| `AGENT_DEFAULT_TIMEOUT_SECS` | `60` | Agent 请求超时（秒） |
+| `SCNET_OCR_TIMEOUT_SECS` | `30` | SCNet OCR 请求超时（秒） |
+| `SINGLE_INSTANCE_TCP_TIMEOUT_MS` | `700` | 单实例检查 TCP 超时（毫秒） |
+| `EMBEDDING_DOWNLOAD_TIMEOUT_SECS` | `120` | Embedding 模型下载超时（秒） |
+| `EMBEDDING_TEST_TIMEOUT_SECS` | `120` | Embedding 连接测试超时（秒） |
+
+## LLM 推理参数
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `LLM_MAX_RETRIES` | `3` | LLM 请求最大重试次数 |
+| `LLM_VLM_MAX_ATTEMPTS` | `3` | VLM 识别最大尝试次数 |
+| `LLM_VLM_CONFIDENCE_THRESHOLD` | `0.5` | 置信度阈值，低于此值触发审核 |
+| `LLM_VLM_TEMPERATURES` | `[0.0, 0.3, 0.5]` | VLM 重试温度递增序列 |
+| `LLM_RECOGNITION_MAX_TOKENS` | `16384` | 发票识别最大输出 Token |
+| `AGENT_MAX_TOKENS` | `8192` | Agent 系统最大输出 Token |
+
+## Agent 参数
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `AGENT_MAX_ITERATIONS` | `20` | 工具调用最大循环次数 |
+| `AGENT_HISTORY_LIMIT` | `20` | 加载为上下文的历史消息数 |
+| `AGENT_DEFAULT_TITLE` | `"新对话"` | 默认会话标题 |
+
+## 监控目录参数
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `WATCHER_DEFAULT_STABLE_WAIT_MS` | `2000` | 文件稳定等待时间（毫秒） |
+| `WATCHER_STABILITY_CHECK_INTERVAL_MS` | `100` | 稳定性检查间隔（毫秒） |
+| `SECONDS_PER_DAY` | `86400` | 一天的秒数，用于最大文件年龄转换 |
+
+## 文件扩展名
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `ALLOWED_EXTENSIONS` | `["pdf", "png", "jpg", "jpeg"]` | 支持导入的发票文件类型 |
+
+## 状态常量模块
+
+状态常量定义在 `constants::status` 子模块中，用于替代代码中的字符串字面量：
+
+### 导入任务状态
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `IMPORTED` | `"imported"` | 已导入 |
+| `FAILED` | `"failed"` | 导入失败 |
+| `RECOGNIZING` | `"recognizing"` | 正在识别中 |
+| `COMPLETED` | `"completed"` | 已完成 |
+| `PENDING` | `"pending"` | 等待处理 |
+| `CONFIRMED` | `"confirmed"` | 已确认 |
+| `ARCHIVED` | `"archived"` | 已归档 |
+
+### 去重状态
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `UNIQUE` | `"unique"` | 唯一发票 |
+| `EXACT_DUPLICATE` | `"exact_duplicate"` | 精确重复 |
+| `PROBABLE_DUPLICATE` | `"probable_duplicate"` | 可能重复 |
+| `POSSIBLE_DUPLICATE` | `"possible_duplicate"` | 疑似重复 |
+| `NOT_DUPLICATE` | `"not_duplicate"` | 非重复 |
+
+### 使用方式
+
+```rust
+use crate::app_core::constants::status;
+
+// 推荐：使用常量
+state.set_import_job_status(raw_file_id, status::RECOGNIZING, None)?;
+
+// 不推荐：使用字符串字面量
+state.set_import_job_status(raw_file_id, "recognizing", None)?;
+```
+
+## 如何添加新常量
+
+当需要添加新的应用级常量时，请遵循以下步骤：
+
+1. 打开 `src-tauri/src/app_core/constants.rs`
+2. 在合适的分类区域添加常量定义
+3. 添加文档注释说明常量用途
+4. 在需要使用的模块中引入常量
+
+```rust
+// 示例：在 constants.rs 中添加新常量
+
+// ---------------------------------------------------------------------------
+// 新功能参数
+// ---------------------------------------------------------------------------
+
+/// 新功能的默认超时时间（秒）。
+pub const NEW_FEATURE_TIMEOUT_SECS: u64 = 60;
+
+/// 新功能的最大重试次数。
+pub const NEW_FEATURE_MAX_RETRIES: u32 = 5;
+```
+
+### 注意事项
+
+- 常量值应有明确的单位后缀（如 `_SECS`、`_MS`、`_BYTES`）
+- 每个常量都需要文档注释（`///`）
+- 将相关常量放在同一分类区域中
+- 状态常量应放在 `status` 子模块中
+- 避免在代码中直接使用字符串字面量表示状态

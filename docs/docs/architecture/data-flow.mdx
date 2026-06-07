@@ -1,0 +1,585 @@
+---
+title: 数据流
+sidebar_position: 4
+description: 导入、识别、搜索、导出、Agent 五大核心业务的数据流转过程
+---
+
+# 数据流
+
+本章通过时序图和流程图详细展示票匣五大核心业务的数据流转过程。
+
+## 1. 导入流程
+
+文件导入是票匣最基本的业务流程。用户通过拖拽或文件选择器提供文件路径，系统自动完成哈希计算、去重检查、归档存储和任务创建。
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant FE as 前端
+    participant Cmd as commands/import.rs
+    participant AS as AppState
+    participant IMP as importer/
+    participant RAW as raw_store/
+    participant DB as SQLite
+
+    User->>FE: 拖拽文件 / 选择文件
+    FE->>Cmd: invoke("import_files", {paths})
+    Cmd->>AS: state.import_files(paths, app)
+    AS->>AS: 路径去重 guard（importing_paths）
+
+    loop 每个文件路径
+        AS->>RAW: inspect_file(path)
+        Note over RAW: 计算 SHA256 + MD5<br/>验证扩展名<br/>检测 MIME 类型
+        RAW-->>AS: RawFileInput
+
+        AS->>DB: 查询 SHA256 是否已存在
+        alt 文件已存在
+            DB-->>AS: 返回 duplicate
+        else 文件不存在
+            AS->>RAW: store_original_file(input, raw_dir)
+            Note over RAW: 按 年/月/ 归档<br/>处理文件名冲突
+            RAW-->>AS: 存储路径
+            AS->>DB: INSERT INTO raw_files
+            AS->>DB: INSERT INTO import_jobs (status: imported)
+        end
+    end
+
+    AS-->>Cmd: Vec&lt;ImportJobSummary&gt;
+    Cmd-->>FE: 返回导入结果
+    FE->>User: 显示导入状态
+
+    Note over AS: 异步触发识别
+    AS->>AS: spawn_recognition_task()
+```
+
+### 导入状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> imported: 文件成功导入
+    [*] --> duplicate: SHA256 重复
+    [*] --> failed: 导入失败
+    imported --> recognizing: 触发自动识别
+    recognizing --> imported: 识别成功
+    recognizing --> failed: 识别失败
+```
+
+### 文件归档结构
+
+导入的文件按年月目录归档：
+
+```
+raw/
+├── 2026/
+│   ├── 01/
+│   │   ├── a1b2c3d4_original_name.pdf
+│   │   └── e5f6g7h8_another_invoice.jpg
+│   └── 06/
+│       └── i9j0k1l2_june_invoice.png
+```
+
+文件名格式为 `{hash_prefix}_{original_name}`，通过 SHA256 哈希前 8 位避免冲突。
+
+## 2. 识别流程
+
+识别流程将原始发票文件转换为结构化数据，是票匣最核心的 AI 能力。
+
+```mermaid
+sequenceDiagram
+    participant AS as AppState
+    participant Doc as document/
+    participant LLM as llm/
+    participant API as LLM API
+    participant EXT as extractor/
+    participant EMB as embedding/
+    participant DB as SQLite
+    participant CH as chroma/
+
+    Note over AS: spawn_recognition_task()
+    AS->>DB: UPDATE import_jobs SET status = 'recognizing'
+
+    alt PDF 文件
+        AS->>Doc: render_pdf_pages(pdf_path)
+        Note over Doc: 调用 pdftoppm<br/>逐页渲染为 PPM<br/>转为 JPEG
+        Doc-->>AS: Vec&lt;RenderedPdfPage&gt;
+
+        loop 每页
+            AS->>Doc: prepare_image_for_recognition()
+            Note over Doc: 缩放到合理尺寸<br/>标准化格式<br/>生成缩略图
+            Doc-->>AS: PreparedImage
+
+            AS->>LLM: recognize_invoice_with_retries()
+            LLM->>API: POST /chat/completions
+            Note over API: 多模态识别<br/>图片 Base64 + Prompt
+            API-->>LLM: JSON 响应
+            Note over LLM: 解析 + 置信度校验<br/>失败时重试（温度递增）
+
+            LLM-->>AS: InvoiceRecognitionResult
+            AS->>EXT: save_invoice_extraction()
+            EXT->>DB: INSERT INTO invoices + invoice_items
+        end
+    else 图片文件
+        AS->>Doc: prepare_image_for_recognition()
+        Doc-->>AS: PreparedImage
+        AS->>LLM: recognize_invoice_with_retries()
+        LLM->>API: POST /chat/completions
+        API-->>LLM: JSON 响应
+        LLM-->>AS: InvoiceRecognitionResult
+        AS->>EXT: save_invoice_extraction()
+        EXT->>DB: INSERT INTO invoices + invoice_items
+    end
+
+    opt Embedding 已启用
+        AS->>EXT: get_invoice_detail()
+        EXT->>DB: 查询发票详情
+        EXT-->>AS: InvoiceDetail
+        AS->>EXT: invoice_to_embedding_text()
+        Note over EXT: 拼接发票文本描述
+        AS->>EMB: generate_embedding(engine, text)
+        Note over EMB: ONNX Runtime 推理<br/>bge-small-zh-v1.5<br/>输出 384 维向量
+        EMB-->>AS: EmbeddingResult
+        AS->>CH: upsert_embedding(invoice_id, vector)
+        CH->>DB: INSERT INTO invoice_embeddings
+    end
+
+    AS->>DB: UPDATE import_jobs SET status = 'imported'
+    AS->>AS: app.emit("recognition-complete")
+```
+
+### LLM 识别详细流程
+
+```mermaid
+flowchart TD
+    A["原始文件"] --> B{"文件类型？"}
+    B -->|PDF| C["pdftoppm 渲染为 PPM"]
+    C --> D["转为 JPEG"]
+    B -->|图片| E["ImageMagick 标准化"]
+    D --> F["图片预处理（缩放、EXIF 校正）"]
+    E --> F
+    F --> G["Base64 编码"]
+    G --> H["构建多模态消息"]
+    Note1["System Prompt: 发票识别指令<br/>User: 图片 Base64 + 识别要求"]
+    H --> I["POST /chat/completions"]
+    I --> J{"响应包含 JSON？"}
+    J -->|是| K["解析 JSON"]
+    J -->|否| L{"重试次数 < 3？"}
+    L -->|是| M["调整温度，重试"]
+    M --> I
+    L -->|否| N["识别失败"]
+    K --> O{"置信度 >= 0.5？"}
+    O -->|是| P["保存到数据库"]
+    O -->|否| Q{"VLM 尝试 < 3？"}
+    Q -->|是| M
+    Q -->|否| N
+
+    style A fill:#e1f5fe
+    style P fill:#e8f5e9
+    style N fill:#fce4ec
+```
+
+### 识别结果字段
+
+LLM 返回的 JSON 包含以下结构化字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `invoice_type` | string | 发票类型（增值税普通发票、增值税专用发票等） |
+| `invoice_code` | string | 发票代码 |
+| `invoice_number` | string | 发票号码 |
+| `issue_date` | string | 开票日期 |
+| `seller_name` | string | 销售方名称 |
+| `seller_tax_id` | string | 销售方纳税人识别号 |
+| `buyer_name` | string | 购买方名称 |
+| `buyer_tax_id` | string | 购买方纳税人识别号 |
+| `total_amount` | string | 金额合计 |
+| `tax_amount` | string | 税额 |
+| `currency` | string | 币种（默认 CNY） |
+| `category` | string | 消费类别 |
+| `confidence` | number | 识别置信度（0-1） |
+| `items` | array | 明细行列表 |
+| `items[].name` | string | 项目名称 |
+| `items[].quantity` | string | 数量 |
+| `items[].unit_price` | string | 单价 |
+| `items[].amount` | string | 金额 |
+
+## 3. 搜索流程
+
+票匣支持关键词搜索和语义搜索两种模式。
+
+### 关键词搜索
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant FE as 前端
+    participant Cmd as commands/invoice.rs
+    participant AS as AppState
+    participant EXT as extractor/
+    participant DB as SQLite
+
+    User->>FE: 输入搜索条件
+    FE->>Cmd: invoke("search_invoices", {params})
+    Cmd->>AS: state.search_invoices(params)
+    AS->>DB: 获取数据库锁
+    AS->>EXT: search_invoices(&db, params)
+
+    Note over EXT: 构建动态 SQL<br/>WHERE 条件拼接
+    EXT->>DB: SELECT ... FROM invoices<br/>WHERE ... AND ...<br/>ORDER BY ...<br/>LIMIT ... OFFSET ...
+    DB-->>EXT: 查询结果行
+    EXT->>EXT: 组装 InvoiceSummary<br/>（含 badges）
+    EXT-->>AS: InvoiceSearchResult
+    AS-->>Cmd: 返回结果
+    Cmd-->>FE: JSON 响应
+    FE->>User: 显示搜索结果
+```
+
+### 语义搜索
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant FE as 前端
+    participant Cmd as commands/semantic.rs
+    participant AS as AppState
+    participant EMB as embedding/
+    participant CH as chroma/
+    participant DB as SQLite
+
+    User->>FE: 输入自然语言查询
+    FE->>Cmd: invoke("search_invoices_semantic", {query, limit})
+    Cmd->>AS: state.search_invoices_semantic(query, limit)
+    AS->>AS: 检查 Embedding 已启用
+    AS->>EMB: generate_embedding(engine, query)
+    Note over EMB: ONNX 推理<br/>文本 → 384 维向量
+    EMB-->>AS: EmbeddingResult
+    AS->>DB: 获取数据库锁
+    AS->>CH: query_similar(&db, &embedding, limit)
+    Note over CH: 遍历 invoice_embeddings 表<br/>计算余弦相似度<br/>返回 Top-K 结果
+    CH->>DB: SELECT invoice_id, embedding
+    DB-->>CH: 向量数据
+    CH-->>AS: Vec&lt;SimilarResult&gt;
+    AS-->>Cmd: 返回结果
+    Cmd-->>FE: JSON 响应
+    FE->>User: 显示相似发票
+```
+
+### 余弦相似度计算
+
+```mermaid
+graph TD
+    A["查询向量 q (384维)"] --> Compare
+    DB["数据库中每个发票向量 v_i (384维)"] --> Compare
+    Compare["计算 cos(q, v_i)<br/>= dot(q, v_i) / (|q| * |v_i|)"]
+    Compare --> Sort["按相似度降序排序"]
+    Sort --> TopK["返回 Top-K 结果"]
+
+    style A fill:#e1f5fe
+    style DB fill:#e8f5e9
+    style Compare fill:#fff3e0
+```
+
+## 4. 导出流程
+
+导出流程将发票数据转换为 CSV、Excel 或 PDF 格式的文件。
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant FE as 前端
+    participant Cmd as commands/export.rs
+    participant AS as AppState
+    participant EXP as exporter/
+    participant TE as template_engine/
+    participant DB as SQLite
+    participant FS as 文件系统
+
+    User->>FE: 选择导出格式和列配置
+    FE->>Cmd: invoke("export_invoices", {request})
+    Cmd->>AS: state.export_invoices(request)
+    AS->>DB: 获取数据库锁
+    AS->>EXP: export_invoices(&db, request)
+
+    alt CSV 格式
+        EXP->>DB: 查询发票数据
+        EXP->>EXP: 构建 CSV 行
+        EXP->>FS: 写入 .csv 文件
+    else Excel 格式
+        EXP->>DB: 查询发票数据
+        EXP->>TE: 模板引擎处理
+        Note over TE: 解析模板 → 识别区域<br/>→ 绑定数据 → 写入
+        TE->>FS: 写入 .xlsx 文件
+    else PDF 格式
+        EXP->>DB: 查询发票数据
+        EXP->>EXP: 使用 printpdf 生成
+        EXP->>FS: 写入 .pdf 文件
+    end
+
+    EXP-->>AS: ExportResult
+    AS-->>Cmd: 返回结果
+    Cmd-->>FE: JSON 响应
+    FE->>User: 显示导出成功
+
+    opt Agent 导出
+        Note over AS: 导出文件保存到<br/>sessions/{uuid}/ 目录
+        AS->>DB: INSERT INTO agent_artifacts
+    end
+```
+
+### Excel 模板引擎
+
+票匣内置了一个自研的 Excel 模板引擎，支持格式保持导出：
+
+```mermaid
+graph LR
+    subgraph Pipeline["模板引擎流水线"]
+        Parse["解析 XLSX 模板"] --> Recognize["识别数据区域"]
+        Recognize --> Bind["绑定发票数据"]
+        Bind --> Write["写入新 XLSX"]
+    end
+
+    Template["模板文件<br/>(.xlsx)"] --> Parse
+    Data["发票数据"] --> Bind
+    Write --> Output["导出文件<br/>(.xlsx)"]
+
+    style Pipeline fill:#e1f5fe
+```
+
+模板引擎通过以下子模块协作：
+
+| 子模块 | 职责 |
+|--------|------|
+| `parser.rs` | 解析 XLSX 文件结构 |
+| `ast.rs` | 构建抽象语法树 |
+| `region.rs` | 识别数据填充区域 |
+| `binder.rs` | 将数据绑定到模板 |
+| `ir.rs` | 中间表示 |
+| `plan.rs` | 执行计划 |
+| `writer.rs` | 写入输出文件 |
+| `cloner.rs` | 格式克隆（保持原始样式） |
+| `strings.rs` | 字符串工具 |
+
+## 5. Agent 对话流程
+
+Agent 是票匣最复杂的数据流，涉及多轮对话、工具调用和流式响应。
+
+### Agent 会话生命周期
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created: 创建会话
+    Created --> Active: 发送第一条消息
+    Active --> Active: 多轮对话
+    Active --> Deleted: 删除会话
+
+    state Active {
+        [*] --> Thinking: LLM 处理
+        Thinking --> ToolCall: 返回 tool_calls
+        ToolCall --> Executing: 执行工具
+        Executing --> Thinking: 返回工具结果
+        Thinking --> Responding: 返回文本响应
+        Responding --> [*]
+    }
+```
+
+### 完整对话流程
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant FE as 前端
+    participant Cmd as commands/agent.rs
+    participant AS as AppState
+    participant Agent as agent/
+    participant LLM as llm/
+    participant API as LLM API
+    participant Tools as 工具执行器
+    participant DB as SQLite
+
+    User->>FE: 发送消息 "统计上月发票总额"
+    FE->>Cmd: invoke("send_agent_message_stream", ...)
+    Cmd->>AS: state.send_agent_message_stream()
+    AS->>Agent: run_agent_turn_stream()
+
+    Note over Agent: 构建消息历史<br/>（最近 20 条）
+    Agent->>DB: INSERT INTO agent_messages (user)
+    Agent->>Agent: 构建系统提示词<br/>（工具定义 + 发票字段目录）
+
+    Agent->>LLM: 发送请求
+    LLM->>API: POST /chat/completions<br/>messages + tools
+
+    API-->>LLM: tool_calls: [get_current_date_context]
+    LLM-->>Agent: ToolCall 事件
+
+    Agent->>FE: emit("agent://stream", ToolCall)
+    FE->>User: 显示工具调用中
+
+    Agent->>Tools: execute("get_current_date_context", {})
+    Tools-->>Agent: {date_from: "2026-05-01", date_to: "2026-05-31"}
+
+    Agent->>DB: INSERT INTO agent_messages (tool_result)
+
+    Agent->>LLM: 发送工具结果
+    LLM->>API: POST /chat/completions
+
+    API-->>LLM: tool_calls: [get_dashboard_stats]
+    LLM-->>Agent: ToolCall 事件
+
+    Agent->>FE: emit("agent://stream", ToolCall)
+    FE->>User: 显示工具调用中
+
+    Agent->>Tools: execute("get_dashboard_stats", {date_from, date_to})
+    Tools->>DB: 查询统计数据
+    DB-->>Tools: 统计结果
+    Tools-->>Agent: DashboardStats JSON
+
+    Agent->>DB: INSERT INTO agent_messages (tool_result)
+
+    Agent->>LLM: 发送工具结果
+    LLM->>API: POST /chat/completions
+
+    API-->>LLM: 文本响应 "上月发票总额为 ¥45,678.00..."
+    LLM-->>Agent: TextChunk 事件
+
+    Agent->>FE: emit("agent://stream", TextChunk)
+    FE->>User: 流式显示回答
+
+    Agent->>DB: INSERT INTO agent_messages (assistant)
+    Agent-->>AS: AgentResponse
+    AS-->>Cmd: 返回结果
+    Cmd-->>FE: 请求完成
+```
+
+### Agent 工具集
+
+Agent 可调用以下工具与发票数据交互：
+
+```mermaid
+graph TD
+    subgraph 读取工具["读取工具（无需确认）"]
+        T1["search_invoices<br/>搜索发票"]
+        T2["get_invoice_detail<br/>获取详情"]
+        T3["get_dashboard_stats<br/>统计数据"]
+        T4["get_current_date_context<br/>日期上下文"]
+        T5["get_invoice_field_catalog<br/>字段字典"]
+        T6["create_export_preview<br/>导出预览"]
+        T7["list_message_attachments<br/>列出附件"]
+        T8["inspect_spreadsheet<br/>读取表格"]
+    end
+
+    subgraph 写入工具["写入工具（需确认）"]
+        T9["export_invoices<br/>导出发票"]
+        T10["update_invoice<br/>更新发票"]
+        T11["merge_invoices<br/>合并发票"]
+        T12["set_invoice_badge<br/>设置标签"]
+        T13["export_pdf_report<br/>PDF 报表"]
+    end
+
+    style 读取工具 fill:#e8f5e9
+    style 写入工具 fill:#fff3e0
+```
+
+### 工具调用循环
+
+Agent 的工具调用遵循一个循环，最多执行 20 次迭代：
+
+```mermaid
+flowchart TD
+    Start["开始 Agent Turn"] --> Build["构建消息 + 工具定义"]
+    Build --> LLM["发送给 LLM"]
+    LLM --> Response{"LLM 响应类型？"}
+
+    Response -->|"tool_calls"| CheckLoop{"迭代次数 < 20？"}
+    CheckLoop -->|是| ExecTools["执行工具"]
+    ExecTools --> SaveResult["保存工具结果"]
+    SaveResult --> LLM
+
+    CheckLoop -->|否| ForceAnswer["强制 LLM 给出最终回答"]
+    ForceAnswer --> End
+
+    Response -->|"text"| SaveMsg["保存助手消息"]
+    SaveMsg --> End["返回 AgentResponse"]
+
+    Response -->|"tool_calls (需确认)"| Confirm["请求用户确认"]
+    Confirm -->|"同意"| ExecTools
+    Confirm -->|"拒绝"| SaveReject["保存拒绝结果"]
+    SaveReject --> LLM
+
+    style Start fill:#e1f5fe
+    style End fill:#e8f5e9
+    style Confirm fill:#fff3e0
+```
+
+### 流式事件类型
+
+Agent 通过 Tauri 事件系统实时推送以下事件给前端：
+
+| 事件类型 | 说明 | 前端处理 |
+|---------|------|---------|
+| `TextChunk` | 文本响应的增量片段 | 追加显示到消息 |
+| `ToolCall` | LLM 请求调用工具 | 显示工具调用卡片 |
+| `ToolResult` | 工具执行完成 | 更新工具卡片状态 |
+| `ConfirmRequest` | 需要用户确认的操作 | 显示确认对话框 |
+| `Error` | 错误信息 | 显示错误提示 |
+| `Done` | Agent Turn 完成 | 移除加载状态 |
+
+## 数据流总结
+
+```mermaid
+graph TD
+    subgraph 输入["数据输入"]
+        File["文件导入"]
+        Email["邮件同步"]
+        Manual["手动录入"]
+    end
+
+    subgraph 处理["数据处理"]
+        Hash["哈希计算 + 归档"]
+        OCR["AI 识别"]
+        Dedup["去重检测"]
+        Embed["向量嵌入"]
+    end
+
+    subgraph 存储["数据存储"]
+        DB[("SQLite")]
+        FS["文件系统"]
+        Vec[("向量存储")]
+    end
+
+    subgraph 查询["数据查询"]
+        Search["关键词搜索"]
+        Semantic["语义搜索"]
+        AgentQ["Agent 查询"]
+        Dashboard["仪表盘"]
+    end
+
+    subgraph 输出["数据输出"]
+        Excel["Excel/CSV"]
+        PDF["PDF 报表"]
+        AgentOut["Agent 回答"]
+    end
+
+    输入 --> Hash
+    Hash --> OCR
+    OCR --> Dedup
+    Dedup --> DB
+    Hash --> FS
+    OCR --> Embed
+    Embed --> Vec
+
+    DB --> Search
+    DB --> Dashboard
+    Vec --> Semantic
+    DB --> AgentQ
+    Vec --> AgentQ
+
+    Search --> Excel
+    Dashboard --> PDF
+    AgentQ --> AgentOut
+    AgentQ --> Excel
+
+    style 输入 fill:#e1f5fe
+    style 处理 fill:#f3e5f5
+    style 存储 fill:#e8f5e9
+    style 查询 fill:#fff3e0
+    style 输出 fill:#fce4ec
+```

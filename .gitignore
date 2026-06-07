@@ -1,6 +1,9 @@
 receipts/
 node_modules/
 dist/
+docs/build/
+docs/.docusaurus/
+docs/.cache-loader/
 invoicevault-dependencies-win-x86_64.zip
 target/
 src-tauri/target/

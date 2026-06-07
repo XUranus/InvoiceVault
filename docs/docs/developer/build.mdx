@@ -1,0 +1,211 @@
+---
+title: 构建指南
+sidebar_position: 1
+description: InvoiceVault 开发环境搭建与生产构建的完整指南
+---
+
+# 构建指南
+
+本文档介绍如何搭建 InvoiceVault 的开发环境，以及如何进行生产构建。
+
+## 前置依赖
+
+### 必需工具
+
+| 工具 | 最低版本 | 说明 |
+|------|----------|------|
+| Node.js | 18+ | 前端构建和包管理 |
+| npm | 9+ | 随 Node.js 安装 |
+| Rust | 1.75+ (stable) | 后端编译 |
+| Cargo | 随 Rust 安装 | Rust 包管理器 |
+
+### 系统依赖
+
+InvoiceVault 基于 Tauri 2.x 构建，需要安装平台相关的系统依赖。
+
+#### Windows
+
+Windows 上需要安装以下工具：
+
+- **Visual Studio Build Tools**：C++ 构建工具链
+- **WebView2**：Windows 10/11 通常已预装
+
+#### macOS
+
+```bash
+# 安装 Xcode Command Line Tools
+xcode-select --install
+```
+
+#### Linux (Debian/Ubuntu)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential \
+    curl \
+    wget \
+    file \
+    patchelf \
+    libssl-dev \
+    libgtk-3-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    libwebkit2gtk-4.1-dev \
+    libxdo-dev
+```
+
+### 外部运行时依赖
+
+| 依赖 | 用途 | 安装方式 |
+|------|------|----------|
+| **Poppler** (`pdftoppm`) | PDF 页面渲染为图片 | Linux: `apt install poppler-utils` / Windows: 随应用打包 |
+| **ONNX Runtime** | 本地 Embedding 推理 | 随应用打包（动态加载） |
+
+:::note
+Poppler 用于将 PDF 发票渲染为图片后发送给视觉语言模型识别。Linux 上需要系统安装 `poppler-utils`，Windows 上已随应用打包。
+:::
+
+## 开发模式
+
+开发模式启动前端热更新和 Rust 后端的联合调试环境：
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/XUranus/InvoiceVault.git
+cd InvoiceVault
+
+# 2. 安装前端依赖
+npm install
+
+# 3. 启动开发模式
+npm run tauri dev
+```
+
+开发模式下：
+- 前端使用 Vite 开发服务器，支持热模块替换（HMR）
+- Rust 后端在代码变更时自动重新编译
+- 应用窗口自动刷新
+
+### 仅前端开发
+
+如果只需要修改前端 UI，可以单独启动 Vite 开发服务器：
+
+```bash
+npm run dev
+```
+
+这会在 `http://127.0.0.1:5173` 启动前端开发服务器（不包含 Tauri 后端功能）。
+
+## 生产构建
+
+### 标准构建
+
+```bash
+npm run tauri build
+```
+
+该命令会：
+1. 使用 `tsc` 编译 TypeScript
+2. 使用 Vite 打包前端资源
+3. 编译 Rust 后端为 release 二进制文件
+4. 生成平台安装包
+
+### 构建产物
+
+构建产物位于 `src-tauri/target/release/bundle/` 目录下：
+
+| 平台 | 安装包格式 | 路径 |
+|------|-----------|------|
+| Windows | NSIS (.exe)、MSI (.msi) | `bundle/nsis/`、`bundle/msi/` |
+| macOS | DMG (.dmg) | `bundle/dmg/` |
+| Linux | AppImage (.AppImage) | `bundle/appimage/` |
+
+### 指定打包格式
+
+```bash
+# 仅构建 NSIS 安装包（Windows）
+npm run tauri -- build --bundles nsis
+
+# 仅构建 DMG（macOS）
+npm run tauri -- build --bundles dmg
+
+# 仅构建 AppImage（Linux）
+npm run tauri -- build --bundles appimage
+
+# 构建多种格式
+npm run tauri -- build --bundles nsis msi
+```
+
+## 平台特定注意事项
+
+### Windows
+
+- 需要预先准备 Windows 依赖包（ONNX Runtime、Poppler），可通过脚本打包：
+
+```bash
+npm run package:win-deps
+```
+
+- 依赖包下载后放置在 `src-tauri/resources/win-x86_64/`
+- NSIS 安装包支持自定义安装路径和开始菜单快捷方式
+- 应用名称为"票匣"
+
+### macOS
+
+- 构建的 DMG 包含完整的应用程序
+- 首次运行可能需要在"系统偏好设置 > 安全性与隐私"中允许运行
+
+### Linux
+
+- AppImage 构建后会自动移除冲突的 Wayland 和 EGL 库，避免白屏问题
+- 需要系统安装 `libwebkit2gtk-4.1-dev`
+- aarch64 (ARM64) 架构在 CI 上使用 `ubuntu-24.04-arm` runner 构建
+
+## 版本管理
+
+版本号定义在两个文件中，需要保持同步：
+
+- `src-tauri/tauri.conf.json` 中的 `version` 字段
+- `src-tauri/Cargo.toml` 中的 `version` 字段
+
+在 CI/CD 流程中，版本号通过 git tag 自动注入。本地开发时默认使用 `0.1.0`。
+
+### Git 版本注入
+
+构建时通过 `build.rs` 读取 git 信息，在编译时注入：
+
+```rust
+// 运行时获取版本
+env!("GIT_VERSION")
+```
+
+## 常见问题
+
+### 编译缓慢
+
+Rust 首次编译可能需要较长时间（10-30 分钟），后续增量编译会快很多。建议：
+
+- 使用 SSD 存储项目目录
+- 确保足够的内存（建议 8GB+）
+- 使用 `cargo build` 单独编译 Rust 部分进行调试
+
+### WebView 相关错误
+
+Linux 上如果遇到 WebView 渲染问题：
+
+```bash
+# 检查 WebKitGTK 版本
+dpkg -l | grep webkit2gtk
+
+# 确保版本 >= 4.1
+sudo apt-get install libwebkit2gtk-4.1-dev
+```
+
+### ONNX Runtime 加载失败
+
+如果 Embedding 功能无法使用：
+
+1. 检查 `src-tauri/resources/` 下是否有对应平台的 ONNX Runtime 库文件
+2. 或设置环境变量 `ORT_DYLIB_PATH` 指向库文件的绝对路径
+3. Linux 上也可以安装系统级 ONNX Runtime 到 `/usr/lib/`
